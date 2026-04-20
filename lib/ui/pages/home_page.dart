@@ -241,8 +241,8 @@ class _DockButton extends StatelessWidget {
               AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
-                width: isSelected ? 18 : 6,
-                height: 3,
+                width: isSelected ? 18 : 0,
+                height: isSelected ? 3 : 0,
                 decoration: BoxDecoration(
                   color: isSelected
                       ? const Color(0xFF111827)
