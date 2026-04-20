@@ -4,6 +4,9 @@ import '../../common/app_assets.dart';
 import '../../database/auth_repository.dart';
 import 'home_page.dart';
 
+// ========== 登录页 ==========
+// 负责注册、登录，以及自动恢复本地有效会话。
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -20,22 +23,12 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _obscurePassword = true;
   bool _isSubmitting = false;
+  bool _isInitializing = true;
 
   @override
   void initState() {
     super.initState();
     _initializeDatabase();
-  }
-
-  Future<void> _initializeDatabase() async {
-    try {
-      await _authRepository.ensureInitialized();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showMessage('数据库初始化失败：$error');
-    }
   }
 
   @override
@@ -45,14 +38,47 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  // ========== 初始化与路由 ==========
+
+  Future<void> _initializeDatabase() async {
+    try {
+      await _authRepository.ensureInitialized();
+      final currentUser = await _authRepository.getCurrentUserProfile();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (currentUser != null) {
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil(HomePage.routeName, (route) => false);
+        return;
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('数据库初始化失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    }
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // ========== 登录与注册 ==========
+
   Future<void> _handleLogin() async {
-    if (_isSubmitting) {
+    if (_isSubmitting || _isInitializing) {
       return;
     }
 
@@ -90,7 +116,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _handleRegister() async {
-    if (_isSubmitting) {
+    if (_isSubmitting || _isInitializing) {
       return;
     }
 
@@ -124,6 +150,8 @@ class _LoginPageState extends State<LoginPage> {
       _passwordController.clear();
     }
   }
+
+  // ========== 页面构建 ==========
 
   @override
   Widget build(BuildContext context) {
@@ -205,6 +233,7 @@ class _LoginPageState extends State<LoginPage> {
                     const SizedBox(height: 22),
                     TextField(
                       controller: _usernameController,
+                      enabled: !_isInitializing,
                       decoration: InputDecoration(
                         labelText: '用户名',
                         hintText: '请输入用户名',
@@ -224,17 +253,20 @@ class _LoginPageState extends State<LoginPage> {
                     const SizedBox(height: 14),
                     TextField(
                       controller: _passwordController,
+                      enabled: !_isInitializing,
                       obscureText: _obscurePassword,
                       decoration: InputDecoration(
                         labelText: '密码',
                         hintText: '请输入密码',
                         prefixIcon: const Icon(Icons.lock_outline),
                         suffixIcon: IconButton(
-                          onPressed: () {
-                            setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            });
-                          },
+                          onPressed: _isInitializing
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _obscurePassword = !_obscurePassword;
+                                  });
+                                },
                           icon: Icon(
                             _obscurePassword
                                 ? Icons.visibility_off_outlined
@@ -256,15 +288,19 @@ class _LoginPageState extends State<LoginPage> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: () {
-                          _showMessage('忘记密码功能待接入');
-                        },
+                        onPressed: _isInitializing
+                            ? null
+                            : () {
+                                _showMessage('忘记密码功能待接入');
+                              },
                         child: const Text('忘记密码'),
                       ),
                     ),
                     const SizedBox(height: 4),
                     FilledButton(
-                      onPressed: _isSubmitting ? null : _handleLogin,
+                      onPressed: _isSubmitting || _isInitializing
+                          ? null
+                          : _handleLogin,
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
                         backgroundColor: const Color(0xFF0C4A6E),
@@ -282,6 +318,15 @@ class _LoginPageState extends State<LoginPage> {
                                 color: Colors.white,
                               ),
                             )
+                          : _isInitializing
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
                           : const Text(
                               '登录',
                               style: TextStyle(fontWeight: FontWeight.w700),
@@ -289,7 +334,9 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 10),
                     OutlinedButton(
-                      onPressed: _isSubmitting ? null : _handleRegister,
+                      onPressed: _isSubmitting || _isInitializing
+                          ? null
+                          : _handleRegister,
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
                         side: const BorderSide(color: Color(0xFF0C4A6E)),

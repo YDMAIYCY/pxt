@@ -1,13 +1,16 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+// ========== SQLite 数据库入口 ==========
+// 统一管理数据库打开、建表与升级逻辑。
+
 class AppDatabase {
   AppDatabase._();
 
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 1;
+  static const int databaseVersion = 3;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -40,6 +43,7 @@ class AppDatabase {
         await db.execute('PRAGMA foreign_keys = ON;');
       },
       onCreate: _createTables,
+      onUpgrade: _upgradeTables,
     );
   }
 
@@ -50,6 +54,14 @@ class AppDatabase {
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         password_salt TEXT NOT NULL,
+        display_name TEXT,
+        bio TEXT,
+        gender TEXT,
+        age INTEGER,
+        avatar_style TEXT,
+        background_style TEXT,
+        avatar_image_path TEXT,
+        background_image_path TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         last_login_at TEXT,
@@ -198,5 +210,48 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_practice_document_id ON $tablePracticeQuestions(document_id);',
     );
+  }
+
+  Future<void> _upgradeTables(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      await _upgradeUsersToV2(db);
+    }
+    if (oldVersion < 3) {
+      await _upgradeUsersToV3(db);
+    }
+  }
+
+  Future<void> _upgradeUsersToV2(Database db) async {
+    await _addColumnIfMissing(db, tableUsers, 'display_name', 'TEXT');
+    await _addColumnIfMissing(db, tableUsers, 'bio', 'TEXT');
+    await _addColumnIfMissing(db, tableUsers, 'gender', 'TEXT');
+    await _addColumnIfMissing(db, tableUsers, 'age', 'INTEGER');
+    await _addColumnIfMissing(db, tableUsers, 'avatar_style', 'TEXT');
+    await _addColumnIfMissing(db, tableUsers, 'background_style', 'TEXT');
+  }
+
+  Future<void> _upgradeUsersToV3(Database db) async {
+    await _addColumnIfMissing(db, tableUsers, 'avatar_image_path', 'TEXT');
+    await _addColumnIfMissing(db, tableUsers, 'background_image_path', 'TEXT');
+  }
+
+  Future<void> _addColumnIfMissing(
+    Database db,
+    String tableName,
+    String columnName,
+    String definition,
+  ) async {
+    final tableInfo = await db.rawQuery('PRAGMA table_info($tableName);');
+    final hasColumn = tableInfo.any((row) => row['name'] == columnName);
+
+    if (!hasColumn) {
+      await db.execute(
+        'ALTER TABLE $tableName ADD COLUMN $columnName $definition;',
+      );
+    }
   }
 }
