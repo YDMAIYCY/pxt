@@ -1,0 +1,242 @@
+class KnowledgeCardRecord {
+  const KnowledgeCardRecord({
+    required this.id,
+    required this.documentId,
+    required this.title,
+    required this.content,
+    required this.createdAt,
+  });
+
+  final int id;
+  final int documentId;
+  final String title;
+  final String content;
+  final DateTime createdAt;
+
+  factory KnowledgeCardRecord.fromMap(Map<String, Object?> map) {
+    final createdAt = (map['created_at'] as String?) ?? '';
+
+    return KnowledgeCardRecord(
+      id: map['id'] as int,
+      documentId: map['document_id'] as int,
+      title: (map['title'] as String?)?.trim() ?? '',
+      content: (map['content'] as String?)?.trim() ?? '',
+      createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
+    );
+  }
+}
+
+class ReviewOutlineRecord {
+  const ReviewOutlineRecord({
+    required this.id,
+    required this.documentId,
+    required this.title,
+    required this.outlineText,
+    required this.createdAt,
+  });
+
+  final int id;
+  final int documentId;
+  final String title;
+  final String outlineText;
+  final DateTime createdAt;
+
+  factory ReviewOutlineRecord.fromMap(Map<String, Object?> map) {
+    final createdAt = (map['created_at'] as String?) ?? '';
+
+    return ReviewOutlineRecord(
+      id: map['id'] as int,
+      documentId: map['document_id'] as int,
+      title: (map['title'] as String?)?.trim() ?? '',
+      outlineText: (map['outline_text'] as String?)?.trim() ?? '',
+      createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
+    );
+  }
+}
+
+class MindmapTextRecord {
+  const MindmapTextRecord({
+    required this.id,
+    required this.documentId,
+    required this.mindmapText,
+    required this.createdAt,
+  });
+
+  final int id;
+  final int documentId;
+  final String mindmapText;
+  final DateTime createdAt;
+
+  factory MindmapTextRecord.fromMap(Map<String, Object?> map) {
+    final createdAt = (map['created_at'] as String?) ?? '';
+
+    return MindmapTextRecord(
+      id: map['id'] as int,
+      documentId: map['document_id'] as int,
+      mindmapText: (map['mindmap_text'] as String?)?.trim() ?? '',
+      createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
+    );
+  }
+}
+
+class PracticeQuestionRecord {
+  const PracticeQuestionRecord({
+    required this.id,
+    required this.documentId,
+    required this.questionText,
+    required this.answerText,
+    required this.analysisText,
+    required this.difficulty,
+    required this.reviewStatus,
+    required this.wrongCount,
+    required this.createdAt,
+    this.lastUserAnswer,
+    this.lastReviewedAt,
+  });
+
+  final int id;
+  final int documentId;
+  final String questionText;
+  final String? answerText;
+  final String? analysisText;
+  final String? difficulty;
+  final String reviewStatus;
+  final String? lastUserAnswer;
+  final DateTime? lastReviewedAt;
+  final int wrongCount;
+  final DateTime createdAt;
+
+  bool get isPending => reviewStatus == PracticeQuestionReviewStatus.pending;
+
+  bool get isWrong => reviewStatus == PracticeQuestionReviewStatus.wrong;
+
+  bool get isMastered => reviewStatus == PracticeQuestionReviewStatus.mastered;
+
+  factory PracticeQuestionRecord.fromMap(Map<String, Object?> map) {
+    final createdAt = (map['created_at'] as String?) ?? '';
+    final reviewedAt = (map['last_reviewed_at'] as String?) ?? '';
+
+    return PracticeQuestionRecord(
+      id: map['id'] as int,
+      documentId: map['document_id'] as int,
+      questionText: (map['question_text'] as String?)?.trim() ?? '',
+      answerText: (map['answer_text'] as String?)?.trim(),
+      analysisText: (map['analysis_text'] as String?)?.trim(),
+      difficulty: (map['difficulty'] as String?)?.trim(),
+      reviewStatus: PracticeQuestionReviewStatus.normalize(
+        map['review_status'] as String?,
+      ),
+      lastUserAnswer: (map['last_user_answer'] as String?)?.trim(),
+      lastReviewedAt: reviewedAt.isEmpty
+          ? null
+          : DateTime.tryParse(reviewedAt)?.toLocal(),
+      wrongCount: _readInt(map['wrong_count']),
+      createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
+    );
+  }
+
+  static int _readInt(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value) ?? 0;
+    }
+    return 0;
+  }
+}
+
+class PracticeQuestionReviewStatus {
+  const PracticeQuestionReviewStatus._();
+
+  static const String pending = 'pending';
+  static const String wrong = 'wrong';
+  static const String mastered = 'mastered';
+
+  static String normalize(String? value) {
+    switch ((value ?? '').trim().toLowerCase()) {
+      case wrong:
+        return wrong;
+      case mastered:
+        return mastered;
+      case pending:
+      default:
+        return pending;
+    }
+  }
+}
+
+class GeneratedContentRecord {
+  const GeneratedContentRecord({
+    required this.contentType,
+    required this.contentLabel,
+    required this.documentId,
+    required this.documentTitle,
+    required this.title,
+    required this.summary,
+    required this.createdAt,
+  });
+
+  final String contentType;
+  final String contentLabel;
+  final int documentId;
+  final String documentTitle;
+  final String title;
+  final String summary;
+  final DateTime createdAt;
+}
+
+class PracticeQuestionWithDocument {
+  const PracticeQuestionWithDocument({
+    required this.question,
+    required this.documentTitle,
+  });
+
+  final PracticeQuestionRecord question;
+  final String documentTitle;
+}
+
+class AiTaskWithDocument {
+  const AiTaskWithDocument({
+    required this.id,
+    required this.documentId,
+    required this.documentTitle,
+    required this.taskType,
+    required this.taskLabel,
+    required this.status,
+    required this.updatedAt,
+    this.errorMessage,
+  });
+
+  final int id;
+  final int documentId;
+  final String documentTitle;
+  final String taskType;
+  final String taskLabel;
+  final String status;
+  final String? errorMessage;
+  final DateTime updatedAt;
+}
+
+class StudyOverviewStats {
+  const StudyOverviewStats({
+    required this.documentCount,
+    required this.ocrSuccessCount,
+    required this.generatedResultCount,
+    required this.practiceQuestionCount,
+    required this.pendingPracticeCount,
+    required this.wrongQuestionCount,
+    required this.masteredQuestionCount,
+  });
+
+  final int documentCount;
+  final int ocrSuccessCount;
+  final int generatedResultCount;
+  final int practiceQuestionCount;
+  final int pendingPracticeCount;
+  final int wrongQuestionCount;
+  final int masteredQuestionCount;
+}

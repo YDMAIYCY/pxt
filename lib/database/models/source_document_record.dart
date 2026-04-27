@@ -8,6 +8,28 @@ class SourceDocumentSourceType {
   static const String galleryImport = 'gallery_import';
 }
 
+class SourceDocumentOcrStatus {
+  const SourceDocumentOcrStatus._();
+
+  static const String pending = 'pending';
+  static const String processing = 'processing';
+  static const String success = 'success';
+  static const String failed = 'failed';
+
+  static String normalize(String? status, {bool fallbackDone = false}) {
+    final raw = (status ?? '').trim().toLowerCase();
+    switch (raw) {
+      case pending:
+      case processing:
+      case success:
+      case failed:
+        return raw;
+      default:
+        return fallbackDone ? success : pending;
+    }
+  }
+}
+
 // ========== 原始资料模型 ==========
 // 承载首页最近记录和资料详情页所需的原始资料信息。
 
@@ -19,9 +41,11 @@ class SourceDocumentRecord {
     required this.imagePath,
     required this.title,
     required this.createdAt,
-    required this.ocrDone,
+    required this.ocrStatus,
     required this.aiDone,
     this.libraryId,
+    this.ocrErrorMessage,
+    this.ocrUpdatedAt,
   });
 
   final int id;
@@ -31,8 +55,29 @@ class SourceDocumentRecord {
   final String imagePath;
   final String title;
   final DateTime createdAt;
-  final bool ocrDone;
+  final String ocrStatus;
   final bool aiDone;
+  final String? ocrErrorMessage;
+  final DateTime? ocrUpdatedAt;
+
+  bool get ocrDone => ocrStatus == SourceDocumentOcrStatus.success;
+
+  bool get ocrFailed => ocrStatus == SourceDocumentOcrStatus.failed;
+
+  String get ocrStatusLabel {
+    switch (ocrStatus) {
+      case SourceDocumentOcrStatus.pending:
+        return '待识别';
+      case SourceDocumentOcrStatus.processing:
+        return '识别中';
+      case SourceDocumentOcrStatus.success:
+        return '识别成功';
+      case SourceDocumentOcrStatus.failed:
+        return '识别失败';
+      default:
+        return '待识别';
+    }
+  }
 
   String get sourceTypeLabel {
     switch (sourceType) {
@@ -65,6 +110,8 @@ class SourceDocumentRecord {
 
   factory SourceDocumentRecord.fromMap(Map<String, Object?> map) {
     final rawCreatedAt = (map['created_at'] as String?)?.trim() ?? '';
+    final ocrDoneFallback = _readBool(map['ocr_done']);
+    final rawOcrUpdatedAt = (map['ocr_updated_at'] as String?)?.trim() ?? '';
 
     return SourceDocumentRecord(
       id: map['id'] as int,
@@ -75,10 +122,16 @@ class SourceDocumentRecord {
       title: ((map['original_title'] as String?)?.trim().isNotEmpty ?? false)
           ? (map['original_title'] as String).trim()
           : '未命名资料',
-      createdAt:
-          DateTime.tryParse(rawCreatedAt)?.toLocal() ?? DateTime.now(),
-      ocrDone: _readBool(map['ocr_done']),
+      createdAt: DateTime.tryParse(rawCreatedAt)?.toLocal() ?? DateTime.now(),
+      ocrStatus: SourceDocumentOcrStatus.normalize(
+        map['ocr_status'] as String?,
+        fallbackDone: ocrDoneFallback,
+      ),
       aiDone: _readBool(map['ai_done']),
+      ocrErrorMessage: (map['ocr_error_message'] as String?)?.trim(),
+      ocrUpdatedAt: rawOcrUpdatedAt.isEmpty
+          ? null
+          : DateTime.tryParse(rawOcrUpdatedAt)?.toLocal(),
     );
   }
 

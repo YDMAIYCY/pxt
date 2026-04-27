@@ -5,7 +5,11 @@ import 'package:flutter/material.dart';
 
 import '../../../common/app_assets.dart';
 import '../../../common/profile_image_store.dart';
+import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
+import '../../../database/llm_config_repository.dart';
+import '../../../database/models/ai_result_records.dart';
+import '../../../database/models/llm_provider_config.dart';
 import '../../../database/models/user_profile.dart';
 import '../login_page.dart';
 
@@ -91,9 +95,14 @@ class ProfileTabPage extends StatefulWidget {
 
 class _ProfileTabPageState extends State<ProfileTabPage> {
   final AuthRepository _authRepository = AuthRepository();
+  final LlmConfigRepository _llmConfigRepository = LlmConfigRepository();
+  final AiGenerationRepository _aiGenerationRepository =
+      AiGenerationRepository();
   final ProfileImageStore _imageStore = ProfileImageStore();
 
   UserProfile? _profile;
+  LlmProviderConfig? _llmConfig;
+  StudyOverviewStats? _studyStats;
   bool _isLoading = true;
   bool _isSaving = false;
 
@@ -109,6 +118,14 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     try {
       await _authRepository.ensureInitialized();
       final currentProfile = await _authRepository.getCurrentUserProfile();
+      final llmConfig = currentProfile == null
+          ? null
+          : await _llmConfigRepository.getByUserId(currentProfile.id);
+      final studyStats = currentProfile == null
+          ? null
+          : await _aiGenerationRepository.fetchStudyOverviewStats(
+              currentProfile.id,
+            );
 
       if (!mounted) {
         return;
@@ -116,6 +133,8 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
 
       setState(() {
         _profile = currentProfile;
+        _llmConfig = llmConfig;
+        _studyStats = studyStats;
         _isLoading = false;
       });
     } catch (error) {
@@ -329,6 +348,56 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
         );
       },
     );
+  }
+
+  Future<void> _editLlmConfig() async {
+    final profile = _profile;
+    if (profile == null) {
+      return;
+    }
+
+    final currentConfig =
+        _llmConfig ?? LlmProviderConfig.emptyForUser(profile.id);
+    final result = await Navigator.of(context).push<LlmProviderConfig>(
+      MaterialPageRoute(
+        builder: (_) => _EditLlmConfigPage(config: currentConfig),
+      ),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final saved = await _llmConfigRepository.save(result);
+      final profile = _profile;
+      final latestStats = profile == null
+          ? null
+          : await _aiGenerationRepository.fetchStudyOverviewStats(profile.id);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _llmConfig = saved;
+        _studyStats = latestStats;
+      });
+      _showMessage('AI 大模型配置已保存');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('保存 AI 配置失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
   }
 
   Future<void> _pickAvatarFromGallery() async {
@@ -581,7 +650,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
                       _buildHeroHeader(context, profile),
                       Transform.translate(
                         offset: const Offset(0, -28),
-                        child: _buildSettingsSection(context, profile),
+                        child: _buildSettingsSection(context),
                       ),
                     ],
                   ),
@@ -617,169 +686,155 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-            _BackgroundPreview(
-              preset: backgroundPreset,
-              backgroundImagePath: profile.backgroundImagePath,
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0, 0.35, 1],
-                  colors: [
-                    Colors.black.withValues(alpha: 0.10),
-                    Colors.black.withValues(alpha: 0.24),
-                    Colors.black.withValues(alpha: 0.68),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              left: 18,
-              top: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.22),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-                ),
-                child: Text(
-                  '我的',
-                  style: textTheme.titleLarge?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 18,
-              top: 16,
-              child: _HeaderIconButton(
-                icon: Icons.wallpaper_rounded,
-                tooltip: '设置背景',
-                onTap: _showBackgroundActions,
-              ),
-            ),
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 52,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          _AvatarView(profile: profile, size: 96),
-                          Positioned(
-                            right: -2,
-                            bottom: -2,
-                            child: _HeaderIconButton(
-                              icon: Icons.camera_alt_rounded,
-                              tooltip: '设置头像',
-                              size: 30,
-                              onTap: _showAvatarActions,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  Text(
-                                    profile.primaryName,
-                                    style: textTheme.headlineMedium?.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w900,
-                                      height: 1.05,
-                                    ),
-                                  ),
-                                  _MetaChip(
-                                    icon: genderIcon,
-                                    label: profile.gender,
-                                  ),
-                                  _MetaChip(
-                                    icon: Icons.cake_rounded,
-                                    label: ageLabel,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '账号 ID: ${profile.username}',
-                                style: textTheme.bodyMedium?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.82),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.20),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.14),
-                      ),
-                    ),
-                    child: Text(
-                      profile.bio,
-                      style: textTheme.bodyLarge?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.96),
-                        height: 1.45,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      _HeroActionPill(
-                        icon: Icons.edit_note_rounded,
-                        label: '编辑资料',
-                        onTap: _editProfile,
-                      ),
-                      _HeroActionPill(
-                        icon: Icons.photo_filter_rounded,
-                        label: '设置头像',
-                        onTap: _showAvatarActions,
-                      ),
-                      _HeroActionPill(
-                        icon: Icons.wallpaper_rounded,
-                        label: '设置背景',
-                        onTap: _showBackgroundActions,
-                      ),
-                    ],
-                  ),
+          _BackgroundPreview(
+            preset: backgroundPreset,
+            backgroundImagePath: profile.backgroundImagePath,
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: const [0, 0.35, 1],
+                colors: [
+                  Colors.black.withValues(alpha: 0.10),
+                  Colors.black.withValues(alpha: 0.24),
+                  Colors.black.withValues(alpha: 0.68),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+          Positioned(
+            left: 18,
+            top: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              ),
+              child: Text(
+                '我的',
+                style: textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 18,
+            top: 16,
+            child: _HeaderIconButton(
+              icon: Icons.wallpaper_rounded,
+              tooltip: '设置背景',
+              onTap: _showBackgroundActions,
+            ),
+          ),
+          Positioned(
+            left: 18,
+            right: 18,
+            bottom: 52,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        _AvatarView(profile: profile, size: 96),
+                        Positioned(
+                          right: -2,
+                          bottom: -2,
+                          child: _HeaderIconButton(
+                            icon: Icons.camera_alt_rounded,
+                            tooltip: '设置头像',
+                            size: 30,
+                            onTap: _showAvatarActions,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  profile.primaryName,
+                                  style: textTheme.headlineMedium?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                    height: 1.05,
+                                  ),
+                                ),
+                                _MetaChip(
+                                  icon: genderIcon,
+                                  label: profile.gender,
+                                ),
+                                _MetaChip(
+                                  icon: Icons.cake_rounded,
+                                  label: ageLabel,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '账号 ID: ${profile.username}',
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.20),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Text(
+                    profile.bio,
+                    style: textTheme.bodyLarge?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.96),
+                      height: 1.45,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '个人资料、头像和账号信息可从右上角三个点进入。',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1059,32 +1114,13 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
                                 ),
                           ),
                           const Spacer(),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _GlassActionButton(
-                                  icon: Icons.edit_note_rounded,
-                                  label: '编辑资料',
-                                  onTap: _editProfile,
+                          Text(
+                            '个人资料、头像和账号信息可从右上角三个点进入。',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Colors.white.withValues(alpha: 0.78),
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _GlassActionButton(
-                                  icon: Icons.photo_filter_rounded,
-                                  label: '设置头像',
-                                  onTap: _showAvatarActions,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _GlassActionButton(
-                                  icon: Icons.wallpaper_rounded,
-                                  label: '设置背景',
-                                  onTap: _showBackgroundActions,
-                                ),
-                              ),
-                            ],
                           ),
                         ],
                       ),
@@ -1099,10 +1135,8 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     );
   }
 
-  Widget _buildSettingsSection(BuildContext context, UserProfile profile) {
-    final avatarMode = profile.avatarImagePath == null
-        ? '预设：${_avatarPresetFor(profile.avatarStyle).label}'
-        : '当前：自定义头像';
+  Widget _buildSettingsSection(BuildContext context) {
+    final stats = _studyStats;
 
     return Container(
       width: double.infinity,
@@ -1125,7 +1159,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '基础设置',
+            '我的学习资产',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
               color: const Color(0xFF0F172A),
               fontWeight: FontWeight.w900,
@@ -1133,7 +1167,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '把头像、昵称、简介和账号操作集中放在这里。',
+            '资料、错题和模型配置集中在这里；个人资料从右上角三个点进入。',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: const Color(0xFF64748B),
               fontWeight: FontWeight.w500,
@@ -1141,16 +1175,28 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           ),
           const SizedBox(height: 16),
           _SettingTile(
-            icon: Icons.badge_rounded,
-            title: '编辑个人资料',
-            subtitle: '名字、简介、年龄、性别',
-            onTap: _editProfile,
+            icon: Icons.report_problem_rounded,
+            title: '我的错题收藏',
+            subtitle: stats == null
+                ? '待同步'
+                : '待处理 ${stats.wrongQuestionCount} 题，已掌握 ${stats.masteredQuestionCount} 题',
+            onTap: () => _showMessage('请到任务页查看和处理错题'),
           ),
           _SettingTile(
-            icon: Icons.face_retouching_natural_rounded,
-            title: '设置头像',
-            subtitle: avatarMode,
-            onTap: _showAvatarActions,
+            icon: Icons.collections_bookmark_rounded,
+            title: '我的知识库收藏',
+            subtitle: stats == null
+                ? '待同步'
+                : '${stats.documentCount} 份资料，${stats.generatedResultCount} 条学习成果',
+            onTap: () => _showMessage('请到知识库页查看全部资料和成果'),
+          ),
+          _SettingTile(
+            icon: Icons.auto_awesome_rounded,
+            title: 'AI 大模型配置',
+            subtitle: _llmConfig?.isConfigured == true
+                ? '${_llmConfig!.provider.toUpperCase()} / ${_llmConfig!.effectiveModel}'
+                : '填写 API Key、Base URL 和模型 ID',
+            onTap: _editLlmConfig,
           ),
           _SettingTile(
             icon: Icons.info_outline_rounded,
@@ -1177,13 +1223,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           ),
         ],
       ),
-    );
-  }
-
-  _AvatarPreset _avatarPresetFor(String avatarStyle) {
-    return _avatarPresets.firstWhere(
-      (preset) => preset.id == avatarStyle,
-      orElse: () => _avatarPresets.first,
     );
   }
 
@@ -1344,12 +1383,8 @@ class _BackgroundPreview extends StatelessWidget {
             Image.file(
               File(backgroundImagePath!),
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  hasPresetImage
-                  ? Image.asset(
-                      preset.imageAsset!,
-                      fit: BoxFit.cover,
-                    )
+              errorBuilder: (context, error, stackTrace) => hasPresetImage
+                  ? Image.asset(preset.imageAsset!, fit: BoxFit.cover)
                   : const SizedBox.shrink(),
             )
           else if (hasPresetImage)
@@ -1451,101 +1486,7 @@ class _HeaderIconButton extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(
-              icon,
-              size: size * 0.44,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroActionPill extends StatelessWidget {
-  const _HeroActionPill({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.22),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 17, color: Colors.white),
-              const SizedBox(width: 7),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GlassActionButton extends StatelessWidget {
-  const _GlassActionButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Ink(
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 18, color: Colors.white),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
+            child: Icon(icon, size: size * 0.44, color: Colors.white),
           ),
         ),
       ),
@@ -1845,6 +1786,183 @@ class _EditProfilePageState extends State<_EditProfilePage> {
   }
 
   InputDecoration _inputDecoration(String label, String hintText) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hintText,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFF0C4A6E), width: 1.5),
+      ),
+    );
+  }
+}
+
+class _EditLlmConfigPage extends StatefulWidget {
+  const _EditLlmConfigPage({required this.config});
+
+  final LlmProviderConfig config;
+
+  @override
+  State<_EditLlmConfigPage> createState() => _EditLlmConfigPageState();
+}
+
+class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
+  late final TextEditingController _providerController;
+  late final TextEditingController _apiKeyController;
+  late final TextEditingController _baseUrlController;
+  late final TextEditingController _modelController;
+  late final TextEditingController _maxTokensController;
+
+  @override
+  void initState() {
+    super.initState();
+    _providerController = TextEditingController(
+      text: widget.config.provider == LlmProvider.custom
+          ? ''
+          : widget.config.provider,
+    );
+    _apiKeyController = TextEditingController(text: widget.config.apiKey);
+    _baseUrlController = TextEditingController(text: widget.config.baseUrl);
+    _modelController = TextEditingController(text: widget.config.model);
+    _maxTokensController = TextEditingController(
+      text: widget.config.effectiveMaxTokens.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _providerController.dispose();
+    _apiKeyController.dispose();
+    _baseUrlController.dispose();
+    _modelController.dispose();
+    _maxTokensController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final provider = _providerController.text.trim();
+    final apiKey = _apiKeyController.text.trim();
+    final baseUrl = _baseUrlController.text.trim();
+    final model = _modelController.text.trim();
+    if (apiKey.isEmpty) {
+      _showError('请填写 API Key');
+      return;
+    }
+    if (baseUrl.isEmpty) {
+      _showError('请填写 Base URL');
+      return;
+    }
+    if (model.isEmpty) {
+      _showError('请填写模型 ID');
+      return;
+    }
+
+    final maxTokens = int.tryParse(_maxTokensController.text.trim());
+    if (maxTokens == null || maxTokens < 512) {
+      _showError('最大输出 Token 至少为 512');
+      return;
+    }
+
+    Navigator.of(context).pop(
+      widget.config.copyWith(
+        provider: provider.isEmpty ? LlmProvider.custom : provider,
+        apiMode: LlmApiMode.openAiCompatible,
+        apiKey: apiKey,
+        baseUrl: baseUrl,
+        model: model,
+        maxTokens: maxTokens,
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: const Text('AI 大模型配置'),
+        backgroundColor: Colors.transparent,
+        foregroundColor: const Color(0xFF0B1324),
+        actions: [TextButton(onPressed: _submit, child: const Text('保存'))],
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+          children: [
+            Text(
+              '通用大模型',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '这里按 OpenAI-compatible 接口调用。你填哪个服务商的 Base URL、API Key 和模型 ID，AI 生成结果就调用哪个模型。',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFF64748B),
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _providerController,
+              decoration: _llmInputDecoration(
+                '服务商名称',
+                '例如 kimi、deepseek、openai',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKeyController,
+              obscureText: true,
+              decoration: _llmInputDecoration('API Key', '粘贴你的 API Key'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _baseUrlController,
+              decoration: _llmInputDecoration(
+                'Base URL',
+                '例如 https://api.moonshot.cn/v1',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _modelController,
+              decoration: _llmInputDecoration(
+                '模型 ID',
+                '例如 kimi-k2.5、deepseek-chat',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _maxTokensController,
+              keyboardType: TextInputType.number,
+              decoration: _llmInputDecoration('最大输出 Token', '4096'),
+            ),
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.save_rounded),
+              label: const Text('保存 AI 配置'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _llmInputDecoration(String label, String hintText) {
     return InputDecoration(
       labelText: label,
       hintText: hintText,

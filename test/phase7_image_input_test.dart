@@ -58,44 +58,50 @@ void main() {
 
       final createdDocument = await ingestService.importFromInput(
         userId: 11,
+        libraryId: 3,
         source: ImageInputSource.gallery,
       );
 
       expect(repository.lastUserId, 11);
-      expect(
-        repository.lastSourceType,
-        SourceDocumentSourceType.galleryImport,
-      );
+      expect(repository.lastLibraryId, 3);
+      expect(repository.lastSourceType, SourceDocumentSourceType.galleryImport);
       expect(repository.lastTitle, 'math note final');
       expect(createdDocument?.title, 'math note final');
-      expect(createdDocument?.sourceType, SourceDocumentSourceType.galleryImport);
+      expect(
+        createdDocument?.sourceType,
+        SourceDocumentSourceType.galleryImport,
+      );
     });
 
-    test('document ingest deletes orphaned file when database insert fails', () async {
-      final storedFile = File('${tempDirectory.path}\\orphan.jpg');
-      await storedFile.writeAsBytes(<int>[1, 2, 3]);
+    test(
+      'document ingest deletes orphaned file when database insert fails',
+      () async {
+        final storedFile = File('${tempDirectory.path}\\orphan.jpg');
+        await storedFile.writeAsBytes(<int>[1, 2, 3]);
 
-      final ingestService = DocumentIngestService(
-        imageInputPort: _FakeImageInputPort(
-          StoredImageSelection(
-            savedPath: storedFile.path,
-            originalName: 'physics_note',
-            inputSource: ImageInputSource.gallery,
+        final ingestService = DocumentIngestService(
+          imageInputPort: _FakeImageInputPort(
+            StoredImageSelection(
+              savedPath: storedFile.path,
+              originalName: 'physics_note',
+              inputSource: ImageInputSource.gallery,
+            ),
           ),
-        ),
-        sourceDocumentRepository: _ThrowingSourceDocumentRepository(),
-      );
+          sourceDocumentRepository: _ThrowingSourceDocumentRepository(),
+        );
 
-      await expectLater(
-        ingestService.importFromInput(
-          userId: 1,
-          source: ImageInputSource.gallery,
-        ),
-        throwsException,
-      );
+        await expectLater(
+          ingestService.importFromInput(
+            userId: 1,
+            libraryId: 5,
+            source: ImageInputSource.gallery,
+          ),
+          throwsException,
+        );
 
-      expect(storedFile.existsSync(), isFalse);
-    });
+        expect(storedFile.existsSync(), isFalse);
+      },
+    );
   });
 }
 
@@ -117,6 +123,7 @@ class _FakeImageInputPort implements ImageInputPort {
 
 class _RecordingSourceDocumentRepository extends SourceDocumentRepository {
   int? lastUserId;
+  int? lastLibraryId;
   String? lastSourceType;
   String? lastImagePath;
   String? lastTitle;
@@ -124,11 +131,13 @@ class _RecordingSourceDocumentRepository extends SourceDocumentRepository {
   @override
   Future<SourceDocumentRecord> createSourceDocument({
     required int userId,
+    int? libraryId,
     required String sourceType,
     required String imagePath,
     required String title,
   }) async {
     lastUserId = userId;
+    lastLibraryId = libraryId;
     lastSourceType = sourceType;
     lastImagePath = imagePath;
     lastTitle = title;
@@ -141,7 +150,7 @@ class _RecordingSourceDocumentRepository extends SourceDocumentRepository {
       imagePath: imagePath,
       title: title,
       createdAt: DateTime.now(),
-      ocrDone: false,
+      ocrStatus: SourceDocumentOcrStatus.pending,
       aiDone: false,
     );
   }
@@ -151,6 +160,7 @@ class _ThrowingSourceDocumentRepository extends SourceDocumentRepository {
   @override
   Future<SourceDocumentRecord> createSourceDocument({
     required int userId,
+    int? libraryId,
     required String sourceType,
     required String imagePath,
     required String title,

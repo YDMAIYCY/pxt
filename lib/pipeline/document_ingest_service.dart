@@ -23,6 +23,7 @@ class DocumentIngestService {
 
   Future<SourceDocumentRecord?> importFromInput({
     required int userId,
+    int? libraryId,
     required ImageInputSource source,
   }) async {
     final storedImage = await _imageInputPort.pickAndStoreImage(source: source);
@@ -32,8 +33,9 @@ class DocumentIngestService {
     }
 
     try {
-      return _sourceDocumentRepository.createSourceDocument(
+      return await _sourceDocumentRepository.createSourceDocument(
         userId: userId,
+        libraryId: libraryId,
         sourceType: _mapSourceType(source),
         imagePath: storedImage.savedPath,
         title: _buildDocumentTitle(storedImage),
