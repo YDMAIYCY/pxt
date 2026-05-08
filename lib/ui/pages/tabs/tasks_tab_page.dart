@@ -61,12 +61,10 @@ class _TasksTabPageState extends State<TasksTabPage> {
       userId: user.id,
       limit: 300,
     );
-    final pendingPractice = await _aiGenerationRepository
-        .fetchPracticeQuestionsByUser(
-          userId: user.id,
-          reviewStatus: PracticeQuestionReviewStatus.pending,
-          limit: 300,
-        );
+    final todayPractice = await _aiGenerationRepository
+        .fetchTodayPracticeQuestionsByUser(userId: user.id, limit: 300);
+    final overduePractice = await _aiGenerationRepository
+        .fetchOverduePracticeQuestionsByUser(userId: user.id, limit: 300);
     final wrongQuestions = await _aiGenerationRepository
         .fetchPracticeQuestionsByUser(
           userId: user.id,
@@ -82,7 +80,8 @@ class _TasksTabPageState extends State<TasksTabPage> {
     return _TaskCenterData(
       documents: documents,
       aiTasks: aiTasks,
-      pendingPractice: pendingPractice,
+      todayPractice: todayPractice,
+      overduePractice: overduePractice,
       wrongQuestions: wrongQuestions,
       masteredQuestions: masteredQuestions,
     );
@@ -191,14 +190,15 @@ class _TaskListPageState extends State<_TaskListPage> {
     }
 
     switch (widget.kind) {
-      case _TaskListKind.pendingPractice:
+      case _TaskListKind.todayPractice:
         return _TaskListData(
           questions: await widget.aiGenerationRepository
-              .fetchPracticeQuestionsByUser(
-                userId: user.id,
-                reviewStatus: PracticeQuestionReviewStatus.pending,
-                limit: 300,
-              ),
+              .fetchTodayPracticeQuestionsByUser(userId: user.id, limit: 300),
+        );
+      case _TaskListKind.overduePractice:
+        return _TaskListData(
+          questions: await widget.aiGenerationRepository
+              .fetchOverduePracticeQuestionsByUser(userId: user.id, limit: 300),
         );
       case _TaskListKind.wrongQuestions:
         return _TaskListData(
@@ -241,7 +241,11 @@ class _TaskListPageState extends State<_TaskListPage> {
   Future<void> _openPractice([int? questionId]) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => PracticeReviewPage(initialQuestionId: questionId),
+        builder: (_) => PracticeReviewPage(
+          initialQuestionId: questionId,
+          authRepository: widget.authRepository,
+          aiGenerationRepository: widget.aiGenerationRepository,
+        ),
       ),
     );
     if (mounted) {
@@ -250,9 +254,15 @@ class _TaskListPageState extends State<_TaskListPage> {
   }
 
   Future<void> _openWrongQuestion(PracticeQuestionWithDocument item) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => WrongQuestionPage(item: item)));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WrongQuestionPage(
+          item: item,
+          aiGenerationRepository: widget.aiGenerationRepository,
+          authRepository: widget.authRepository,
+        ),
+      ),
+    );
     if (mounted) {
       await _refresh();
     }
@@ -310,7 +320,7 @@ class _TaskListPageState extends State<_TaskListPage> {
 
   List<Widget> _buildItems(_TaskListData data) {
     switch (widget.kind) {
-      case _TaskListKind.pendingPractice:
+      case _TaskListKind.todayPractice:
         if (data.questions.isEmpty) {
           return [const _EmptyHint(text: '暂无待刷复习题。生成复习题后会出现在这里。')];
         }
@@ -318,8 +328,22 @@ class _TaskListPageState extends State<_TaskListPage> {
             .map(
               (item) => _TaskTile(
                 title: item.question.questionText,
-                subtitle: item.documentTitle,
+                subtitle: _questionMeta(item),
                 status: '待刷',
+                onTap: () => _openPractice(item.question.id),
+              ),
+            )
+            .toList(growable: false);
+      case _TaskListKind.overduePractice:
+        if (data.questions.isEmpty) {
+          return [const _EmptyHint(text: '暂无逾期复习题。')];
+        }
+        return data.questions
+            .map(
+              (item) => _TaskTile(
+                title: item.question.questionText,
+                subtitle: _questionMeta(item),
+                status: '逾期',
                 onTap: () => _openPractice(item.question.id),
               ),
             )
@@ -458,11 +482,18 @@ class _TaskBoard extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       _BoardItem(
-        kind: _TaskListKind.pendingPractice,
+        kind: _TaskListKind.todayPractice,
         title: '待刷复习题',
-        value: '${data.pendingPractice.length}',
+        value: '${data.todayPractice.length}',
         icon: Icons.quiz_rounded,
         color: const Color(0xFFFFF7ED),
+      ),
+      _BoardItem(
+        kind: _TaskListKind.overduePractice,
+        title: '逾期复习',
+        value: '${data.overduePractice.length}',
+        icon: Icons.schedule_rounded,
+        color: const Color(0xFFFFF1F2),
       ),
       _BoardItem(
         kind: _TaskListKind.wrongQuestions,
@@ -728,14 +759,16 @@ class _TaskCenterData {
   const _TaskCenterData({
     required this.documents,
     required this.aiTasks,
-    required this.pendingPractice,
+    required this.todayPractice,
+    required this.overduePractice,
     required this.wrongQuestions,
     required this.masteredQuestions,
   });
 
   final List<SourceDocumentRecord> documents;
   final List<AiTaskWithDocument> aiTasks;
-  final List<PracticeQuestionWithDocument> pendingPractice;
+  final List<PracticeQuestionWithDocument> todayPractice;
+  final List<PracticeQuestionWithDocument> overduePractice;
   final List<PracticeQuestionWithDocument> wrongQuestions;
   final List<PracticeQuestionWithDocument> masteredQuestions;
 
@@ -779,7 +812,8 @@ class _BoardItem {
 }
 
 enum _TaskListKind {
-  pendingPractice,
+  todayPractice,
+  overduePractice,
   wrongQuestions,
   activeFlow,
   masteredQuestions,
@@ -787,8 +821,10 @@ enum _TaskListKind {
 
 String _titleOf(_TaskListKind kind) {
   switch (kind) {
-    case _TaskListKind.pendingPractice:
+    case _TaskListKind.todayPractice:
       return '待刷复习题';
+    case _TaskListKind.overduePractice:
+      return '逾期复习';
     case _TaskListKind.wrongQuestions:
       return '待处理错题';
     case _TaskListKind.activeFlow:
@@ -796,6 +832,20 @@ String _titleOf(_TaskListKind kind) {
     case _TaskListKind.masteredQuestions:
       return '已掌握题目';
   }
+}
+
+String _questionMeta(PracticeQuestionWithDocument item) {
+  final question = item.question;
+  final parts = <String>[
+    item.documentTitle,
+    '掌握度 ${question.masteryScore}',
+    '错 ${question.wrongCount} 次',
+  ];
+  final nextReviewAt = question.nextReviewAt;
+  if (nextReviewAt != null) {
+    parts.add('下次 ${_formatTime(nextReviewAt)}');
+  }
+  return parts.join(' / ');
 }
 
 String _statusLabel(String status) {

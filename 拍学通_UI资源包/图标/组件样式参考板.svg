@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<rect width="128" height="128" rx="24" fill="#F7FCFB"/>
+<rect x="12" y="12" width="104" height="30" rx="15" fill="#14B8A6"/>
+<text x="64" y="32" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="Arial">主按钮</text>
+<rect x="12" y="52" width="48" height="24" rx="12" fill="#E8F8F5"/>
+<text x="36" y="68" text-anchor="middle" font-size="9" fill="#0EA5A4" font-family="Arial">状态标签</text>
+<rect x="68" y="52" width="48" height="24" rx="12" fill="#FFF3E8"/>
+<text x="92" y="68" text-anchor="middle" font-size="9" fill="#FF8A3D" font-family="Arial">处理中</text>
+<rect x="12" y="86" width="104" height="30" rx="15" fill="white" stroke="#E5E7EB"/>
+<text x="64" y="105" text-anchor="middle" font-size="10" fill="#6B7280" font-family="Arial">输入框 / 卡片</text>
+
+</svg>

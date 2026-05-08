@@ -1,0 +1,34 @@
+{
+  "app_name": "拍学通",
+  "aspect_ratio": "9:16",
+  "colors": {
+    "primary": "#14B8A6",
+    "primary_dark": "#0EA5A4",
+    "secondary_blue": "#4FA3FF",
+    "secondary_purple": "#9B7BFF",
+    "accent_orange": "#FF8A3D",
+    "danger": "#EF4444",
+    "background": "#F7FCFB",
+    "surface": "#FFFFFF",
+    "text_primary": "#111827",
+    "text_secondary": "#6B7280",
+    "text_tertiary": "#9CA3AF"
+  },
+  "radius": {
+    "card": 24,
+    "button": 18,
+    "sheet": 32,
+    "chip": 999
+  },
+  "shadow": {
+    "soft_card": "0 12px 32px rgba(17, 24, 39, 0.08)",
+    "float": "0 18px 48px rgba(20, 184, 166, 0.18)"
+  },
+  "typography": {
+    "font_suggestion": "PingFang SC / HarmonyOS Sans / Noto Sans SC",
+    "h1": "32px / 700",
+    "h2": "24px / 700",
+    "body": "16px / 400",
+    "caption": "13px / 400"
+  }
+}

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_linux
+  pdf_render_maintained
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

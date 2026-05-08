@@ -11,6 +11,7 @@ import '../../../database/llm_config_repository.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/llm_provider_config.dart';
 import '../../../database/models/user_profile.dart';
+import '../../../llm/llm_model_catalog.dart';
 import '../login_page.dart';
 
 // ========== 参数配置 ==========
@@ -1813,6 +1814,10 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
   late final TextEditingController _baseUrlController;
   late final TextEditingController _modelController;
   late final TextEditingController _maxTokensController;
+  List<LlmModelOption> _modelOptions = const [];
+  int _selectedModelIndex = 0;
+  bool _isRefreshingModels = false;
+  String? _modelListMessage;
 
   @override
   void initState() {
@@ -1828,6 +1833,15 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
     _maxTokensController = TextEditingController(
       text: widget.config.effectiveMaxTokens.toString(),
     );
+    _modelOptions = LlmModelCatalog.modelsFor(
+      provider: _providerController.text,
+      baseUrl: _baseUrlController.text,
+      currentModel: _modelController.text,
+    );
+    _selectedModelIndex = _indexForSelectedModel(
+      _modelController.text,
+      _modelOptions,
+    );
   }
 
   @override
@@ -1838,6 +1852,141 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
     _modelController.dispose();
     _maxTokensController.dispose();
     super.dispose();
+  }
+
+  void _applyProviderPreset(LlmProviderPreset preset) {
+    _providerController.text = preset.provider;
+    _baseUrlController.text = preset.baseUrl;
+    final nextOptions = LlmModelCatalog.modelsFor(
+      provider: preset.provider,
+      baseUrl: preset.baseUrl,
+      currentModel: _modelController.text,
+    );
+    final nextIndex = nextOptions.isEmpty
+        ? 0
+        : _indexForSelectedModel(_modelController.text, nextOptions);
+    final shouldSelectFirstModel =
+        _modelController.text.trim().isEmpty && nextOptions.isNotEmpty;
+
+    setState(() {
+      _modelOptions = nextOptions;
+      _selectedModelIndex = shouldSelectFirstModel ? 0 : nextIndex;
+      if (shouldSelectFirstModel) {
+        _modelController.text = nextOptions.first.id;
+      }
+      _modelListMessage = '${preset.label} 已填入默认接口地址，可继续滑动选择模型。';
+    });
+  }
+
+  void _syncModelOptionsFromInputs() {
+    final nextOptions = LlmModelCatalog.modelsFor(
+      provider: _providerController.text,
+      baseUrl: _baseUrlController.text,
+      currentModel: _modelController.text,
+    );
+
+    setState(() {
+      _modelOptions = nextOptions;
+      _selectedModelIndex = _indexForSelectedModel(
+        _modelController.text,
+        nextOptions,
+      );
+      _modelListMessage = null;
+    });
+  }
+
+  Future<void> _refreshRemoteModels() async {
+    if (_isRefreshingModels) {
+      return;
+    }
+
+    setState(() {
+      _isRefreshingModels = true;
+      _modelListMessage = null;
+    });
+
+    try {
+      final remoteModels = await LlmModelCatalog.fetchModels(
+        baseUrl: _baseUrlController.text,
+        apiKey: _apiKeyController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final nextOptions = _includeCurrentModel(remoteModels);
+      var nextIndex = _indexForSelectedModel(
+        _modelController.text,
+        nextOptions,
+      );
+      if (_modelController.text.trim().isEmpty && nextOptions.isNotEmpty) {
+        _modelController.text = nextOptions.first.id;
+        nextIndex = 0;
+      }
+
+      setState(() {
+        _modelOptions = nextOptions;
+        _selectedModelIndex = nextIndex;
+        _modelListMessage = '已从接口读取 ${nextOptions.length} 个可用模型。';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showError(error.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshingModels = false;
+        });
+      }
+    }
+  }
+
+  void _selectModel(int index) {
+    if (index < 0 || index >= _modelOptions.length) {
+      return;
+    }
+
+    setState(() {
+      _selectedModelIndex = index;
+      _modelController.text = _modelOptions[index].id;
+      _modelListMessage = null;
+    });
+  }
+
+  List<LlmModelOption> _includeCurrentModel(List<LlmModelOption> models) {
+    final selected = _modelController.text.trim();
+    if (selected.isEmpty ||
+        models.any(
+          (model) => model.id.toLowerCase() == selected.toLowerCase(),
+        )) {
+      return models;
+    }
+
+    return [
+      ...models,
+      LlmModelOption(
+        id: selected,
+        label: selected,
+        description: '当前已保存的自定义模型。',
+      ),
+    ];
+  }
+
+  int _indexForSelectedModel(
+    String selectedModel,
+    List<LlmModelOption> models,
+  ) {
+    final selected = selectedModel.trim().toLowerCase();
+    if (models.isEmpty || selected.isEmpty) {
+      return 0;
+    }
+
+    final index = models.indexWhere(
+      (model) => model.id.toLowerCase() == selected,
+    );
+    return index < 0 ? 0 : index;
   }
 
   void _submit() {
@@ -1912,8 +2061,16 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
               ),
             ),
             const SizedBox(height: 16),
+            _ProviderPresetSelector(
+              presets: LlmModelCatalog.providerPresets,
+              provider: _providerController.text,
+              baseUrl: _baseUrlController.text,
+              onSelected: _applyProviderPreset,
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _providerController,
+              onChanged: (_) => _syncModelOptionsFromInputs(),
               decoration: _llmInputDecoration(
                 '服务商名称',
                 '例如 kimi、deepseek、openai',
@@ -1928,18 +2085,26 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
             const SizedBox(height: 12),
             TextField(
               controller: _baseUrlController,
+              onChanged: (_) => _syncModelOptionsFromInputs(),
               decoration: _llmInputDecoration(
                 'Base URL',
                 '例如 https://api.moonshot.cn/v1',
               ),
             ),
             const SizedBox(height: 12),
+            _ModelSliderSelector(
+              models: _modelOptions,
+              selectedIndex: _selectedModelIndex,
+              isRefreshing: _isRefreshingModels,
+              message: _modelListMessage,
+              onChanged: _selectModel,
+              onRefresh: _refreshRemoteModels,
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _modelController,
-              decoration: _llmInputDecoration(
-                '模型 ID',
-                '例如 kimi-k2.5、deepseek-chat',
-              ),
+              onChanged: (_) => _syncModelOptionsFromInputs(),
+              decoration: _llmInputDecoration('当前模型 ID', '也可以手动输入官方列表之外的模型'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -1970,6 +2135,225 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: Color(0xFF0C4A6E), width: 1.5),
+      ),
+    );
+  }
+}
+
+class _ProviderPresetSelector extends StatelessWidget {
+  const _ProviderPresetSelector({
+    required this.presets,
+    required this.provider,
+    required this.baseUrl,
+    required this.onSelected,
+  });
+
+  final List<LlmProviderPreset> presets;
+  final String provider;
+  final String baseUrl;
+  final ValueChanged<LlmProviderPreset> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedPreset = LlmModelCatalog.presetFor(
+      provider: provider,
+      baseUrl: baseUrl,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '常用服务商',
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: presets.map((preset) {
+            final isSelected = selectedPreset?.provider == preset.provider;
+
+            return ChoiceChip(
+              selected: isSelected,
+              label: Text(preset.label),
+              avatar: Icon(
+                isSelected ? Icons.check_rounded : Icons.auto_awesome_rounded,
+                size: 18,
+              ),
+              onSelected: (_) => onSelected(preset),
+              selectedColor: const Color(0xFFE0F2FE),
+              labelStyle: TextStyle(
+                color: isSelected
+                    ? const Color(0xFF075985)
+                    : const Color(0xFF334155),
+                fontWeight: FontWeight.w700,
+              ),
+              side: BorderSide(
+                color: isSelected
+                    ? const Color(0xFF0EA5E9)
+                    : const Color(0xFFE2E8F0),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _ModelSliderSelector extends StatelessWidget {
+  const _ModelSliderSelector({
+    required this.models,
+    required this.selectedIndex,
+    required this.isRefreshing,
+    required this.onChanged,
+    required this.onRefresh,
+    this.message,
+  });
+
+  final List<LlmModelOption> models;
+  final int selectedIndex;
+  final bool isRefreshing;
+  final ValueChanged<int> onChanged;
+  final VoidCallback onRefresh;
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasModels = models.isNotEmpty;
+    final safeIndex = !hasModels
+        ? 0
+        : selectedIndex < 0
+        ? 0
+        : selectedIndex >= models.length
+        ? models.length - 1
+        : selectedIndex;
+    final selectedModel = hasModels ? models[safeIndex] : null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '滑动选择模型',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: isRefreshing ? null : onRefresh,
+                icon: isRefreshing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync_rounded, size: 18),
+                label: const Text('刷新'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (!hasModels)
+            Text(
+              '选择上方服务商会出现官方模型预设；填好 API Key 后，也可以刷新接口读取账号可用模型。',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFF64748B),
+                height: 1.45,
+              ),
+            )
+          else ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    selectedModel!.label,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: const Color(0xFF0F172A),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    selectedModel.id,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF0EA5E9),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (selectedModel.description.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      selectedModel.description,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF64748B),
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (models.length > 1)
+              Slider(
+                min: 0,
+                max: (models.length - 1).toDouble(),
+                divisions: models.length - 1,
+                value: safeIndex.toDouble(),
+                label: selectedModel.id,
+                onChanged: (value) => onChanged(value.round()),
+              )
+            else
+              Text(
+                '当前列表只有一个模型，已自动选中。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF64748B),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            Text(
+              '${safeIndex + 1} / ${models.length}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF94A3B8),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (message != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              message!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF0F766E),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

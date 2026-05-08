@@ -57,12 +57,16 @@ class SourceDocumentRepository {
   Future<List<SourceDocumentRecord>> fetchRecentSourceDocuments({
     required int userId,
     int? libraryId,
+    bool includeBatchPages = true,
     int limit = 5,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final args = <Object?>[userId];
     final libraryClause = _buildLibraryClause(libraryId, args);
+    final batchClause = includeBatchPages
+        ? ''
+        : 'AND documents.batch_id IS NULL';
     args.add(limit);
 
     final rows = await db.rawQuery('''
@@ -70,6 +74,8 @@ class SourceDocumentRepository {
         documents.id,
         documents.user_id,
         documents.library_id,
+        documents.batch_id,
+        documents.page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -89,6 +95,7 @@ class SourceDocumentRepository {
       FROM ${AppDatabase.tableSourceDocuments} documents
       WHERE documents.user_id = ?
         $libraryClause
+        $batchClause
       ORDER BY documents.created_at DESC
       LIMIT ?
       ''', args);
@@ -112,6 +119,8 @@ class SourceDocumentRepository {
         documents.id,
         documents.user_id,
         documents.library_id,
+        documents.batch_id,
+        documents.page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -150,6 +159,8 @@ class SourceDocumentRepository {
         documents.id,
         documents.user_id,
         documents.library_id,
+        documents.batch_id,
+        documents.page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,

@@ -152,6 +152,8 @@ class MiniMaxClient {
       return _parseStructuredJson(jsonContent);
     } on TimeoutException {
       throw MiniMaxException('$_providerLabel 请求超时，请稍后重试');
+    } on http.ClientException {
+      throw MiniMaxException('$_providerLabel 网络连接中断，请检查网络、代理或接口地址后重试。');
     } on FormatException {
       throw MiniMaxException('$_providerLabel 返回内容不是有效 JSON');
     }

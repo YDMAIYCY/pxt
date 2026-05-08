@@ -4,6 +4,8 @@ import 'package:path/path.dart' as p;
 
 import '../camera/document_input_contract.dart';
 import '../camera/image_input_service.dart';
+import '../database/document_batch_repository.dart';
+import '../database/models/document_batch_record.dart';
 import '../database/models/source_document_record.dart';
 import '../database/source_document_repository.dart';
 
@@ -13,13 +15,20 @@ import '../database/source_document_repository.dart';
 class DocumentIngestService {
   DocumentIngestService({
     ImageInputPort? imageInputPort,
+    BatchDocumentInputPort? batchInputPort,
     SourceDocumentRepository? sourceDocumentRepository,
+    DocumentBatchRepository? documentBatchRepository,
   }) : _imageInputPort = imageInputPort ?? ImageInputService(),
+       _batchInputPort = batchInputPort ?? ImageInputService(),
        _sourceDocumentRepository =
-           sourceDocumentRepository ?? SourceDocumentRepository();
+           sourceDocumentRepository ?? SourceDocumentRepository(),
+       _documentBatchRepository =
+           documentBatchRepository ?? DocumentBatchRepository();
 
   final ImageInputPort _imageInputPort;
+  final BatchDocumentInputPort _batchInputPort;
   final SourceDocumentRepository _sourceDocumentRepository;
+  final DocumentBatchRepository _documentBatchRepository;
 
   Future<SourceDocumentRecord?> importFromInput({
     required int userId,
@@ -46,12 +55,58 @@ class DocumentIngestService {
     }
   }
 
+  Future<DocumentBatchRecord?> importBatchFromInput({
+    required int userId,
+    int? libraryId,
+    required BatchDocumentInputSource source,
+  }) async {
+    final storedBatch = await _batchInputPort.pickAndStoreBatch(source: source);
+    if (storedBatch == null || storedBatch.pages.isEmpty) {
+      return null;
+    }
+
+    try {
+      return await _documentBatchRepository.createDocumentBatch(
+        userId: userId,
+        libraryId: libraryId,
+        sourceType: _mapBatchSourceType(storedBatch.source),
+        pageSourceType: _mapBatchPageSourceType(storedBatch.source),
+        title: _normalizeBatchTitle(storedBatch.title, storedBatch.source),
+        originalFilePath: storedBatch.originalFilePath,
+        pages: _buildPageDrafts(storedBatch),
+      );
+    } catch (_) {
+      for (final page in storedBatch.pages) {
+        await _cleanupStoredFile(page.savedPath);
+      }
+      rethrow;
+    }
+  }
+
   String _mapSourceType(ImageInputSource source) {
     switch (source) {
       case ImageInputSource.camera:
         return SourceDocumentSourceType.cameraCapture;
       case ImageInputSource.gallery:
         return SourceDocumentSourceType.galleryImport;
+    }
+  }
+
+  String _mapBatchSourceType(BatchDocumentInputSource source) {
+    switch (source) {
+      case BatchDocumentInputSource.multiImage:
+        return DocumentBatchSourceType.multiImage;
+      case BatchDocumentInputSource.pdf:
+        return DocumentBatchSourceType.pdf;
+    }
+  }
+
+  String _mapBatchPageSourceType(BatchDocumentInputSource source) {
+    switch (source) {
+      case BatchDocumentInputSource.multiImage:
+        return SourceDocumentSourceType.galleryImport;
+      case BatchDocumentInputSource.pdf:
+        return SourceDocumentSourceType.pdfPage;
     }
   }
 
@@ -73,6 +128,39 @@ class DocumentIngestService {
     }
 
     return '相册导入 $timestamp';
+  }
+
+  String _normalizeBatchTitle(String title, BatchDocumentInputSource source) {
+    final trimmed = title.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+
+    final timestamp = _formatTimestamp(DateTime.now());
+    switch (source) {
+      case BatchDocumentInputSource.multiImage:
+        return '批量图片 $timestamp';
+      case BatchDocumentInputSource.pdf:
+        return 'PDF 资料 $timestamp';
+    }
+  }
+
+  List<DocumentBatchPageDraft> _buildPageDrafts(StoredBatchSelection batch) {
+    final batchTitle = _normalizeBatchTitle(batch.title, batch.source);
+
+    return batch.pages
+        .asMap()
+        .entries
+        .map((entry) {
+          final pageNumber = entry.key + 1;
+          final page = entry.value;
+          return DocumentBatchPageDraft(
+            savedPath: page.savedPath,
+            title: '$batchTitle 第$pageNumber页',
+            pageNumber: pageNumber,
+          );
+        })
+        .toList(growable: false);
   }
 
   String _normalizeOriginalName(String originalName) {

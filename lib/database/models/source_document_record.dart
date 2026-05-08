@@ -6,6 +6,7 @@ class SourceDocumentSourceType {
 
   static const String cameraCapture = 'camera_capture';
   static const String galleryImport = 'gallery_import';
+  static const String pdfPage = 'pdf_page';
 }
 
 class SourceDocumentOcrStatus {
@@ -44,6 +45,8 @@ class SourceDocumentRecord {
     required this.ocrStatus,
     required this.aiDone,
     this.libraryId,
+    this.batchId,
+    this.pageNumber,
     this.ocrErrorMessage,
     this.ocrUpdatedAt,
   });
@@ -51,6 +54,8 @@ class SourceDocumentRecord {
   final int id;
   final int userId;
   final int? libraryId;
+  final int? batchId;
+  final int? pageNumber;
   final String sourceType;
   final String imagePath;
   final String title;
@@ -85,6 +90,8 @@ class SourceDocumentRecord {
         return '拍照';
       case SourceDocumentSourceType.galleryImport:
         return '相册';
+      case SourceDocumentSourceType.pdfPage:
+        return 'PDF';
       default:
         return '资料';
     }
@@ -117,6 +124,8 @@ class SourceDocumentRecord {
       id: map['id'] as int,
       userId: map['user_id'] as int,
       libraryId: map['library_id'] as int?,
+      batchId: map['batch_id'] as int?,
+      pageNumber: map['page_number'] as int?,
       sourceType: (map['source_type'] as String?)?.trim() ?? '',
       imagePath: (map['image_path'] as String?)?.trim() ?? '',
       title: ((map['original_title'] as String?)?.trim().isNotEmpty ?? false)

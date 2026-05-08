@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class KnowledgeCardRecord {
   const KnowledgeCardRecord({
     required this.id,
@@ -92,6 +94,12 @@ class PracticeQuestionRecord {
     required this.createdAt,
     this.lastUserAnswer,
     this.lastReviewedAt,
+    this.nextReviewAt,
+    this.masteryScore = 0,
+    this.reviewIntervalDays = 0,
+    this.correctStreak = 0,
+    this.parentQuestionId,
+    this.questionKind = PracticeQuestionKind.normal,
   });
 
   final int id;
@@ -103,7 +111,13 @@ class PracticeQuestionRecord {
   final String reviewStatus;
   final String? lastUserAnswer;
   final DateTime? lastReviewedAt;
+  final DateTime? nextReviewAt;
   final int wrongCount;
+  final int masteryScore;
+  final int reviewIntervalDays;
+  final int correctStreak;
+  final int? parentQuestionId;
+  final String questionKind;
   final DateTime createdAt;
 
   bool get isPending => reviewStatus == PracticeQuestionReviewStatus.pending;
@@ -112,9 +126,12 @@ class PracticeQuestionRecord {
 
   bool get isMastered => reviewStatus == PracticeQuestionReviewStatus.mastered;
 
+  bool get isSimilarQuestion => questionKind == PracticeQuestionKind.similar;
+
   factory PracticeQuestionRecord.fromMap(Map<String, Object?> map) {
     final createdAt = (map['created_at'] as String?) ?? '';
     final reviewedAt = (map['last_reviewed_at'] as String?) ?? '';
+    final nextReviewAt = (map['next_review_at'] as String?) ?? '';
 
     return PracticeQuestionRecord(
       id: map['id'] as int,
@@ -130,7 +147,17 @@ class PracticeQuestionRecord {
       lastReviewedAt: reviewedAt.isEmpty
           ? null
           : DateTime.tryParse(reviewedAt)?.toLocal(),
+      nextReviewAt: nextReviewAt.isEmpty
+          ? null
+          : DateTime.tryParse(nextReviewAt)?.toLocal(),
       wrongCount: _readInt(map['wrong_count']),
+      masteryScore: _readInt(map['mastery_score']),
+      reviewIntervalDays: _readInt(map['review_interval_days']),
+      correctStreak: _readInt(map['correct_streak']),
+      parentQuestionId: _readNullableInt(map['parent_question_id']),
+      questionKind: PracticeQuestionKind.normalize(
+        map['question_kind'] as String?,
+      ),
       createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
     );
   }
@@ -146,6 +173,22 @@ class PracticeQuestionRecord {
       return int.tryParse(value) ?? 0;
     }
     return 0;
+  }
+
+  static int? _readNullableInt(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value);
+    }
+    return null;
   }
 }
 
@@ -167,6 +210,79 @@ class PracticeQuestionReviewStatus {
         return pending;
     }
   }
+}
+
+class PracticeQuestionKind {
+  const PracticeQuestionKind._();
+
+  static const String normal = 'normal';
+  static const String similar = 'similar';
+
+  static String normalize(String? value) {
+    switch ((value ?? '').trim().toLowerCase()) {
+      case similar:
+        return similar;
+      case normal:
+      default:
+        return normal;
+    }
+  }
+}
+
+class WrongQuestionTrainingRecord {
+  const WrongQuestionTrainingRecord({
+    required this.id,
+    required this.wrongQuestionId,
+    required this.causeTags,
+    required this.status,
+    required this.createdAt,
+    this.completedAt,
+  });
+
+  final int id;
+  final int wrongQuestionId;
+  final List<String> causeTags;
+  final String status;
+  final DateTime createdAt;
+  final DateTime? completedAt;
+
+  bool get isCompleted => status == WrongQuestionTrainingStatus.completed;
+
+  factory WrongQuestionTrainingRecord.fromMap(Map<String, Object?> map) {
+    final createdAt = (map['created_at'] as String?) ?? '';
+    final completedAt = (map['completed_at'] as String?) ?? '';
+
+    return WrongQuestionTrainingRecord(
+      id: map['id'] as int,
+      wrongQuestionId: map['wrong_question_id'] as int,
+      causeTags: _decodeTags((map['cause_tags_json'] as String?) ?? '[]'),
+      status:
+          (map['status'] as String?)?.trim() ??
+          WrongQuestionTrainingStatus.pending,
+      createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
+      completedAt: completedAt.isEmpty
+          ? null
+          : DateTime.tryParse(completedAt)?.toLocal(),
+    );
+  }
+
+  static List<String> _decodeTags(String jsonText) {
+    final decoded = jsonDecode(jsonText);
+    if (decoded is! List) {
+      return const <String>[];
+    }
+    return decoded
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+}
+
+class WrongQuestionTrainingStatus {
+  const WrongQuestionTrainingStatus._();
+
+  static const String pending = 'pending';
+  static const String completed = 'completed';
 }
 
 class GeneratedContentRecord {

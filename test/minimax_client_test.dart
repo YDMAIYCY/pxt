@@ -222,6 +222,35 @@ void main() {
         expect(requestBody?['response_format'], {'type': 'json_object'});
       },
     );
+
+    test('reports connection aborts as retryable provider network errors', () {
+      final client = MiniMaxClient(
+        apiKey: 'test-key',
+        provider: LlmProvider.kimi,
+        endpoint: Uri.parse('https://api.moonshot.cn/v1/chat/completions'),
+        model: 'kimi-k2.5',
+        httpClient: MockClient((request) async {
+          throw http.ClientException(
+            'Software caused connection abort',
+            request.url,
+          );
+        }),
+      );
+
+      expect(
+        () => client.generateStructuredJson(
+          systemPrompt: '只返回 JSON',
+          userPrompt: '生成知识卡片',
+        ),
+        throwsA(
+          isA<MiniMaxException>().having(
+            (error) => error.message,
+            'message',
+            allOf(contains('Kimi 网络连接中断'), contains('请检查网络')),
+          ),
+        ),
+      );
+    });
   });
 }
 

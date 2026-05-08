@@ -51,11 +51,10 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       throw StateError('登录状态已失效');
     }
 
-    final questions = await _aiGenerationRepository
-        .fetchPracticeQuestionsByUser(
-          userId: user.id,
-          reviewStatus: PracticeQuestionReviewStatus.pending,
-        );
+    final questions = await _aiGenerationRepository.fetchReviewQueueByUser(
+      userId: user.id,
+      limit: 300,
+    );
     final initialId = widget.initialQuestionId;
     if (initialId != null) {
       final index = questions.indexWhere(
@@ -63,6 +62,15 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       );
       if (index >= 0) {
         _currentIndex = index;
+      } else {
+        final selected = await _aiGenerationRepository
+            .fetchPracticeQuestionByUserAndId(
+              userId: user.id,
+              questionId: initialId,
+            );
+        if (selected != null) {
+          return [selected, ...questions];
+        }
       }
     }
     return questions;
@@ -122,8 +130,8 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       _isSaving = true;
     });
     try {
-      await _aiGenerationRepository.resetPracticeQuestionForReview(
-        question.id,
+      await _aiGenerationRepository.markPracticeQuestionWrong(
+        questionId: question.id,
         userAnswer: _answerController.text,
       );
       if (!mounted) {
@@ -367,6 +375,17 @@ class _QuestionCard extends StatelessWidget {
             const SizedBox(height: 10),
             _ChipText(text: '难度：${question.difficulty}'),
           ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ChipText(text: '掌握度 ${question.masteryScore}'),
+              _ChipText(text: '错 ${question.wrongCount} 次'),
+              if (question.nextReviewAt != null)
+                _ChipText(text: '下次 ${_formatTime(question.nextReviewAt!)}'),
+            ],
+          ),
         ],
       ),
     );
@@ -503,4 +522,9 @@ class _StatePanel extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatTime(DateTime time) {
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${time.month}-${two(time.day)} ${two(time.hour)}:${two(time.minute)}';
 }

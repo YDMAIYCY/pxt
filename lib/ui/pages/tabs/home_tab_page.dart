@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import '../../../camera/document_input_contract.dart';
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
+import '../../../database/document_batch_repository.dart';
 import '../../../database/knowledge_library_repository.dart';
 import '../../../database/models/ai_result_records.dart';
+import '../../../database/models/document_batch_record.dart';
 import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/models/user_profile.dart';
@@ -14,7 +16,9 @@ import '../../../database/source_document_repository.dart';
 import '../../../pipeline/document_ingest_service.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../ai_generation_page.dart';
+import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
+import '../../../game/games_hub_page.dart';
 import '../practice_review_page.dart';
 
 class HomeTabPage extends StatefulWidget {
@@ -22,6 +26,7 @@ class HomeTabPage extends StatefulWidget {
     this.authRepository,
     this.sourceDocumentRepository,
     this.aiGenerationRepository,
+    this.documentBatchRepository,
     this.knowledgeLibraryRepository,
     this.documentIngestService,
     this.detailPageBuilder,
@@ -31,6 +36,7 @@ class HomeTabPage extends StatefulWidget {
   final AuthRepository? authRepository;
   final SourceDocumentRepository? sourceDocumentRepository;
   final AiGenerationRepository? aiGenerationRepository;
+  final DocumentBatchRepository? documentBatchRepository;
   final KnowledgeLibraryRepository? knowledgeLibraryRepository;
   final DocumentIngestService? documentIngestService;
   final Widget Function(int documentId)? detailPageBuilder;
@@ -43,6 +49,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
   late final AuthRepository _authRepository;
   late final SourceDocumentRepository _sourceDocumentRepository;
   late final AiGenerationRepository _aiGenerationRepository;
+  late final DocumentBatchRepository _documentBatchRepository;
   late final KnowledgeLibraryRepository _knowledgeLibraryRepository;
   late final DocumentIngestService _documentIngestService;
   late Future<_HomeData> _future;
@@ -56,6 +63,8 @@ class _HomeTabPageState extends State<HomeTabPage> {
         widget.sourceDocumentRepository ?? SourceDocumentRepository();
     _aiGenerationRepository =
         widget.aiGenerationRepository ?? AiGenerationRepository();
+    _documentBatchRepository =
+        widget.documentBatchRepository ?? DocumentBatchRepository();
     _knowledgeLibraryRepository =
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
     _documentIngestService =
@@ -71,7 +80,15 @@ class _HomeTabPageState extends State<HomeTabPage> {
     }
 
     final recentDocuments = await _sourceDocumentRepository
-        .fetchRecentSourceDocuments(userId: user.id, limit: 6);
+        .fetchRecentSourceDocuments(
+          userId: user.id,
+          includeBatchPages: false,
+          limit: 6,
+        );
+    final recentBatches = await _documentBatchRepository.fetchRecentBatches(
+      userId: user.id,
+      limit: 4,
+    );
     final recentContents = await _aiGenerationRepository
         .fetchRecentGeneratedContents(userId: user.id, limit: 8);
     final stats = await _aiGenerationRepository.fetchStudyOverviewStats(
@@ -80,6 +97,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
 
     return _HomeData(
       user: user,
+      recentBatches: recentBatches,
       recentDocuments: recentDocuments,
       recentContents: recentContents,
       stats: stats,
@@ -129,6 +147,51 @@ class _HomeTabPageState extends State<HomeTabPage> {
     } catch (error) {
       if (mounted) {
         _showMessage('导入失败：$error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleBatchImport(BatchDocumentInputSource source) async {
+    if (_isImporting) {
+      return;
+    }
+    setState(() {
+      _isImporting = true;
+    });
+
+    try {
+      final user = await _authRepository.getCurrentUserProfile();
+      if (user == null) {
+        _showMessage('登录状态已失效，请重新登录');
+        return;
+      }
+
+      final library = await _chooseLibraryForImport(user.id);
+      if (!mounted || library == null) {
+        return;
+      }
+
+      final batch = await _documentIngestService.importBatchFromInput(
+        userId: user.id,
+        libraryId: library.id,
+        source: source,
+      );
+      if (!mounted || batch == null) {
+        return;
+      }
+      await _openBatch(batch.id);
+      if (mounted) {
+        await _refresh();
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage('批量导入失败：$error');
       }
     } finally {
       if (mounted) {
@@ -249,6 +312,17 @@ class _HomeTabPageState extends State<HomeTabPage> {
     }
   }
 
+  Future<void> _openBatch(int batchId) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DocumentBatchDetailPage(batchId: batchId),
+      ),
+    );
+    if (mounted) {
+      await _refresh();
+    }
+  }
+
   Future<void> _openAiGeneration(List<SourceDocumentRecord> documents) async {
     final target = documents.cast<SourceDocumentRecord?>().firstWhere(
       (item) => item?.ocrDone == true,
@@ -273,6 +347,15 @@ class _HomeTabPageState extends State<HomeTabPage> {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const PracticeReviewPage()));
+    if (mounted) {
+      await _refresh();
+    }
+  }
+
+  Future<void> _openGames() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const GamesHubPage()));
     if (mounted) {
       await _refresh();
     }
@@ -322,8 +405,19 @@ class _HomeTabPageState extends State<HomeTabPage> {
                             _handleImageImport(ImageInputSource.camera),
                         onGallery: () =>
                             _handleImageImport(ImageInputSource.gallery),
+                        onMultiImage: () => _handleBatchImport(
+                          BatchDocumentInputSource.multiImage,
+                        ),
+                        onPdf: () =>
+                            _handleBatchImport(BatchDocumentInputSource.pdf),
                         onAi: () => _openAiGeneration(data.recentDocuments),
                         onPractice: _openPractice,
+                        onGames: _openGames,
+                      ),
+                      const SizedBox(height: 14),
+                      _RecentBatchesSection(
+                        batches: data.recentBatches,
+                        onOpenBatch: _openBatch,
                       ),
                       const SizedBox(height: 14),
                       _RecentDocumentsSection(
@@ -393,15 +487,21 @@ class _QuickActions extends StatelessWidget {
     required this.isImporting,
     required this.onCamera,
     required this.onGallery,
+    required this.onMultiImage,
+    required this.onPdf,
     required this.onAi,
     required this.onPractice,
+    required this.onGames,
   });
 
   final bool isImporting;
   final VoidCallback onCamera;
   final VoidCallback onGallery;
+  final VoidCallback onMultiImage;
+  final VoidCallback onPdf;
   final VoidCallback onAi;
   final VoidCallback onPractice;
+  final VoidCallback onGames;
 
   @override
   Widget build(BuildContext context) {
@@ -433,6 +533,22 @@ class _QuickActions extends StatelessWidget {
               SizedBox(
                 width: width,
                 child: _ActionTile(
+                  icon: Icons.photo_library_rounded,
+                  title: '多图导入',
+                  onTap: isImporting ? null : onMultiImage,
+                ),
+              ),
+              SizedBox(
+                width: width,
+                child: _ActionTile(
+                  icon: Icons.picture_as_pdf_rounded,
+                  title: '导入 PDF',
+                  onTap: isImporting ? null : onPdf,
+                ),
+              ),
+              SizedBox(
+                width: width,
+                child: _ActionTile(
                   icon: Icons.auto_awesome_rounded,
                   title: '生成 AI 结果',
                   onTap: onAi,
@@ -446,10 +562,47 @@ class _QuickActions extends StatelessWidget {
                   onTap: onPractice,
                 ),
               ),
+              SizedBox(
+                width: width,
+                child: _ActionTile(
+                  icon: Icons.games_rounded,
+                  title: '益智游戏',
+                  onTap: onGames,
+                ),
+              ),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+class _RecentBatchesSection extends StatelessWidget {
+  const _RecentBatchesSection({
+    required this.batches,
+    required this.onOpenBatch,
+  });
+
+  final List<DocumentBatchRecord> batches;
+  final Future<void> Function(int batchId) onOpenBatch;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section(
+      title: '最近学习包',
+      child: batches.isEmpty
+          ? const _EmptyHint(text: '多图或 PDF 导入后，会在这里形成学习包。')
+          : Column(
+              children: batches
+                  .map(
+                    (batch) => _BatchTile(
+                      batch: batch,
+                      onTap: () => onOpenBatch(batch.id),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
     );
   }
 }
@@ -634,6 +787,32 @@ class _DocumentTile extends StatelessWidget {
       title: document.title,
       subtitle:
           '${document.createdAtLabel} / OCR ${document.ocrStatusLabel} / AI ${document.aiDone ? '已生成' : '待生成'}',
+    );
+  }
+}
+
+class _BatchTile extends StatelessWidget {
+  const _BatchTile({required this.batch, required this.onTap});
+
+  final DocumentBatchRecord batch;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ListTileShell(
+      onTap: onTap,
+      leading: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE0F2FE),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Icon(Icons.folder_copy_rounded, color: Color(0xFF0C4A6E)),
+      ),
+      title: batch.title,
+      subtitle:
+          '${batch.sourceTypeLabel} / ${batch.pageCount} 页 / ${batch.createdAtLabel}',
     );
   }
 }
@@ -853,12 +1032,14 @@ class _StatePanel extends StatelessWidget {
 class _HomeData {
   const _HomeData({
     required this.user,
+    required this.recentBatches,
     required this.recentDocuments,
     required this.recentContents,
     required this.stats,
   });
 
   final UserProfile user;
+  final List<DocumentBatchRecord> recentBatches;
   final List<SourceDocumentRecord> recentDocuments;
   final List<GeneratedContentRecord> recentContents;
   final StudyOverviewStats stats;

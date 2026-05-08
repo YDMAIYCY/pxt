@@ -10,11 +10,12 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 7;
+  static const int databaseVersion = 9;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
   static const String tableKnowledgeLibraries = 'knowledge_libraries';
+  static const String tableDocumentBatches = 'document_batches';
   static const String tableSourceDocuments = 'source_documents';
   static const String tableOcrTexts = 'ocr_texts';
   static const String tableAiGenerationTasks = 'ai_generation_tasks';
@@ -25,6 +26,7 @@ class AppDatabase {
   static const String tableLlmProviderConfigs = 'llm_provider_configs';
   static const String tableWrongQuestionExplanations =
       'wrong_question_explanations';
+  static const String tableWrongQuestionTrainings = 'wrong_question_trainings';
 
   Database? _database;
 
@@ -101,10 +103,28 @@ class AppDatabase {
     ''');
 
     await db.execute('''
+      CREATE TABLE $tableDocumentBatches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        library_id INTEGER,
+        source_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        original_file_path TEXT,
+        page_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL
+      );
+    ''');
+
+    await db.execute('''
       CREATE TABLE $tableSourceDocuments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         library_id INTEGER,
+        batch_id INTEGER,
+        page_number INTEGER,
         source_type TEXT NOT NULL,
         image_path TEXT NOT NULL,
         original_title TEXT,
@@ -113,7 +133,8 @@ class AppDatabase {
         ocr_updated_at TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
-        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL,
+        FOREIGN KEY(batch_id) REFERENCES $tableDocumentBatches(id) ON DELETE CASCADE
       );
     ''');
 
@@ -192,8 +213,15 @@ class AppDatabase {
         last_user_answer TEXT,
         last_reviewed_at TEXT,
         wrong_count INTEGER NOT NULL DEFAULT 0,
+        next_review_at TEXT,
+        mastery_score INTEGER NOT NULL DEFAULT 0,
+        review_interval_days INTEGER NOT NULL DEFAULT 0,
+        correct_streak INTEGER NOT NULL DEFAULT 0,
+        parent_question_id INTEGER,
+        question_kind TEXT NOT NULL DEFAULT 'normal',
         created_at TEXT NOT NULL,
-        FOREIGN KEY(document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE
+        FOREIGN KEY(document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE,
+        FOREIGN KEY(parent_question_id) REFERENCES $tablePracticeQuestions(id) ON DELETE CASCADE
       );
     ''');
 
@@ -225,6 +253,18 @@ class AppDatabase {
       );
     ''');
 
+    await db.execute('''
+      CREATE TABLE $tableWrongQuestionTrainings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wrong_question_id INTEGER NOT NULL,
+        cause_tags_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY(wrong_question_id) REFERENCES $tablePracticeQuestions(id) ON DELETE CASCADE
+      );
+    ''');
+
     await db.execute(
       'CREATE INDEX idx_users_username ON $tableUsers(username);',
     );
@@ -235,10 +275,19 @@ class AppDatabase {
       'CREATE INDEX idx_libraries_user_id ON $tableKnowledgeLibraries(user_id);',
     );
     await db.execute(
+      'CREATE INDEX idx_document_batches_user_id ON $tableDocumentBatches(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_document_batches_library_id ON $tableDocumentBatches(library_id);',
+    );
+    await db.execute(
       'CREATE INDEX idx_documents_user_id ON $tableSourceDocuments(user_id);',
     );
     await db.execute(
       'CREATE INDEX idx_documents_library_id ON $tableSourceDocuments(library_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_documents_batch_id ON $tableSourceDocuments(batch_id);',
     );
     await db.execute(
       'CREATE INDEX idx_documents_ocr_status ON $tableSourceDocuments(ocr_status);',
@@ -254,6 +303,18 @@ class AppDatabase {
     );
     await db.execute(
       'CREATE INDEX idx_practice_review_status ON $tablePracticeQuestions(review_status);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_practice_next_review_at ON $tablePracticeQuestions(next_review_at);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_practice_parent_question_id ON $tablePracticeQuestions(parent_question_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_wrong_question_trainings_question_id ON $tableWrongQuestionTrainings(wrong_question_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_wrong_question_trainings_status ON $tableWrongQuestionTrainings(status);',
     );
     await db.execute(
       'CREATE INDEX idx_llm_configs_user_id ON $tableLlmProviderConfigs(user_id);',
@@ -282,6 +343,12 @@ class AppDatabase {
     }
     if (oldVersion < 7) {
       await _upgradePracticeQuestionsToV7(db);
+    }
+    if (oldVersion < 8) {
+      await _upgradeDocumentBatchesToV8(db);
+    }
+    if (oldVersion < 9) {
+      await _upgradePracticeSchedulingToV9(db);
     }
   }
 
@@ -438,6 +505,147 @@ class AppDatabase {
     );
   }
 
+  Future<void> _upgradeDocumentBatchesToV8(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableDocumentBatches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        library_id INTEGER,
+        source_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        original_file_path TEXT,
+        page_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL
+      );
+    ''');
+
+    if (await _tableExists(db, tableSourceDocuments)) {
+      await _addColumnIfMissing(
+        db,
+        tableSourceDocuments,
+        'batch_id',
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableSourceDocuments,
+        'page_number',
+        'INTEGER',
+      );
+    }
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_batches_user_id ON $tableDocumentBatches(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_batches_library_id ON $tableDocumentBatches(library_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_documents_batch_id ON $tableSourceDocuments(batch_id);',
+    );
+  }
+
+  Future<void> _upgradePracticeSchedulingToV9(Database db) async {
+    if (!await _tableExists(db, tablePracticeQuestions)) {
+      return;
+    }
+
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'next_review_at',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'mastery_score',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'review_interval_days',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'correct_streak',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'parent_question_id',
+      'INTEGER',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'question_kind',
+      "TEXT NOT NULL DEFAULT 'normal'",
+    );
+
+    final now = DateTime.now().toUtc();
+    final nowText = now.toIso8601String();
+    final masteredReviewText = now
+        .add(const Duration(days: 30))
+        .toIso8601String();
+    await db.rawUpdate(
+      '''
+      UPDATE $tablePracticeQuestions
+      SET next_review_at = CASE
+            WHEN review_status = 'mastered' THEN ?
+            ELSE ?
+          END,
+          mastery_score = CASE
+            WHEN review_status = 'mastered' THEN 100
+            WHEN review_status = 'wrong' THEN 20
+            ELSE 0
+          END,
+          review_interval_days = CASE
+            WHEN review_status = 'mastered' THEN 30
+            ELSE 0
+          END,
+          question_kind = 'normal'
+      WHERE next_review_at IS NULL
+         OR TRIM(next_review_at) = ''
+         OR question_kind IS NULL
+         OR TRIM(question_kind) = '';
+      ''',
+      [masteredReviewText, nowText],
+    );
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableWrongQuestionTrainings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wrong_question_id INTEGER NOT NULL,
+        cause_tags_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY(wrong_question_id) REFERENCES $tablePracticeQuestions(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_practice_next_review_at ON $tablePracticeQuestions(next_review_at);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_practice_parent_question_id ON $tablePracticeQuestions(parent_question_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_wrong_question_trainings_question_id ON $tableWrongQuestionTrainings(wrong_question_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_wrong_question_trainings_status ON $tableWrongQuestionTrainings(status);',
+    );
+  }
+
   // 兼容历史版本中“版本号已升级但列缺失”的异常状态，启动时自动补齐。
   Future<void> _ensureSchemaConsistency(Database db) async {
     await db.execute('''
@@ -492,6 +700,18 @@ class AppDatabase {
       await _addColumnIfMissing(
         db,
         tableSourceDocuments,
+        'batch_id',
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableSourceDocuments,
+        'page_number',
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableSourceDocuments,
         'ocr_status',
         "TEXT NOT NULL DEFAULT 'pending'",
       );
@@ -529,6 +749,9 @@ class AppDatabase {
       );
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_documents_library_id ON $tableSourceDocuments(library_id);',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_documents_batch_id ON $tableSourceDocuments(batch_id);',
       );
       await db.execute('''
         UPDATE $tableSourceDocuments
@@ -582,8 +805,10 @@ class AppDatabase {
       );
     }
 
+    await _upgradeDocumentBatchesToV8(db);
     await _upgradeLlmConfigsToV6(db);
     await _upgradePracticeQuestionsToV7(db);
+    await _upgradePracticeSchedulingToV9(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

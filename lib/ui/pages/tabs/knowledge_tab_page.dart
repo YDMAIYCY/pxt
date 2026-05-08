@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
+import '../../../database/document_batch_repository.dart';
 import '../../../database/knowledge_library_repository.dart';
 import '../../../database/models/ai_result_records.dart';
+import '../../../database/models/document_batch_record.dart';
 import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
+import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
 
 // ========== 知识库 Tab ==========
@@ -18,6 +21,7 @@ class KnowledgeTabPage extends StatefulWidget {
     this.authRepository,
     this.sourceDocumentRepository,
     this.aiGenerationRepository,
+    this.documentBatchRepository,
     this.knowledgeLibraryRepository,
     super.key,
   });
@@ -25,6 +29,7 @@ class KnowledgeTabPage extends StatefulWidget {
   final AuthRepository? authRepository;
   final SourceDocumentRepository? sourceDocumentRepository;
   final AiGenerationRepository? aiGenerationRepository;
+  final DocumentBatchRepository? documentBatchRepository;
   final KnowledgeLibraryRepository? knowledgeLibraryRepository;
 
   @override
@@ -35,6 +40,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   late final AuthRepository _authRepository;
   late final SourceDocumentRepository _sourceDocumentRepository;
   late final AiGenerationRepository _aiGenerationRepository;
+  late final DocumentBatchRepository _documentBatchRepository;
   late final KnowledgeLibraryRepository _knowledgeLibraryRepository;
   late Future<_KnowledgeData> _future;
   String _selectedType = _KnowledgeType.documents;
@@ -48,6 +54,8 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         widget.sourceDocumentRepository ?? SourceDocumentRepository();
     _aiGenerationRepository =
         widget.aiGenerationRepository ?? AiGenerationRepository();
+    _documentBatchRepository =
+        widget.documentBatchRepository ?? DocumentBatchRepository();
     _knowledgeLibraryRepository =
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
     _future = _loadData();
@@ -63,6 +71,11 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
     final libraries = await _knowledgeLibraryRepository.fetchLibraries(user.id);
     final selectedLibrary = _resolveSelectedLibrary(libraries);
     final documents = await _sourceDocumentRepository.fetchAllSourceDocuments(
+      userId: user.id,
+      libraryId: selectedLibrary.id,
+      limit: 300,
+    );
+    final batches = await _documentBatchRepository.fetchRecentBatches(
       userId: user.id,
       libraryId: selectedLibrary.id,
       limit: 300,
@@ -84,6 +97,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       userId: user.id,
       libraries: libraries,
       selectedLibrary: selectedLibrary,
+      batches: batches,
       documents: documents,
       contents: contents,
       wrongQuestions: wrongQuestions,
@@ -121,6 +135,17 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DocumentDetailPage(documentId: documentId),
+      ),
+    );
+    if (mounted) {
+      await _refresh();
+    }
+  }
+
+  Future<void> _openBatch(int batchId) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DocumentBatchDetailPage(batchId: batchId),
       ),
     );
     if (mounted) {
@@ -315,6 +340,49 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
     }
   }
 
+  Future<void> _deleteBatch(_KnowledgeData data, int batchId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('删除这个学习包？'),
+          content: const Text('会同时删除学习包下全部页资料、OCR 文本、AI 结果、复习题和错题记录。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+              ),
+              child: const Text('删除'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await _documentBatchRepository.deleteBatch(
+        userId: data.userId,
+        batchId: batchId,
+      );
+      if (mounted) {
+        _showMessage('学习包已删除');
+        await _refresh();
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage('删除学习包失败：$error');
+      }
+    }
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -388,6 +456,13 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   List<_KnowledgeTypeItem> _buildTypeItems(_KnowledgeData data) {
     return [
       _KnowledgeTypeItem(
+        type: _KnowledgeType.batches,
+        title: '学习包',
+        count: data.batches.length,
+        icon: Icons.folder_copy_rounded,
+        color: const Color(0xFFECFEFF),
+      ),
+      _KnowledgeTypeItem(
         type: _KnowledgeType.documents,
         title: '讲义资料',
         count: data.documents.length,
@@ -433,6 +508,27 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   }
 
   Widget _buildSelectedList(_KnowledgeData data) {
+    if (_selectedType == _KnowledgeType.batches) {
+      if (data.batches.isEmpty) {
+        return const _EmptyListHint(text: '这个知识库还没有多页学习包。');
+      }
+      return Column(
+        children: data.batches
+            .map(
+              (batch) => _ContentTile(
+                title: batch.title,
+                subtitle:
+                    '${batch.sourceTypeLabel} / ${batch.pageCount} 页 / ${batch.createdAtLabel}',
+                body: '点进学习包后可以逐页 OCR、生成 AI 结果和刷题。',
+                onTap: () => _openBatch(batch.id),
+                onMove: null,
+                onDelete: () => _deleteBatch(data, batch.id),
+              ),
+            )
+            .toList(growable: false),
+      );
+    }
+
     if (_selectedType == _KnowledgeType.documents) {
       if (data.documents.isEmpty) {
         return const _EmptyListHint(text: '这个知识库还没有讲义资料。');
@@ -751,7 +847,7 @@ class _ContentTile extends StatelessWidget {
   final String subtitle;
   final String body;
   final VoidCallback onTap;
-  final VoidCallback onMove;
+  final VoidCallback? onMove;
   final VoidCallback onDelete;
 
   @override
@@ -784,7 +880,7 @@ class _BaseTile extends StatelessWidget {
   final String subtitle;
   final String body;
   final VoidCallback onTap;
-  final VoidCallback onMove;
+  final VoidCallback? onMove;
   final VoidCallback onDelete;
 
   @override
@@ -852,14 +948,21 @@ class _BaseTile extends StatelessWidget {
                   ),
                   onSelected: (value) {
                     if (value == 'move') {
-                      onMove();
+                      onMove?.call();
                     } else if (value == 'delete') {
                       onDelete();
                     }
                   },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 'move', child: Text('移动到其他知识库')),
-                    PopupMenuItem(value: 'delete', child: Text('删除资料和结果')),
+                  itemBuilder: (context) => [
+                    if (onMove != null)
+                      const PopupMenuItem(
+                        value: 'move',
+                        child: Text('移动到其他知识库'),
+                      ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('删除资料和结果'),
+                    ),
                   ],
                 ),
               ],
@@ -989,6 +1092,7 @@ class _KnowledgeData {
     required this.userId,
     required this.libraries,
     required this.selectedLibrary,
+    required this.batches,
     required this.documents,
     required this.contents,
     required this.wrongQuestions,
@@ -997,12 +1101,16 @@ class _KnowledgeData {
   final int userId;
   final List<KnowledgeLibraryRecord> libraries;
   final KnowledgeLibraryRecord selectedLibrary;
+  final List<DocumentBatchRecord> batches;
   final List<SourceDocumentRecord> documents;
   final List<GeneratedContentRecord> contents;
   final List<PracticeQuestionWithDocument> wrongQuestions;
 
   int get totalCount =>
-      documents.length + contents.length + wrongQuestions.length;
+      batches.length +
+      documents.length +
+      contents.length +
+      wrongQuestions.length;
 
   int countByType(String type) => contentsOf(type).length;
 
@@ -1017,6 +1125,7 @@ class _KnowledgeType {
   const _KnowledgeType._();
 
   static const String documents = 'documents';
+  static const String batches = 'batches';
   static const String cards = 'knowledge_cards';
   static const String outlines = 'review_outline';
   static const String mindmaps = 'mindmap_text';
