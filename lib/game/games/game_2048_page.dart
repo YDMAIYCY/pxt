@@ -10,162 +10,99 @@ class Game2048Page extends StatefulWidget {
 }
 
 class _Game2048PageState extends State<Game2048Page> {
-  static const _size = 4;
-  final _random = Random();
+  static const _n = 4;
+  final _rng = Random();
 
-  late List<List<int>> _grid;
+  List<List<int>> _grid = List.generate(_n, (_) => List.filled(_n, 0));
   int _score = 0;
-  bool _gameOver = false;
-  bool _won = false;
+  bool _over = false;
 
-  static const _bgColors = {
-    0: Color(0xFFCDC1B4),
-    2: Color(0xFFEEE4DA),
-    4: Color(0xFFEDE0C8),
-    8: Color(0xFFF2B179),
-    16: Color(0xFFF59563),
-    32: Color(0xFFF67C5F),
-    64: Color(0xFFF65E3B),
-    128: Color(0xFFEDCF72),
-    256: Color(0xFFEDCC61),
-    512: Color(0xFFEDC850),
-    1024: Color(0xFFEDC53F),
-    2048: Color(0xFFEDC22E),
+  static const _bg = {
+    0:    Color(0xFFCDC1B4), 2: Color(0xFFEEE4DA), 4: Color(0xFFEDE0C8),
+    8:    Color(0xFFF2B179), 16: Color(0xFFF59563), 32: Color(0xFFF67C5F),
+    64:   Color(0xFFF65E3B), 128: Color(0xFFEDCF72), 256: Color(0xFFEDCC61),
+    512:  Color(0xFFEDC850), 1024: Color(0xFFEDC53F), 2048: Color(0xFFEDC22E),
   };
-
-  static const _textColors = {
-    0: Color(0xFFCDC1B4),
-    2: Color(0xFF776E65),
-    4: Color(0xFF776E65),
-    8: Colors.white,
-    16: Colors.white,
-    32: Colors.white,
-    64: Colors.white,
-    128: Colors.white,
-    256: Colors.white,
-    512: Colors.white,
-    1024: Colors.white,
-    2048: Colors.white,
+  static const _fg = {
+    2: Color(0xFF776E65), 4: Color(0xFF776E65), 8: Colors.white,
+    16: Colors.white, 32: Colors.white, 64: Colors.white, 128: Colors.white,
+    256: Colors.white, 512: Colors.white, 1024: Colors.white, 2048: Colors.white,
   };
+  Color _cbg(int v) => _bg[v] ?? const Color(0xFF3C3A32);
+  Color _cfg(int v) => _fg[v] ?? Colors.white;
+  double _fs(int v) => v < 100 ? 28 : v < 1000 ? 24 : v < 10000 ? 18 : 14;
 
   @override
   void initState() {
     super.initState();
-    _reset();
+    _add(); _add();
   }
 
-  void _reset() {
-    _grid = List.generate(_size, (_) => List.filled(_size, 0));
-    _score = 0;
-    _gameOver = false;
-    _won = false;
-    _spawnTile();
-    _spawnTile();
-  }
-
-  void _spawnTile() {
-    final empty = <(int, int)>[];
-    for (var r = 0; r < _size; r++) {
-      for (var c = 0; c < _size; c++) {
-        if (_grid[r][c] == 0) empty.add((r, c));
-      }
+  void _add() {
+    final empty = <int>[];
+    for (var i = 0; i < _n * _n; i++) {
+      if (_grid[i ~/ _n][i % _n] == 0) empty.add(i);
     }
     if (empty.isEmpty) return;
-    final (r, c) = empty[_random.nextInt(empty.length)];
-    _grid[r][c] = _random.nextDouble() < 0.9 ? 2 : 4;
+    final idx = empty[_rng.nextInt(empty.length)];
+    _grid[idx ~/ _n][idx % _n] = _rng.nextDouble() < 0.9 ? 2 : 4;
   }
 
-  bool _canMove() {
-    for (var r = 0; r < _size; r++) {
-      for (var c = 0; c < _size; c++) {
+  bool _alive() {
+    for (var r = 0; r < _n; r++) {
+      for (var c = 0; c < _n; c++) {
         if (_grid[r][c] == 0) return true;
-        if (_grid[r][c] == 2048 && !_won) {
-          _won = true;
-        }
-        if (c < _size - 1 && _grid[r][c] == _grid[r][c + 1]) return true;
-        if (r < _size - 1 && _grid[r][c] == _grid[r + 1][c]) return true;
+        if (c < _n - 1 && _grid[r][c] == _grid[r][c + 1]) return true;
+        if (r < _n - 1 && _grid[r][c] == _grid[r + 1][c]) return true;
       }
     }
     return false;
   }
 
-  List<int> _slideLine(List<int> line) {
-    final filtered = line.where((v) => v != 0).toList();
-    final merged = <int>[];
+  List<int> _merge(List<int> row) {
+    final f = row.where((v) => v != 0).toList();
+    final m = <int>[];
     var i = 0;
-    while (i < filtered.length) {
-      if (i + 1 < filtered.length && filtered[i] == filtered[i + 1]) {
-        merged.add(filtered[i] * 2);
-        _score += filtered[i] * 2;
-        i += 2;
-      } else {
-        merged.add(filtered[i]);
-        i++;
-      }
+    while (i < f.length) {
+      if (i + 1 < f.length && f[i] == f[i + 1]) { m.add(f[i] * 2); _score += f[i] * 2; i += 2; }
+      else { m.add(f[i]); i++; }
     }
-    while (merged.length < _size) {
-      merged.add(0);
-    }
-    return merged;
+    while (m.length < _n) { m.add(0); }
+    return m;
   }
 
-  void _move(Direction dir) {
-    if (_gameOver) return;
-
-    final oldGrid = _grid.map((row) => List<int>.from(row)).toList();
-    final oldScore = _score;
-
-    switch (dir) {
+  void _swipe(Direction d) {
+    if (_over) return;
+    final old = _grid.map((r) => List<int>.from(r)).toList();
+    switch (d) {
       case Direction.left:
-        for (var r = 0; r < _size; r++) {
-          _grid[r] = _slideLine(_grid[r]);
-        }
+        for (var r = 0; r < _n; r++) { _grid[r] = _merge(_grid[r]); }
       case Direction.right:
-        for (var r = 0; r < _size; r++) {
-          _grid[r] = _slideLine(_grid[r].reversed.toList()).reversed.toList();
-        }
+        for (var r = 0; r < _n; r++) { _grid[r] = _merge(_grid[r].reversed.toList()).reversed.toList(); }
       case Direction.up:
-        for (var c = 0; c < _size; c++) {
-          final col = _slideLine(List.generate(_size, (r) => _grid[r][c]));
-          for (var r = 0; r < _size; r++) {
-            _grid[r][c] = col[r];
-          }
+        for (var c = 0; c < _n; c++) {
+          final col = _merge([for (var r = 0; r < _n; r++) _grid[r][c]]);
+          for (var r = 0; r < _n; r++) { _grid[r][c] = col[r]; }
         }
       case Direction.down:
-        for (var c = 0; c < _size; c++) {
-          final col = _slideLine(List.generate(_size, (r) => _grid[_size - 1 - r][c]));
-          for (var r = 0; r < _size; r++) {
-            _grid[_size - 1 - r][c] = col[r];
-          }
+        for (var c = 0; c < _n; c++) {
+          final col = _merge([for (var r = _n - 1; r >= 0; r--) _grid[r][c]]);
+          for (var r = 0; r < _n; r++) { _grid[_n - 1 - r][c] = col[r]; }
         }
     }
-
     var moved = false;
-    for (var r = 0; r < _size; r++) {
-      for (var c = 0; c < _size; c++) {
-        if (_grid[r][c] != oldGrid[r][c]) moved = true;
-      }
+    for (var r = 0; r < _n; r++) {
+      for (var c = 0; c < _n; c++) { if (_grid[r][c] != old[r][c]) moved = true; }
     }
-
-    if (moved) {
-      _spawnTile();
-      if (!_canMove()) _gameOver = true;
-      setState(() {});
-    } else {
-      _score = oldScore;
-    }
-  }
-
-  Color _tileBg(int value) => _bgColors[value] ?? const Color(0xFF3C3A32);
-  Color _tileTextColor(int value) => _textColors[value] ?? Colors.white;
-  double _tileFontSize(int value) {
-    if (value < 100) return 28;
-    if (value < 1000) return 24;
-    return 18;
+    if (moved) { _add(); if (!_alive()) _over = true; setState(() {}); }
   }
 
   @override
   Widget build(BuildContext context) {
+    final sw = MediaQuery.of(context).size.width;
+    final gap = 6.0;
+    final size = (sw - 32 - gap * (_n + 1)) / _n;
+
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8EF),
       appBar: AppBar(
@@ -173,90 +110,72 @@ class _Game2048PageState extends State<Game2048Page> {
         backgroundColor: const Color(0xFFEC4899),
         foregroundColor: Colors.white,
         actions: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Text('得分: $_score', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            ),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(child: Text('得分: $_score', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
           ),
         ],
       ),
       body: GestureDetector(
-        onHorizontalDragEnd: (details) {
-          if (details.primaryVelocity == null) return;
-          if (details.primaryVelocity! < -30) {
-            _move(Direction.left);
-          } else if (details.primaryVelocity! > 30) {
-            _move(Direction.right);
-          }
+        onHorizontalDragEnd: (d) {
+          if (d.primaryVelocity == null) return;
+          if (d.primaryVelocity! < -30) _swipe(Direction.left);
+          if (d.primaryVelocity! > 30) _swipe(Direction.right);
         },
-        onVerticalDragEnd: (details) {
-          if (details.primaryVelocity == null) return;
-          if (details.primaryVelocity! < -30) {
-            _move(Direction.up);
-          } else if (details.primaryVelocity! > 30) {
-            _move(Direction.down);
-          }
+        onVerticalDragEnd: (d) {
+          if (d.primaryVelocity == null) return;
+          if (d.primaryVelocity! < -30) _swipe(Direction.up);
+          if (d.primaryVelocity! > 30) _swipe(Direction.down);
         },
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('滑动合并数字', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF776E65))),
-                    FilledButton.tonal(
-                      onPressed: () => setState(() => _reset()),
-                      child: const Text('新游戏'),
-                    ),
-                  ],
-                ),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('滑动合并数字', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF776E65))),
+                  FilledButton.tonal(onPressed: () => setState(() { _grid = List.generate(_n, (_) => List.filled(_n, 0)); _score = 0; _over = false; _add(); _add(); }), child: const Text('新游戏')),
+                ]),
                 const SizedBox(height: 16),
-                Expanded(
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: const Color(0xFFBBADA0), borderRadius: BorderRadius.circular(12)),
-                      child: Stack(
-                        children: [
-                          Column(
-                            children: List.generate(_size, (r) {
-                              return Expanded(
-                                child: Row(
-                                  children: List.generate(_size, (c) {
-                                    final value = _grid[r][c];
-                                    return Expanded(
-                                      child: Container(
-                                        margin: const EdgeInsets.all(4),
-                                        decoration: BoxDecoration(color: _tileBg(value), borderRadius: BorderRadius.circular(8)),
-                                        child: Center(
-                                          child: value > 0
-                                              ? Text('$value', style: TextStyle(fontSize: _tileFontSize(value), fontWeight: FontWeight.w800, color: _tileTextColor(value)))
-                                              : null,
-                                        ),
-                                      ),
-                                    );
-                                  }),
-                                ),
-                              );
-                            }),
-                          ),
-                          if (_gameOver)
+                Center(
+                  child: Container(
+                    padding: EdgeInsets.all(gap),
+                    decoration: BoxDecoration(color: const Color(0xFFBBADA0), borderRadius: BorderRadius.circular(12)),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      for (var r = 0; r < _n; r++)
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          for (var c = 0; c < _n; c++)
                             Container(
-                              decoration: BoxDecoration(color: const Color(0xFFEEE4DA).withValues(alpha: 0.73), borderRadius: BorderRadius.circular(8)),
-                              child: const Center(
-                                child: Text('游戏结束', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Color(0xFF776E65))),
+                              width: size, height: size,
+                              margin: EdgeInsets.all(gap / 2),
+                              decoration: BoxDecoration(
+                                color: _cbg(_grid[r][c]),
+                                borderRadius: BorderRadius.circular(8),
                               ),
+                              alignment: Alignment.center,
+                              child: _grid[r][c] > 0
+                                  ? FittedBox(child: Text('${_grid[r][c]}', style: TextStyle(fontSize: _fs(_grid[r][c]), fontWeight: FontWeight.w800, color: _cfg(_grid[r][c]))))
+                                  : null,
                             ),
-                        ],
-                      ),
-                    ),
+                        ]),
+                    ]),
                   ),
                 ),
-              ],
+                if (_over) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(color: const Color(0xFFEEE4DA).withValues(alpha: 0.9), borderRadius: BorderRadius.circular(12)),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      const Text('游戏结束', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF776E65))),
+                      const SizedBox(height: 8),
+                      Text('得分: $_score', style: const TextStyle(fontSize: 18, color: Color(0xFF776E65))),
+                      const SizedBox(height: 12),
+                      FilledButton(onPressed: () => setState(() { _grid = List.generate(_n, (_) => List.filled(_n, 0)); _score = 0; _over = false; _add(); _add(); }), child: const Text('重新开始')),
+                    ]),
+                  ),
+                ],
+              ]),
             ),
           ),
         ),

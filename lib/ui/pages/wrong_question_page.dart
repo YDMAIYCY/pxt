@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../database/auth_repository.dart';
 import '../../database/llm_config_repository.dart';
@@ -190,11 +191,11 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
     final question = widget.item.question;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('处理错题'),
         backgroundColor: Colors.transparent,
-        foregroundColor: const Color(0xFF0B1324),
+        foregroundColor: AppColors.textPrimary,
       ),
       body: FutureBuilder<_TrainingData>(
         future: _trainingFuture,
@@ -306,7 +307,7 @@ class _TrainingCard extends StatelessWidget {
           Text(
             '还没有错因标签和相似题。',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF64748B),
+              color: AppColors.textSecondary,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -334,7 +335,7 @@ class _TrainingCard extends StatelessWidget {
         Text(
           '相似题 ${data.masteredSimilarCount} / ${data.similarQuestions.length}',
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            color: const Color(0xFF0B1324),
+            color: AppColors.textPrimary,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -375,7 +376,7 @@ class _SimilarQuestionTile extends StatelessWidget {
             : Icons.chevron_right_rounded,
         color: question.isMastered
             ? const Color(0xFF16A34A)
-            : const Color(0xFF64748B),
+            : AppColors.textSecondary,
       ),
     );
   }
@@ -416,7 +417,7 @@ class _InfoCard extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -444,7 +445,7 @@ class _TextBlock extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: const Color(0xFF64748B),
+              color: AppColors.textSecondary,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -452,7 +453,7 @@ class _TextBlock extends StatelessWidget {
           SelectableText(
             text,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               height: 1.45,
             ),
           ),

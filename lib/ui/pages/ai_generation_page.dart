@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../database/auth_repository.dart';
 import '../../database/llm_config_repository.dart';
@@ -258,11 +259,11 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('AI 生成结果'),
         backgroundColor: Colors.transparent,
-        foregroundColor: const Color(0xFF0B1324),
+        foregroundColor: AppColors.textPrimary,
       ),
       body: FutureBuilder<_AiPageData>(
         future: _pageFuture,
@@ -406,7 +407,7 @@ class _GenerationHeader extends StatelessWidget {
           Text(
             document.title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -416,7 +417,7 @@ class _GenerationHeader extends StatelessWidget {
                 ? 'OCR 文本和 AI 配置已就绪，可进行单项生成或一键生成全部结果。'
                 : '请先完成 OCR，并到“我的”页配置 AI 大模型 API Key。',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF64748B),
+              color: AppColors.textSecondary,
               height: 1.45,
             ),
           ),
@@ -424,7 +425,7 @@ class _GenerationHeader extends StatelessWidget {
           Text(
             modelText,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF0C4A6E),
+              color: AppColors.primary,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -490,7 +491,7 @@ class _TaskActionCard extends StatelessWidget {
                 child: Text(
                   taskLabel,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: const Color(0xFF0B1324),
+                    color: AppColors.textPrimary,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -566,7 +567,7 @@ class _TaskActionCard extends StatelessWidget {
   Color _taskStatusColor(String status) {
     switch (status) {
       case AiTaskStatus.running:
-        return const Color(0xFF0C4A6E);
+        return AppColors.primary;
       case AiTaskStatus.completed:
         return const Color(0xFF166534);
       case AiTaskStatus.failed:
@@ -598,7 +599,7 @@ class _ResultSection extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -623,7 +624,7 @@ class _SimpleResultCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: AppColors.background,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -632,7 +633,7 @@ class _SimpleResultCard extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -670,7 +671,7 @@ class _QuestionResultCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: AppColors.background,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -679,7 +680,7 @@ class _QuestionResultCard extends StatelessWidget {
           Text(
             questionText,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -688,7 +689,7 @@ class _QuestionResultCard extends StatelessWidget {
             Text(
               '难度：$difficulty',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF0C4A6E),
+                color: AppColors.primary,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -767,13 +768,13 @@ class _AiStatePanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: const Color(0xFF64748B)),
+            Icon(icon, size: 48, color: AppColors.textSecondary),
             const SizedBox(height: 14),
             Text(
               title,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
-                color: const Color(0xFF0B1324),
+                color: AppColors.textPrimary,
               ),
             ),
             const SizedBox(height: 8),
@@ -781,7 +782,7 @@ class _AiStatePanel extends StatelessWidget {
               description,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF64748B),
+                color: AppColors.textSecondary,
                 height: 1.45,
               ),
             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../database/auth_repository.dart';
 import '../../database/models/ai_result_records.dart';
@@ -160,11 +161,11 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('刷复习题'),
         backgroundColor: Colors.transparent,
-        foregroundColor: const Color(0xFF0B1324),
+        foregroundColor: AppColors.textPrimary,
       ),
       body: FutureBuilder<List<PracticeQuestionWithDocument>>(
         future: _future,
@@ -330,14 +331,14 @@ class _ProgressHeader extends StatelessWidget {
             '第 ${currentIndex + 1} / $total 题',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
             ),
           ),
           const SizedBox(height: 6),
           Text(
             documentTitle,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF64748B),
+              color: AppColors.textSecondary,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -367,7 +368,7 @@ class _QuestionCard extends StatelessWidget {
             question.questionText,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               height: 1.45,
             ),
           ),
@@ -411,7 +412,7 @@ class _AnswerCard extends StatelessWidget {
           Text(
             '正确答案',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -421,7 +422,7 @@ class _AnswerCard extends StatelessWidget {
                 ? question.answerText!
                 : '暂无答案',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               height: 1.45,
             ),
           ),
@@ -429,7 +430,7 @@ class _AnswerCard extends StatelessWidget {
           Text(
             '解析',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -459,13 +460,13 @@ class _ChipText extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFE0F2FE),
+        color: AppColors.primarySoft,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
         style: const TextStyle(
-          color: Color(0xFF0C4A6E),
+          color: AppColors.primary,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -496,7 +497,7 @@ class _StatePanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: const Color(0xFF64748B)),
+            Icon(icon, size: 48, color: AppColors.textSecondary),
             const SizedBox(height: 12),
             Text(
               title,
@@ -510,7 +511,7 @@ class _StatePanel extends StatelessWidget {
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
             FilledButton(
