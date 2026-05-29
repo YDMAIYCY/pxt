@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:pxt1/camera/document_input_contract.dart';
@@ -95,6 +97,61 @@ void main() {
         '概率论讲义 第2页',
       ]);
     });
+
+    test(
+      'cleans rendered pages and original PDF copy when batch insert fails',
+      () async {
+        final tempDirectory = Directory.systemTemp.createTempSync(
+          'stage11-batch-cleanup',
+        );
+        addTearDown(() {
+          if (tempDirectory.existsSync()) {
+            tempDirectory.deleteSync(recursive: true);
+          }
+        });
+
+        final pdfCopy = File('${tempDirectory.path}\\stored.pdf');
+        final pageOne = File('${tempDirectory.path}\\page-1.png');
+        final pageTwo = File('${tempDirectory.path}\\page-2.png');
+        await pdfCopy.writeAsBytes(<int>[1]);
+        await pageOne.writeAsBytes(<int>[2]);
+        await pageTwo.writeAsBytes(<int>[3]);
+
+        final service = DocumentIngestService(
+          batchInputPort: _FakeBatchInputPort(
+            StoredBatchSelection(
+              source: BatchDocumentInputSource.pdf,
+              title: 'failed-pdf',
+              originalFilePath: pdfCopy.path,
+              pages: [
+                StoredDocumentPage(
+                  savedPath: pageOne.path,
+                  originalName: 'page-1',
+                ),
+                StoredDocumentPage(
+                  savedPath: pageTwo.path,
+                  originalName: 'page-2',
+                ),
+              ],
+            ),
+          ),
+          documentBatchRepository: _ThrowingDocumentBatchRepository(),
+        );
+
+        await expectLater(
+          service.importBatchFromInput(
+            userId: 7,
+            libraryId: 4,
+            source: BatchDocumentInputSource.pdf,
+          ),
+          throwsException,
+        );
+
+        expect(pdfCopy.existsSync(), isFalse);
+        expect(pageOne.existsSync(), isFalse);
+        expect(pageTwo.existsSync(), isFalse);
+      },
+    );
   });
 }
 
@@ -150,5 +207,20 @@ class _RecordingDocumentBatchRepository extends DocumentBatchRepository {
       createdAt: DateTime(2026),
       updatedAt: DateTime(2026),
     );
+  }
+}
+
+class _ThrowingDocumentBatchRepository extends DocumentBatchRepository {
+  @override
+  Future<DocumentBatchRecord> createDocumentBatch({
+    required int userId,
+    int? libraryId,
+    required String sourceType,
+    required String pageSourceType,
+    required String title,
+    required String? originalFilePath,
+    required List<DocumentBatchPageDraft> pages,
+  }) async {
+    throw Exception('database write failed');
   }
 }

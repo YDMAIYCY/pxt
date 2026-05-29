@@ -76,6 +76,7 @@ class DocumentIngestService {
         pages: _buildPageDrafts(storedBatch),
       );
     } catch (_) {
+      await _cleanupStoredFile(storedBatch.originalFilePath);
       for (final page in storedBatch.pages) {
         await _cleanupStoredFile(page.savedPath);
       }
@@ -183,7 +184,11 @@ class DocumentIngestService {
     return '$month-$day $hour:$minute';
   }
 
-  Future<void> _cleanupStoredFile(String savedPath) async {
+  Future<void> _cleanupStoredFile(String? savedPath) async {
+    if (savedPath == null || savedPath.trim().isEmpty) {
+      return;
+    }
+
     try {
       final storedFile = File(savedPath);
       if (await storedFile.exists()) {

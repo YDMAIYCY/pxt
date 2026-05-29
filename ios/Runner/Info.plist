@@ -68,5 +68,7 @@
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于选择头像和个人主页背景图。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍照导入学习资料。</string>
 </dict>
 </plist>

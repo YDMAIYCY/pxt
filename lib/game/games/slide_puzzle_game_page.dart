@@ -174,7 +174,9 @@ class _SlidePuzzleGamePageState extends State<SlidePuzzleGamePage> {
   Widget _buildPuzzle() {
     const gap = 6.0;
     return LayoutBuilder(builder: (context, constraints) {
-      final tileSize = _size == 3 ? 100.0 : 76.0;
+      final preferredTileSize = _size == 3 ? 100.0 : 76.0;
+      final fittedTileSize = (constraints.maxWidth - (_size - 1) * gap) / _size;
+      final tileSize = min(preferredTileSize, max(0.0, fittedTileSize));
       final gridWidth = _size * tileSize + (_size - 1) * gap;
       return Center(
         child: SizedBox(

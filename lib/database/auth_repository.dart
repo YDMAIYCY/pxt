@@ -1,10 +1,6 @@
-import 'dart:convert';
-import 'dart:math';
-
-import 'package:crypto/crypto.dart';
-
 import 'app_database.dart';
 import 'models/user_profile.dart';
+import 'password_hasher.dart';
 
 // ========== 认证结果模型 ==========
 // 统一返回登录、注册等认证动作的结果。
@@ -130,9 +126,12 @@ class AuthRepository {
 
       final salt = user['password_salt'] as String;
       final savedHash = user['password_hash'] as String;
-      final currentHash = _hashPassword(salt: salt, password: password);
 
-      if (savedHash != currentHash) {
+      if (!PasswordHasher.verify(
+        salt: salt,
+        password: password,
+        storedHash: savedHash,
+      )) {
         return const AuthResult(success: false, message: '密码错误');
       }
 
@@ -142,7 +141,12 @@ class AuthRepository {
       await db.transaction((txn) async {
         await txn.update(
           AppDatabase.tableUsers,
-          {'last_login_at': now, 'updated_at': now},
+          {
+            'last_login_at': now,
+            'updated_at': now,
+            if (PasswordHasher.shouldRehash(savedHash))
+              'password_hash': _hashPassword(salt: salt, password: password),
+          },
           where: 'id = ?',
           whereArgs: [userId],
         );
@@ -258,23 +262,15 @@ class AuthRepository {
   // ========== 密码与会话工具 ==========
 
   String _generateSalt() {
-    final random = Random();
-    final saltBytes = List<int>.generate(16, (_) => random.nextInt(256));
-    return base64UrlEncode(saltBytes);
+    return PasswordHasher.generateSalt();
   }
 
   String _hashPassword({required String salt, required String password}) {
-    final source = '$salt:$password';
-    final digest = sha256.convert(utf8.encode(source));
-    return digest.toString();
+    return PasswordHasher.hash(salt: salt, password: password);
   }
 
   String _buildSessionToken(int userId) {
-    final random = Random();
-    final tokenBytes = List<int>.generate(16, (_) => random.nextInt(256));
-    final randomToken = base64UrlEncode(tokenBytes);
-    final timestamp = DateTime.now().microsecondsSinceEpoch;
-    return '$userId-$timestamp-$randomToken';
+    return PasswordHasher.buildSessionToken(userId);
   }
 
   static const String _defaultBio = '记录今天的学习灵感，慢慢长成自己的知识库。';

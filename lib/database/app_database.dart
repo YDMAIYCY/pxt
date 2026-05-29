@@ -114,7 +114,7 @@ class AppDatabase {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
-        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE
       );
     ''');
 
@@ -133,7 +133,7 @@ class AppDatabase {
         ocr_updated_at TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
-        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
         FOREIGN KEY(batch_id) REFERENCES $tableDocumentBatches(id) ON DELETE CASCADE
       );
     ''');
@@ -518,7 +518,7 @@ class AppDatabase {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
-        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE SET NULL
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE
       );
     ''');
 

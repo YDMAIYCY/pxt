@@ -99,9 +99,11 @@ class _Game2048PageState extends State<Game2048Page> {
 
   @override
   Widget build(BuildContext context) {
-    final sw = MediaQuery.of(context).size.width;
     final gap = 6.0;
-    final size = (sw - 32 - gap * (_n + 1)) / _n;
+    final mediaQuery = MediaQuery.of(context);
+    final availableWidth = max(0.0, mediaQuery.size.width -
+        mediaQuery.padding.horizontal - 32);
+    final size = max(0.0, (availableWidth - gap * (_n + 2)) / _n);
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8EF),
@@ -132,9 +134,15 @@ class _Game2048PageState extends State<Game2048Page> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  const Text('滑动合并数字', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF776E65))),
-                  FilledButton.tonal(onPressed: () => setState(() { _grid = List.generate(_n, (_) => List.filled(_n, 0)); _score = 0; _over = false; _add(); _add(); }), child: const Text('新游戏')),
+                Row(children: [
+                  const Expanded(child: Text('滑动合并数字', overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF776E65)))),
+                  const SizedBox(width: 12),
+                  FilledButton.tonal(
+                      style: FilledButton.styleFrom(minimumSize: const Size(88, 44),
+                          padding: const EdgeInsets.symmetric(horizontal: 16)),
+                      onPressed: () => setState(() { _grid = List.generate(_n, (_) => List.filled(_n, 0)); _score = 0; _over = false; _add(); _add(); }),
+                      child: const Text('新游戏')),
                 ]),
                 const SizedBox(height: 16),
                 Center(

@@ -29,21 +29,25 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final AuthRepository _authRepository = AuthRepository();
+  final ValueNotifier<int> _refreshNotifier = ValueNotifier<int>(0);
+  final ValueNotifier<int> _activeTabNotifier = ValueNotifier<int>(0);
 
   int _currentIndex = 0;
   bool _isCheckingSession = true;
-
-  static const _tabs = [
-    HomeTabPage(),
-    KnowledgeTabPage(),
-    TasksTabPage(),
-    ProfileTabPage(),
-  ];
+  late final List<Widget> _tabs;
 
   @override
   void initState() {
     super.initState();
+    _tabs = _buildTabs();
     _ensureActiveSession();
+  }
+
+  @override
+  void dispose() {
+    _refreshNotifier.dispose();
+    _activeTabNotifier.dispose();
+    super.dispose();
   }
 
   Future<void> _ensureActiveSession() async {
@@ -53,12 +57,57 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
 
     if (currentUser == null) {
-      Navigator.of(context)
-          .pushNamedAndRemoveUntil(LoginPage.routeName, (route) => false);
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(LoginPage.routeName, (route) => false);
       return;
     }
 
     setState(() => _isCheckingSession = false);
+  }
+
+  void _notifyDataChanged() {
+    if (!mounted) return;
+    _refreshNotifier.value++;
+  }
+
+  void _selectTab(int index) {
+    if (index < 0 || index >= _bottomDockItems.length) return;
+    setState(() {
+      _currentIndex = index;
+    });
+    _activeTabNotifier.value = index;
+    _refreshNotifier.value++;
+  }
+
+  List<Widget> _buildTabs() {
+    return [
+      HomeTabPage(
+        tabIndex: 0,
+        refreshListenable: _refreshNotifier,
+        activeTabListenable: _activeTabNotifier,
+        onDataChanged: _notifyDataChanged,
+      ),
+      KnowledgeTabPage(
+        tabIndex: 1,
+        refreshListenable: _refreshNotifier,
+        activeTabListenable: _activeTabNotifier,
+        onDataChanged: _notifyDataChanged,
+      ),
+      TasksTabPage(
+        tabIndex: 2,
+        refreshListenable: _refreshNotifier,
+        activeTabListenable: _activeTabNotifier,
+        onDataChanged: _notifyDataChanged,
+      ),
+      ProfileTabPage(
+        tabIndex: 3,
+        refreshListenable: _refreshNotifier,
+        activeTabListenable: _activeTabNotifier,
+        onOpenTab: _selectTab,
+        onDataChanged: _notifyDataChanged,
+      ),
+    ];
   }
 
   @override
@@ -77,7 +126,7 @@ class _HomePageState extends State<HomePage> {
           : _FloatingBottomDock(
               currentIndex: _currentIndex,
               items: _bottomDockItems,
-              onSelect: (index) => setState(() => _currentIndex = index),
+              onSelect: _selectTab,
             ),
     );
   }
@@ -171,8 +220,9 @@ class _DockButton extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                  color:
-                      isSelected ? AppColors.primary : AppColors.textTertiary,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textTertiary,
                 ),
               ),
             ],

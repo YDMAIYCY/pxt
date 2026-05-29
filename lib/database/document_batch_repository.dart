@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../common/source_document_file_store.dart';
 import 'app_database.dart';
 import 'models/document_batch_record.dart';
 import 'models/source_document_record.dart';
@@ -8,10 +9,14 @@ import 'models/source_document_record.dart';
 // 管理 PDF / 多图批量导入形成的学习包，以及学习包下的页资料。
 
 class DocumentBatchRepository {
-  DocumentBatchRepository({AppDatabase? database})
-    : _database = database ?? AppDatabase.instance;
+  DocumentBatchRepository({
+    AppDatabase? database,
+    SourceDocumentFileStore? fileStore,
+  }) : _database = database ?? AppDatabase.instance,
+       _fileStore = fileStore ?? const SourceDocumentFileStore();
 
   final AppDatabase _database;
+  final SourceDocumentFileStore _fileStore;
 
   Future<DocumentBatchRecord> createDocumentBatch({
     required int userId,
@@ -202,7 +207,30 @@ class DocumentBatchRepository {
   Future<void> deleteBatch({required int userId, required int batchId}) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
+    final cleanupPaths = <String?>[];
     final deleted = await db.transaction((txn) async {
+      final batchRows = await txn.query(
+        AppDatabase.tableDocumentBatches,
+        columns: ['original_file_path'],
+        where: 'id = ? AND user_id = ?',
+        whereArgs: [batchId, userId],
+        limit: 1,
+      );
+      if (batchRows.isEmpty) {
+        return 0;
+      }
+      cleanupPaths.add(batchRows.first['original_file_path'] as String?);
+
+      final pageRows = await txn.query(
+        AppDatabase.tableSourceDocuments,
+        columns: ['image_path'],
+        where: 'batch_id = ? AND user_id = ?',
+        whereArgs: [batchId, userId],
+      );
+      cleanupPaths.addAll(
+        pageRows.map((row) => row['image_path'] as String?),
+      );
+
       await txn.delete(
         AppDatabase.tableSourceDocuments,
         where: 'batch_id = ? AND user_id = ?',
@@ -217,6 +245,7 @@ class DocumentBatchRepository {
     if (deleted == 0) {
       throw StateError('学习包不存在或无权删除');
     }
+    await _fileStore.deleteAllIfManaged(cleanupPaths);
   }
 
   Future<int?> _resolveLibraryId(

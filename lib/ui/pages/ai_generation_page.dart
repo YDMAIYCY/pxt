@@ -158,21 +158,24 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
       _generatingTaskTypes.add(taskType);
     });
 
-    final result = await _aiGenerationOrchestrator.generateSingle(
-      documentId: document!.id,
-      ocrText: ocrRecord!.cleanText,
-      taskType: taskType,
-      llmConfig: llmConfig,
-    );
-
-    if (!mounted) {
-      return;
-    }
-
-    _showMessage(result.message);
-
     try {
+      final result = await _aiGenerationOrchestrator.generateSingle(
+        documentId: document!.id,
+        ocrText: ocrRecord!.cleanText,
+        taskType: taskType,
+        llmConfig: llmConfig,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage(result.message);
       await _reloadPageData();
+    } catch (error) {
+      if (mounted) {
+        _showMessage('AI 生成失败：$error');
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -203,24 +206,27 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
       _isGeneratingAll = true;
     });
 
-    final batchResult = await _aiGenerationOrchestrator.generateAll(
-      documentId: document!.id,
-      ocrText: ocrRecord!.cleanText,
-      llmConfig: llmConfig,
-    );
-
-    if (!mounted) {
-      return;
-    }
-
-    final successCount = batchResult.results
-        .where((item) => item.success)
-        .length;
-    final failureCount = batchResult.results.length - successCount;
-    _showMessage('一键生成完成：成功 $successCount，失败 $failureCount');
-
     try {
+      final batchResult = await _aiGenerationOrchestrator.generateAll(
+        documentId: document!.id,
+        ocrText: ocrRecord!.cleanText,
+        llmConfig: llmConfig,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      final successCount = batchResult.results
+          .where((item) => item.success)
+          .length;
+      final failureCount = batchResult.results.length - successCount;
+      _showMessage('一键生成完成：成功 $successCount，失败 $failureCount');
       await _reloadPageData();
+    } catch (error) {
+      if (mounted) {
+        _showMessage('AI 生成失败：$error');
+      }
     } finally {
       if (mounted) {
         setState(() {

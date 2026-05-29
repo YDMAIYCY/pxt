@@ -247,16 +247,22 @@ class _MinesweeperGamePageState extends State<MinesweeperGamePage> {
   }
 
   Widget _buildGridWidget() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final gridWidth = screenWidth - 32 - 24;
-    final cellTotal = (gridWidth / _cols).floorToDouble().clamp(28.0, 42.0);
+    final mediaQuery = MediaQuery.of(context);
+    final availableWidth = mediaQuery.size.width -
+        mediaQuery.padding.horizontal - 32;
+    const gridPadding = 10.0;
+    const gap = 2.0;
+    final cellWidth = (availableWidth - gridPadding * 2 -
+            gap * (_cols - 1)) /
+        _cols;
+    final cellTotal = min(42.0, max(0.0, cellWidth.floorToDouble()));
     return Center(
       child: Container(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(gridPadding),
         decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
         child: Wrap(
-          spacing: 2,
-          runSpacing: 2,
+          spacing: gap,
+          runSpacing: gap,
           children: List.generate(_rows * _cols, (i) {
             final revealed = _revealed.contains(i);
             final flagged = _flagged.contains(i);

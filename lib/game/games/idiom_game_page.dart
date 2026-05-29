@@ -135,8 +135,10 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
   }
 
   double _cellSize(BuildContext context) {
-    final available = MediaQuery.of(context).size.width - 32 - 24 - (_gridSize - 1) * 4;
-    return (available / _gridSize).clamp(36.0, 56.0);
+    final mediaQuery = MediaQuery.of(context);
+    final available = mediaQuery.size.width - mediaQuery.padding.horizontal -
+        32 - 16 - _gridSize * 4;
+    return min(56.0, max(0.0, available / _gridSize));
   }
 
   @override
