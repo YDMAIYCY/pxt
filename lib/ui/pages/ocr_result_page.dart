@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../../database/auth_repository.dart';
 import '../../database/models/ocr_text_record.dart';
 import '../../database/models/source_document_record.dart';
@@ -190,11 +191,11 @@ class _OcrResultPageState extends State<OcrResultPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('OCR 结果'),
         backgroundColor: Colors.transparent,
-        foregroundColor: const Color(0xFF0B1324),
+        foregroundColor: AppColors.textPrimary,
       ),
       body: FutureBuilder<_OcrPageData>(
         future: _pageFuture,
@@ -261,7 +262,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
                     Text(
                       data.document.title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: const Color(0xFF0B1324),
+                        color: AppColors.textPrimary,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -271,7 +272,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
                           ? '失败原因：${data.document.ocrErrorMessage}'
                           : '支持识别后重试；你也可以直接手动编辑文本并保存。',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF64748B),
+                        color: AppColors.textSecondary,
                         height: 1.45,
                       ),
                     ),
@@ -333,7 +334,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFFBEB),
+                    color: const Color(0xFFFFF7ED),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Text(
@@ -379,7 +380,7 @@ class _TextEditorCard extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -395,7 +396,7 @@ class _TextEditorCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
               ),
               filled: true,
-              fillColor: const Color(0xFFF8FAFC),
+              fillColor: AppColors.background,
             ),
           ),
         ],
@@ -427,13 +428,13 @@ class _OcrStatePanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: const Color(0xFF64748B)),
+            Icon(icon, size: 48, color: AppColors.textSecondary),
             const SizedBox(height: 14),
             Text(
               title,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
-                color: const Color(0xFF0B1324),
+                color: AppColors.textPrimary,
               ),
             ),
             const SizedBox(height: 8),
@@ -441,7 +442,7 @@ class _OcrStatePanel extends StatelessWidget {
               description,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF64748B),
+                color: AppColors.textSecondary,
                 height: 1.45,
               ),
             ),
@@ -475,8 +476,8 @@ _OcrStatusStyle _ocrStyleOf(String status) {
   switch (status) {
     case SourceDocumentOcrStatus.processing:
       return const _OcrStatusStyle(
-        background: Color(0xFFE0F2FE),
-        foreground: Color(0xFF0C4A6E),
+        background: AppColors.primarySoft,
+        foreground: AppColors.primary,
       );
     case SourceDocumentOcrStatus.success:
       return const _OcrStatusStyle(

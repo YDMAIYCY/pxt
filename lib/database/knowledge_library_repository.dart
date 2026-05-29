@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../common/source_document_file_store.dart';
 import 'app_database.dart';
 import 'models/knowledge_library_record.dart';
 
@@ -7,10 +8,14 @@ import 'models/knowledge_library_record.dart';
 // 管理用户自定义知识库的创建、读取和删除。
 
 class KnowledgeLibraryRepository {
-  KnowledgeLibraryRepository({AppDatabase? database})
-    : _database = database ?? AppDatabase.instance;
+  KnowledgeLibraryRepository({
+    AppDatabase? database,
+    SourceDocumentFileStore? fileStore,
+  }) : _database = database ?? AppDatabase.instance,
+       _fileStore = fileStore ?? const SourceDocumentFileStore();
 
   final AppDatabase _database;
+  final SourceDocumentFileStore _fileStore;
 
   Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId) async {
     await _database.ensureSchemaReady();
@@ -100,6 +105,7 @@ class KnowledgeLibraryRepository {
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
+    final cleanupPaths = <String?>[];
 
     await db.transaction((txn) async {
       final rows = await txn.query(
@@ -113,8 +119,33 @@ class KnowledgeLibraryRepository {
         throw StateError('知识库不存在或无权删除');
       }
 
+      final documentRows = await txn.query(
+        AppDatabase.tableSourceDocuments,
+        columns: ['image_path'],
+        where: 'user_id = ? AND library_id = ?',
+        whereArgs: [userId, libraryId],
+      );
+      cleanupPaths.addAll(
+        documentRows.map((row) => row['image_path'] as String?),
+      );
+
+      final batchRows = await txn.query(
+        AppDatabase.tableDocumentBatches,
+        columns: ['original_file_path'],
+        where: 'user_id = ? AND library_id = ?',
+        whereArgs: [userId, libraryId],
+      );
+      cleanupPaths.addAll(
+        batchRows.map((row) => row['original_file_path'] as String?),
+      );
+
       await txn.delete(
         AppDatabase.tableSourceDocuments,
+        where: 'user_id = ? AND library_id = ?',
+        whereArgs: [userId, libraryId],
+      );
+      await txn.delete(
+        AppDatabase.tableDocumentBatches,
         where: 'user_id = ? AND library_id = ?',
         whereArgs: [userId, libraryId],
       );
@@ -125,6 +156,7 @@ class KnowledgeLibraryRepository {
       );
       await _ensureDefaultLibrary(txn, userId);
     });
+    await _fileStore.deleteAllIfManaged(cleanupPaths);
   }
 
   Future<int> _ensureDefaultLibrary(DatabaseExecutor db, int userId) async {

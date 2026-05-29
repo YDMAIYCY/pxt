@@ -56,7 +56,6 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
     while (true) {
       final path = _generatePath();
       if (path == null) continue;
-
       final fillerPool = (decoys + _answer).split('');
       _board = List.generate(_gridSize, (r) => List.generate(_gridSize, (c) => fillerPool[_random.nextInt(fillerPool.length)]));
       for (var i = 0; i < _answerChars.length; i++) {
@@ -73,7 +72,6 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
       final start = (_random.nextInt(_gridSize), _random.nextInt(_gridSize));
       final path = <(int, int)>[start];
       final used = <(int, int)>{start};
-
       while (path.length < _answerChars.length) {
         final (r, c) = path.last;
         final candidates = <(int, int)>[];
@@ -93,9 +91,7 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
     return null;
   }
 
-  bool _isAdjacent((int, int) a, (int, int) b) {
-    return (a.$1 - b.$1).abs() <= 1 && (a.$2 - b.$2).abs() <= 1;
-  }
+  bool _isAdjacent((int, int) a, (int, int) b) => (a.$1 - b.$1).abs() <= 1 && (a.$2 - b.$2).abs() <= 1;
 
   String get _selectedText => _selectedCells.map((c) => _board[c.$1][c.$2]).join();
 
@@ -109,39 +105,28 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
     final expectedChar = _answerChars[expectedIndex];
 
     if (expectedIndex > 0 && !_isAdjacent(_selectedCells.last, cell)) {
-      setState(() {
-        _selectedCells = [];
-        _mistakes++;
-        _feedback = '所选字必须和上一个字相邻，路径已清空。';
-      });
+      setState(() { _selectedCells = []; _mistakes++; _feedback = '所选字必须和上一个字相邻，路径已清空。'; });
       return;
     }
-
     if (chosenChar != expectedChar) {
-      setState(() {
-        _selectedCells = [];
-        _mistakes++;
-        _feedback = '你点到了"$chosenChar"，路径已清空。';
-      });
+      setState(() { _selectedCells = []; _mistakes++; _feedback = '点到了"$chosenChar"，路径已清空。'; });
       return;
     }
 
-    setState(() {
-      _selectedCells.add(cell);
-      if (_selectedCells.length == _answerChars.length) {
-        _correct++;
-        _questionIndex++;
-        if (_questionIndex >= _totalQuestions) {
-          _finished = true;
-          _feedback = '五道成语寻踪全部完成！';
-        } else {
-          _feedback = '找对了：$_answer，继续下一题。';
-          _loadQuestion();
-        }
+    _selectedCells.add(cell);
+    if (_selectedCells.length == _answerChars.length) {
+      _correct++;
+      _questionIndex++;
+      if (_questionIndex >= _totalQuestions) {
+        _finished = true;
+        setState(() => _feedback = '五道成语寻踪全部完成！');
       } else {
-        _feedback = '已找到 ${_selectedCells.length}/${_answerChars.length} 个字。';
+        setState(() => _feedback = '找对了：$_answer，继续下一题。');
+        _loadQuestion();
       }
-    });
+    } else {
+      setState(() => _feedback = '已找到 ${_selectedCells.length}/${_answerChars.length} 个字。');
+    }
   }
 
   int get _score {
@@ -149,8 +134,16 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
     return (base - _mistakes * 5 + 8).clamp(30, 100);
   }
 
+  double _cellSize(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final available = mediaQuery.size.width - mediaQuery.padding.horizontal -
+        32 - 16 - _gridSize * 4;
+    return min(56.0, max(0.0, available / _gridSize));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cellSize = _cellSize(context);
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -158,165 +151,108 @@ class _IdiomGamePageState extends State<IdiomGamePage> {
         backgroundColor: const Color(0xFF10B981),
         foregroundColor: Colors.white,
         actions: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Text('得分: $_score', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            ),
-          ),
+          Center(child: Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Text('得分: $_score', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          )),
         ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!_finished) ...[
-                LinearProgressIndicator(value: _questionIndex / _totalQuestions, backgroundColor: const Color(0xFFE2E8F0), valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981))),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('题目：${_questionIndex + 1}/$_totalQuestions', style: const TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
-                    Text('失误：$_mistakes', style: const TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 12),
-              _buildCluePanel(),
-              const SizedBox(height: 12),
-              _buildPathDisplay(),
-              const SizedBox(height: 12),
-              _buildGridWidget(),
-              const SizedBox(height: 12),
-              _buildControls(),
-              if (_feedback.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    _feedback,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: _feedback.contains('找对') || _finished ? const Color(0xFF16A34A) : const Color(0xFFEA580C), fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              if (_finished) _buildFinished(),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (!_finished) ...[
+              LinearProgressIndicator(value: _questionIndex / _totalQuestions, backgroundColor: const Color(0xFFE2E8F0), valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981))),
+              const SizedBox(height: 8),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text('题目：${_questionIndex + 1}/$_totalQuestions', style: const TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                Text('失误：$_mistakes', style: const TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w600)),
+              ]),
             ],
-          ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity, padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFA7F3D0))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('线索', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF065F46))),
+                const SizedBox(height: 4),
+                Text(_finished ? '五道题都完成了！' : _clue, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF0B1324))),
+                Text('目标：${_answerChars.length} 字成语', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity, padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF10B981))),
+              child: Column(children: [
+                const Text('当前路径', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                const SizedBox(height: 4),
+                Text(_selectedCells.isEmpty ? '尚未开始' : _selectedText.split('').join('  '),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _selectedCells.isEmpty ? const Color(0xFF94A3B8) : const Color(0xFF0B1324))),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            if (!_finished) Center(
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(_gridSize, (r) {
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(_gridSize, (c) {
+                        final selected = _selectedCells.contains((r, c));
+                        return GestureDetector(
+                          onTap: () => _tapCell(r, c),
+                          child: Container(
+                            width: cellSize, height: cellSize,
+                            margin: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: selected ? const Color(0xFF10B981) : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: selected ? const Color(0xFF059669) : const Color(0xFFE2E8F0), width: 1.5),
+                            ),
+                            child: Center(child: Text(_board[r][c],
+                                style: TextStyle(fontSize: cellSize * 0.38, fontWeight: FontWeight.w700, color: selected ? Colors.white : const Color(0xFF0B1324)))),
+                          ),
+                        );
+                      }),
+                    );
+                  }),
+                ),
+              ),
+            ),
+            if (!_finished) ...[
+              const SizedBox(height: 8),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => setState(() { _selectedCells = []; _feedback = '当前路径已手动清空。'; }),
+                  icon: const Icon(Icons.clear_rounded, color: Color(0xFFEF4444)),
+                  label: const Text('清空当前路径', style: TextStyle(color: Color(0xFFEF4444))),
+                ),
+              ),
+            ],
+            if (_feedback.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_feedback, textAlign: TextAlign.center,
+                    style: TextStyle(color: _feedback.contains('找对') || _finished ? const Color(0xFF16A34A) : const Color(0xFFEA580C), fontSize: 14, fontWeight: FontWeight.w600)),
+              ),
+            if (_finished) Center(
+              child: Column(children: [
+                const Icon(Icons.emoji_events_rounded, size: 56, color: Color(0xFFF59E0B)),
+                const SizedBox(height: 12),
+                Text('完成！答对 $_correct / $_totalQuestions 题', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                Text('累计失误 $_mistakes 次', style: const TextStyle(fontSize: 16, color: Color(0xFF64748B))),
+                Text('本关得分：$_score', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF10B981))),
+                const SizedBox(height: 20),
+                FilledButton.icon(onPressed: () => setState(() { _questionIndex = 0; _correct = 0; _mistakes = 0; _finished = false; _feedback = '根据释义，在字阵中按相邻路径找出完整成语。'; _puzzles = List<Map<String, String>>.from(_puzzleBank)..shuffle(_random); _loadQuestion(); }),
+                    icon: const Icon(Icons.refresh_rounded), label: const Text('再来一次')),
+              ]),
+            ),
+          ]),
         ),
-      ),
-    );
-  }
-
-  Widget _buildCluePanel() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFA7F3D0))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('线索', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF065F46))),
-          const SizedBox(height: 4),
-          Text(_finished ? '五道题都完成了！' : _clue, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF0B1324))),
-          Text('目标：${_answerChars.length} 字成语', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPathDisplay() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF10B981))),
-      child: Column(
-        children: [
-          const Text('当前路径', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
-          const SizedBox(height: 4),
-          Text(
-            _selectedCells.isEmpty ? '尚未开始' : _selectedText.split('').join('  '),
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _selectedCells.isEmpty ? const Color(0xFF94A3B8) : const Color(0xFF0B1324)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGridWidget() {
-    if (_finished) return const SizedBox.shrink();
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
-        child: Column(
-          children: List.generate(_gridSize, (r) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(_gridSize, (c) {
-                final selected = _selectedCells.contains((r, c));
-                return GestureDetector(
-                  onTap: () => _tapCell(r, c),
-                  child: Container(
-                    width: (_gridCellSize),
-                    height: (_gridCellSize),
-                    margin: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xFF10B981) : const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: selected ? const Color(0xFF059669) : const Color(0xFFE2E8F0), width: 2),
-                    ),
-                    child: Center(
-                      child: Text(
-                        _board[r][c],
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: selected ? Colors.white : const Color(0xFF0B1324)),
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-
-  double get _gridCellSize {
-    final screenWidth = MediaQuery.of(context).size.width;
-    return ((screenWidth - 80) / _gridSize).clamp(42.0, 64.0);
-  }
-
-  Widget _buildControls() {
-    if (_finished) return const SizedBox.shrink();
-    return Center(
-      child: TextButton.icon(
-        onPressed: () => setState(() {
-          _selectedCells = [];
-          _feedback = '当前路径已手动清空。';
-        }),
-        icon: const Icon(Icons.clear_rounded, color: Color(0xFFEF4444)),
-        label: const Text('清空当前路径', style: TextStyle(color: Color(0xFFEF4444))),
-      ),
-    );
-  }
-
-  Widget _buildFinished() {
-    return Center(
-      child: Column(
-        children: [
-          const Icon(Icons.emoji_events_rounded, size: 56, color: Color(0xFFF59E0B)),
-          const SizedBox(height: 12),
-          Text('完成！答对 $_correct / $_totalQuestions 题', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-          Text('累计失误 $_mistakes 次', style: const TextStyle(fontSize: 16, color: Color(0xFF64748B))),
-          Text('本关得分：$_score', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF10B981))),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: () => setState(() { _questionIndex = 0; _correct = 0; _mistakes = 0; _finished = false; _feedback = '根据释义，在字阵中按相邻路径找出完整成语。'; _puzzles = List<Map<String, String>>.from(_puzzleBank)..shuffle(_random); _loadQuestion(); }),
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('再来一次'),
-          ),
-        ],
       ),
     );
   }

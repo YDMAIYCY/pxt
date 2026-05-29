@@ -101,6 +101,9 @@ class LlmProviderConfig {
   String get effectiveBaseUrl {
     final normalized = _stripTrailingSlash(baseUrl.trim());
     if (normalized.isNotEmpty) {
+      if (usesTokenPlan && _isMiniMaxCompatibleBase(normalized)) {
+        return 'https://api.minimax.io/anthropic';
+      }
       return normalized;
     }
 
@@ -205,6 +208,37 @@ class LlmProviderConfig {
     );
   }
 
+  static String inferApiMode({
+    required String provider,
+    required String apiKey,
+    required String baseUrl,
+    String? currentApiMode,
+  }) {
+    final normalizedProvider = LlmProvider.normalize(provider);
+    final normalizedCurrent = LlmApiMode.normalize(
+      currentApiMode,
+      provider: normalizedProvider,
+    );
+
+    if (normalizedProvider != LlmProvider.minimax) {
+      return LlmApiMode.openAiCompatible;
+    }
+
+    final normalizedApiKey = apiKey.trim().toLowerCase();
+    final normalizedBaseUrl = _stripTrailingSlash(baseUrl).toLowerCase();
+    if (normalizedApiKey.startsWith('sk-cp-') ||
+        normalizedBaseUrl.contains('/anthropic')) {
+      return LlmApiMode.tokenPlan;
+    }
+
+    if (normalizedCurrent == LlmApiMode.tokenPlan &&
+        normalizedBaseUrl.isEmpty) {
+      return LlmApiMode.tokenPlan;
+    }
+
+    return LlmApiMode.openAiCompatible;
+  }
+
   factory LlmProviderConfig.fromMap(Map<String, Object?> map) {
     final rawCreatedAt = (map['created_at'] as String?)?.trim() ?? '';
     final rawUpdatedAt = (map['updated_at'] as String?)?.trim() ?? '';
@@ -275,6 +309,21 @@ class LlmProviderConfig {
       result = result.substring(0, result.length - 1);
     }
     return result;
+  }
+
+  static bool _isMiniMaxCompatibleBase(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || !uri.host.toLowerCase().contains('minimax')) {
+      return false;
+    }
+
+    final segments = uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .map((segment) => segment.toLowerCase())
+        .toList(growable: false);
+    return segments.isEmpty ||
+        segments.contains('v1') ||
+        _endsWithSegments(segments, const ['chat', 'completions']);
   }
 }
 

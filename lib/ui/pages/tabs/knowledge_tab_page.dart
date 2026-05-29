@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../database/ai_generation_repository.dart';
@@ -9,12 +10,10 @@ import '../../../database/models/document_batch_record.dart';
 import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
-
-// ========== 知识库 Tab ==========
-// 按用户选择的知识库读取资料、卡片、提纲、导图、复习题和错题讲解。
 
 class KnowledgeTabPage extends StatefulWidget {
   const KnowledgeTabPage({
@@ -23,6 +22,11 @@ class KnowledgeTabPage extends StatefulWidget {
     this.aiGenerationRepository,
     this.documentBatchRepository,
     this.knowledgeLibraryRepository,
+    this.refreshVersion = 0,
+    this.refreshListenable,
+    this.activeTabListenable,
+    this.tabIndex,
+    this.onDataChanged,
     super.key,
   });
 
@@ -31,6 +35,11 @@ class KnowledgeTabPage extends StatefulWidget {
   final AiGenerationRepository? aiGenerationRepository;
   final DocumentBatchRepository? documentBatchRepository;
   final KnowledgeLibraryRepository? knowledgeLibraryRepository;
+  final int refreshVersion;
+  final ValueListenable<int>? refreshListenable;
+  final ValueListenable<int>? activeTabListenable;
+  final int? tabIndex;
+  final VoidCallback? onDataChanged;
 
   @override
   State<KnowledgeTabPage> createState() => _KnowledgeTabPageState();
@@ -43,6 +52,8 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   late final DocumentBatchRepository _documentBatchRepository;
   late final KnowledgeLibraryRepository _knowledgeLibraryRepository;
   late Future<_KnowledgeData> _future;
+  late int _handledRefreshVersion;
+  bool _reloadScheduled = false;
   String _selectedType = _KnowledgeType.documents;
   int? _selectedLibraryId;
 
@@ -58,15 +69,61 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         widget.documentBatchRepository ?? DocumentBatchRepository();
     _knowledgeLibraryRepository =
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
+    _handledRefreshVersion = widget.refreshVersion;
+    widget.refreshListenable?.addListener(_handleExternalRefresh);
+    widget.activeTabListenable?.addListener(_handleExternalRefresh);
     _future = _loadData();
+  }
+
+  @override
+  void didUpdateWidget(covariant KnowledgeTabPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshListenable != widget.refreshListenable) {
+      oldWidget.refreshListenable?.removeListener(_handleExternalRefresh);
+      widget.refreshListenable?.addListener(_handleExternalRefresh);
+    }
+    if (oldWidget.activeTabListenable != widget.activeTabListenable) {
+      oldWidget.activeTabListenable?.removeListener(_handleExternalRefresh);
+      widget.activeTabListenable?.addListener(_handleExternalRefresh);
+    }
+    if (widget.refreshVersion != _handledRefreshVersion) {
+      _handledRefreshVersion = widget.refreshVersion;
+      _scheduleReload();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.refreshListenable?.removeListener(_handleExternalRefresh);
+    widget.activeTabListenable?.removeListener(_handleExternalRefresh);
+    super.dispose();
+  }
+
+  bool get _canHandleExternalRefresh {
+    final tabIndex = widget.tabIndex;
+    final activeTab = widget.activeTabListenable?.value;
+    return tabIndex == null || activeTab == null || activeTab == tabIndex;
+  }
+
+  void _handleExternalRefresh() {
+    if (!_canHandleExternalRefresh) return;
+    _scheduleReload();
+  }
+
+  void _scheduleReload() {
+    if (!mounted || _reloadScheduled) return;
+    _reloadScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _reloadScheduled = false;
+      _reload();
+    });
   }
 
   Future<_KnowledgeData> _loadData() async {
     await _authRepository.ensureInitialized();
     final user = await _authRepository.getCurrentUserProfile();
-    if (user == null) {
-      throw StateError('登录状态已失效');
-    }
+    if (user == null) throw StateError('登录状态已失效');
 
     final libraries = await _knowledgeLibraryRepository.fetchLibraries(user.id);
     final selectedLibrary = _resolveSelectedLibrary(libraries);
@@ -117,11 +174,23 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   }
 
   Future<void> _refresh() async {
-    final future = _loadData();
-    setState(() {
-      _future = future;
-    });
+    final future = _reload();
     await future;
+  }
+
+  Future<_KnowledgeData> _reload() {
+    final future = _loadData();
+    setState(() => _future = future);
+    return future;
+  }
+
+  Future<void> _afterDataChanged() async {
+    final onDataChanged = widget.onDataChanged;
+    if (onDataChanged != null) {
+      onDataChanged();
+      return;
+    }
+    await _refresh();
   }
 
   void _selectLibrary(int libraryId) {
@@ -137,9 +206,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         builder: (_) => DocumentDetailPage(documentId: documentId),
       ),
     );
-    if (mounted) {
-      await _refresh();
-    }
+    if (mounted) await _afterDataChanged();
   }
 
   Future<void> _openBatch(int batchId) async {
@@ -148,9 +215,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         builder: (_) => DocumentBatchDetailPage(batchId: batchId),
       ),
     );
-    if (mounted) {
-      await _refresh();
-    }
+    if (mounted) await _afterDataChanged();
   }
 
   Future<void> _createLibrary(int userId) async {
@@ -158,10 +223,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       context: context,
       builder: (_) => const CreateKnowledgeLibraryDialog(),
     );
-    if (name == null || name.trim().isEmpty) {
-      return;
-    }
-
+    if (name == null || name.trim().isEmpty) return;
     try {
       final library = await _knowledgeLibraryRepository.createLibrary(
         userId: userId,
@@ -170,44 +232,35 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       _selectedLibraryId = library.id;
       if (mounted) {
         _showMessage('已创建知识库：${library.name}');
-        await _refresh();
+        await _afterDataChanged();
       }
     } catch (error) {
-      if (mounted) {
-        _showMessage('创建知识库失败：$error');
-      }
+      if (mounted) _showMessage('创建知识库失败：$error');
     }
   }
 
   Future<void> _deleteCurrentLibrary(_KnowledgeData data) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('删除“${data.selectedLibrary.name}”？'),
-          content: Text(
-            '会同时删除这个知识库下的 ${data.documents.length} 份资料，以及相关 OCR 文本、AI 结果、复习题和错题记录。',
+      builder: (dialogContext) => AlertDialog(
+        title: Text('删除"${data.selectedLibrary.name}"？'),
+        content: Text(
+          '会同时删除这个知识库下的 ${data.documents.length} 份资料，以及相关 OCR 文本、AI 结果、复习题和错题记录。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFDC2626),
-              ),
-              child: const Text('确认删除'),
-            ),
-          ],
-        );
-      },
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
     );
-    if (confirmed != true) {
-      return;
-    }
-
+    if (confirmed != true) return;
     try {
       await _knowledgeLibraryRepository.deleteLibraryAndContents(
         userId: data.userId,
@@ -216,12 +269,10 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       _selectedLibraryId = null;
       if (mounted) {
         _showMessage('知识库已删除');
-        await _refresh();
+        await _afterDataChanged();
       }
     } catch (error) {
-      if (mounted) {
-        _showMessage('删除知识库失败：$error');
-      }
+      if (mounted) _showMessage('删除知识库失败：$error');
     }
   }
 
@@ -237,49 +288,38 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
     final targetId = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '移动到哪个知识库',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: const Color(0xFF0B1324),
-                    fontWeight: FontWeight.w800,
-                  ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('移动到哪个知识库', style: AppTextStyles.h3(sheetContext)),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 420),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: targetLibraries
+                      .map(
+                        (library) => ListTile(
+                          leading: const Icon(Icons.drive_file_move_rounded),
+                          title: Text(library.name),
+                          subtitle: Text('${library.documentCount} 份资料'),
+                          onTap: () =>
+                              Navigator.of(sheetContext).pop(library.id),
+                        ),
+                      )
+                      .toList(growable: false),
                 ),
-                const SizedBox(height: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 420),
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: targetLibraries
-                        .map(
-                          (library) => ListTile(
-                            leading: const Icon(Icons.drive_file_move_rounded),
-                            title: Text(library.name),
-                            subtitle: Text('${library.documentCount} 份资料'),
-                            onTap: () =>
-                                Navigator.of(sheetContext).pop(library.id),
-                          ),
-                        )
-                        .toList(growable: false),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
-    if (targetId == null) {
-      return;
-    }
-
+    if (targetId == null) return;
     try {
       await _sourceDocumentRepository.moveDocumentToLibrary(
         userId: data.userId,
@@ -288,42 +328,33 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       );
       if (mounted) {
         _showMessage('已移动到目标知识库');
-        await _refresh();
+        await _afterDataChanged();
       }
     } catch (error) {
-      if (mounted) {
-        _showMessage('移动失败：$error');
-      }
+      if (mounted) _showMessage('移动失败：$error');
     }
   }
 
   Future<void> _deleteDocument(_KnowledgeData data, int documentId) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('删除这份资料？'),
-          content: const Text('会同时删除它的 OCR 文本、AI 结果、复习题和错题记录。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFDC2626),
-              ),
-              child: const Text('删除'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除这份资料？'),
+        content: const Text('会同时删除它的 OCR 文本、AI 结果、复习题和错题记录。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
     );
-    if (confirmed != true) {
-      return;
-    }
-
+    if (confirmed != true) return;
     try {
       await _sourceDocumentRepository.deleteDocument(
         userId: data.userId,
@@ -331,42 +362,33 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       );
       if (mounted) {
         _showMessage('资料已删除');
-        await _refresh();
+        await _afterDataChanged();
       }
     } catch (error) {
-      if (mounted) {
-        _showMessage('删除失败：$error');
-      }
+      if (mounted) _showMessage('删除失败：$error');
     }
   }
 
   Future<void> _deleteBatch(_KnowledgeData data, int batchId) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('删除这个学习包？'),
-          content: const Text('会同时删除学习包下全部页资料、OCR 文本、AI 结果、复习题和错题记录。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFDC2626),
-              ),
-              child: const Text('删除'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除这个学习包？'),
+        content: const Text('会同时删除学习包下全部页资料、OCR 文本、AI 结果、复习题和错题记录。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
     );
-    if (confirmed != true) {
-      return;
-    }
-
+    if (confirmed != true) return;
     try {
       await _documentBatchRepository.deleteBatch(
         userId: data.userId,
@@ -374,12 +396,10 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       );
       if (mounted) {
         _showMessage('学习包已删除');
-        await _refresh();
+        await _afterDataChanged();
       }
     } catch (error) {
-      if (mounted) {
-        _showMessage('删除学习包失败：$error');
-      }
+      if (mounted) _showMessage('删除学习包失败：$error');
     }
   }
 
@@ -406,7 +426,6 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             onPressed: _refresh,
           );
         }
-
         final data = snapshot.data!;
         final typeItems = _buildTypeItems(data);
 
@@ -434,11 +453,8 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
                       _TypeSelector(
                         items: typeItems,
                         selectedType: _selectedType,
-                        onSelected: (type) {
-                          setState(() {
-                            _selectedType = type;
-                          });
-                        },
+                        onSelected: (type) =>
+                            setState(() => _selectedType = type),
                       ),
                       const SizedBox(height: 14),
                       _buildSelectedList(data),
@@ -460,14 +476,14 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         title: '学习包',
         count: data.batches.length,
         icon: Icons.folder_copy_rounded,
-        color: const Color(0xFFECFEFF),
+        color: const Color(0xFFF0FDFA),
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.documents,
         title: '讲义资料',
         count: data.documents.length,
         icon: Icons.menu_book_rounded,
-        color: const Color(0xFFE0F2FE),
+        color: const Color(0xFFEFF6FF),
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.cards,
@@ -528,7 +544,6 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             .toList(growable: false),
       );
     }
-
     if (_selectedType == _KnowledgeType.documents) {
       if (data.documents.isEmpty) {
         return const _EmptyListHint(text: '这个知识库还没有讲义资料。');
@@ -546,7 +561,6 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             .toList(growable: false),
       );
     }
-
     if (_selectedType == _KnowledgeType.wrongQuestions) {
       if (data.wrongQuestions.isEmpty) {
         return const _EmptyListHint(text: '这个知识库暂无待处理错题。');
@@ -570,12 +584,8 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             .toList(growable: false),
       );
     }
-
     final contents = data.contentsOf(_selectedType);
-    if (contents.isEmpty) {
-      return const _EmptyListHint(text: '这个知识库的分类还没有真实结果。');
-    }
-
+    if (contents.isEmpty) return const _EmptyListHint(text: '这个知识库的分类还没有真实结果。');
     return Column(
       children: contents
           .map(
@@ -593,9 +603,9 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   }
 }
 
+// ========== Header ==========
 class _Header extends StatelessWidget {
   const _Header({required this.data});
-
   final _KnowledgeData data;
 
   @override
@@ -607,9 +617,10 @@ class _Header extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFECFEFF), Color(0xFFEEF2FF)],
+          colors: [Color(0xFFCCFBF1), Color(0xFFF0FDFA)],
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: AppColors.primarySoft),
       ),
       child: Row(
         children: [
@@ -622,7 +633,7 @@ class _Header extends StatelessWidget {
             ),
             child: const Icon(
               Icons.collections_bookmark_rounded,
-              color: Color(0xFF0C4A6E),
+              color: AppColors.primary,
             ),
           ),
           const SizedBox(width: 12),
@@ -634,18 +645,14 @@ class _Header extends StatelessWidget {
                   data.selectedLibrary.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: const Color(0xFF0B1324),
-                  ),
+                  style: AppTextStyles.h1(context),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '当前知识库共 ${data.totalCount} 条资料与生成结果',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF475569),
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: AppTextStyles.bodySmall(
+                    context,
+                  ).copyWith(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -656,6 +663,7 @@ class _Header extends StatelessWidget {
   }
 }
 
+// ========== Library Selector ==========
 class _LibrarySelector extends StatelessWidget {
   const _LibrarySelector({
     required this.libraries,
@@ -664,7 +672,6 @@ class _LibrarySelector extends StatelessWidget {
     required this.onCreate,
     required this.onDeleteSelected,
   });
-
   final List<KnowledgeLibraryRecord> libraries;
   final KnowledgeLibraryRecord selectedLibrary;
   final ValueChanged<int> onSelected;
@@ -681,12 +688,12 @@ class _LibrarySelector extends StatelessWidget {
           IconButton(
             tooltip: '新建知识库',
             onPressed: onCreate,
-            icon: const Icon(Icons.add_rounded),
+            icon: const Icon(Icons.add_rounded, color: AppColors.primary),
           ),
           IconButton(
             tooltip: '删除当前知识库',
             onPressed: onDeleteSelected,
-            color: const Color(0xFFDC2626),
+            color: AppColors.error,
             icon: const Icon(Icons.delete_outline_rounded),
           ),
         ],
@@ -712,13 +719,13 @@ class _LibrarySelector extends StatelessWidget {
   }
 }
 
+// ========== Type Selector ==========
 class _TypeSelector extends StatelessWidget {
   const _TypeSelector({
     required this.items,
     required this.selectedType,
     required this.onSelected,
   });
-
   final List<_KnowledgeTypeItem> items;
   final String selectedType;
   final ValueChanged<String> onSelected;
@@ -755,7 +762,6 @@ class _TypeCard extends StatelessWidget {
     required this.selected,
     required this.onTap,
   });
-
   final _KnowledgeTypeItem item;
   final bool selected;
   final VoidCallback onTap;
@@ -773,27 +779,27 @@ class _TypeCard extends StatelessWidget {
             color: item.color,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: selected ? const Color(0xFF0C4A6E) : Colors.white,
+              color: selected ? AppColors.primary : AppColors.border,
               width: selected ? 1.6 : 1,
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(item.icon, color: const Color(0xFF0C4A6E)),
+              Icon(item.icon, color: AppColors.primary),
               const SizedBox(height: 8),
               Text(
                 item.title,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: const Color(0xFF0B1324),
-                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 '${item.count} 条',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF475569),
+                  color: AppColors.textSecondary,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -805,6 +811,7 @@ class _TypeCard extends StatelessWidget {
   }
 }
 
+// ========== Content Tiles ==========
 class _DocumentTile extends StatelessWidget {
   const _DocumentTile({
     required this.document,
@@ -812,11 +819,8 @@ class _DocumentTile extends StatelessWidget {
     required this.onMove,
     required this.onDelete,
   });
-
   final SourceDocumentRecord document;
-  final VoidCallback onTap;
-  final VoidCallback onMove;
-  final VoidCallback onDelete;
+  final VoidCallback onTap, onMove, onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -842,13 +846,9 @@ class _ContentTile extends StatelessWidget {
     required this.onMove,
     required this.onDelete,
   });
-
-  final String title;
-  final String subtitle;
-  final String body;
-  final VoidCallback onTap;
+  final String title, subtitle, body;
+  final VoidCallback onTap, onDelete;
   final VoidCallback? onMove;
-  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -874,14 +874,10 @@ class _BaseTile extends StatelessWidget {
     required this.onMove,
     required this.onDelete,
   });
-
   final IconData icon;
-  final String title;
-  final String subtitle;
-  final String body;
-  final VoidCallback onTap;
+  final String title, subtitle, body;
+  final VoidCallback onTap, onDelete;
   final VoidCallback? onMove;
-  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -895,13 +891,14 @@ class _BaseTile extends StatelessWidget {
           child: Ink(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(icon, color: const Color(0xFF0C4A6E)),
+                Icon(icon, color: AppColors.primary),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -912,15 +909,15 @@ class _BaseTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: const Color(0xFF0B1324),
-                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         subtitle,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -932,7 +929,7 @@ class _BaseTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
-                                color: const Color(0xFF475569),
+                                color: AppColors.textSecondary,
                                 height: 1.35,
                               ),
                         ),
@@ -944,7 +941,7 @@ class _BaseTile extends StatelessWidget {
                   tooltip: '内容操作',
                   icon: const Icon(
                     Icons.more_vert_rounded,
-                    color: Color(0xFF94A3B8),
+                    color: AppColors.textTertiary,
                   ),
                   onSelected: (value) {
                     if (value == 'move') {
@@ -974,9 +971,9 @@ class _BaseTile extends StatelessWidget {
   }
 }
 
+// ========== Common widgets ==========
 class _Panel extends StatelessWidget {
   const _Panel({required this.title, required this.child, this.trailing});
-
   final String title;
   final Widget child;
   final Widget? trailing;
@@ -987,24 +984,17 @@ class _Panel extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        boxShadow: AppShadows.cardSoftList,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF0B1324),
-                  ),
-                ),
-              ),
-              ?trailing,
+              Expanded(child: Text(title, style: AppTextStyles.h3(context))),
+              trailing ?? const SizedBox.shrink(),
             ],
           ),
           const SizedBox(height: 10),
@@ -1017,7 +1007,6 @@ class _Panel extends StatelessWidget {
 
 class _EmptyListHint extends StatelessWidget {
   const _EmptyListHint({required this.text});
-
   final String text;
 
   @override
@@ -1026,16 +1015,13 @@ class _EmptyListHint extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
       ),
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: const Color(0xFF64748B),
-          fontWeight: FontWeight.w600,
-        ),
+        style: AppTextStyles.bodySmall(context),
       ),
     );
   }
@@ -1048,10 +1034,8 @@ class _StatePanel extends StatelessWidget {
     required this.description,
     required this.onPressed,
   });
-
   final IconData icon;
-  final String title;
-  final String description;
+  final String title, description;
   final Future<void> Function() onPressed;
 
   @override
@@ -1062,7 +1046,7 @@ class _StatePanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: const Color(0xFF64748B)),
+            Icon(icon, size: 48, color: AppColors.textTertiary),
             const SizedBox(height: 12),
             Text(
               title,
@@ -1076,7 +1060,7 @@ class _StatePanel extends StatelessWidget {
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
             FilledButton(onPressed: () => onPressed(), child: const Text('重试')),
@@ -1087,6 +1071,7 @@ class _StatePanel extends StatelessWidget {
   }
 }
 
+// ========== Data models ==========
 class _KnowledgeData {
   const _KnowledgeData({
     required this.userId,
@@ -1111,19 +1096,14 @@ class _KnowledgeData {
       documents.length +
       contents.length +
       wrongQuestions.length;
-
   int countByType(String type) => contentsOf(type).length;
-
-  List<GeneratedContentRecord> contentsOf(String type) {
-    return contents
-        .where((item) => item.contentType == type)
-        .toList(growable: false);
-  }
+  List<GeneratedContentRecord> contentsOf(String type) => contents
+      .where((item) => item.contentType == type)
+      .toList(growable: false);
 }
 
 class _KnowledgeType {
   const _KnowledgeType._();
-
   static const String documents = 'documents';
   static const String batches = 'batches';
   static const String cards = 'knowledge_cards';
@@ -1141,9 +1121,7 @@ class _KnowledgeTypeItem {
     required this.icon,
     required this.color,
   });
-
-  final String type;
-  final String title;
+  final String type, title;
   final int count;
   final IconData icon;
   final Color color;

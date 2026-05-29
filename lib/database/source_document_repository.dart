@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../common/source_document_file_store.dart';
 import 'app_database.dart';
 import 'models/source_document_record.dart';
 
@@ -7,10 +8,14 @@ import 'models/source_document_record.dart';
 // 统一负责 source_documents 的入库、详情读取和首页最近记录查询。
 
 class SourceDocumentRepository {
-  SourceDocumentRepository({AppDatabase? database})
-    : _database = database ?? AppDatabase.instance;
+  SourceDocumentRepository({
+    AppDatabase? database,
+    SourceDocumentFileStore? fileStore,
+  }) : _database = database ?? AppDatabase.instance,
+       _fileStore = fileStore ?? const SourceDocumentFileStore();
 
   final AppDatabase _database;
+  final SourceDocumentFileStore _fileStore;
 
   Future<SourceDocumentRecord> createSourceDocument({
     required int userId,
@@ -232,6 +237,17 @@ class SourceDocumentRepository {
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
+    final rows = await db.query(
+      AppDatabase.tableSourceDocuments,
+      columns: ['image_path'],
+      where: 'id = ? AND user_id = ?',
+      whereArgs: [documentId, userId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw StateError('资料不存在或无权删除');
+    }
+
     final deleted = await db.delete(
       AppDatabase.tableSourceDocuments,
       where: 'id = ? AND user_id = ?',
@@ -240,6 +256,7 @@ class SourceDocumentRepository {
     if (deleted == 0) {
       throw StateError('资料不存在或无权删除');
     }
+    await _fileStore.deleteAllIfManaged([rows.first['image_path'] as String?]);
   }
 
   Future<int?> _resolveLibraryId(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../common/app_assets.dart';
+import '../theme/app_theme.dart';
 import 'login_page.dart';
 
 class GuidePage extends StatelessWidget {
@@ -11,7 +12,7 @@ class GuidePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Stack(
           children: [
@@ -33,21 +34,20 @@ class GuidePage extends StatelessWidget {
               bottom: 32,
               child: FilledButton(
                 onPressed: () {
-                  Navigator.of(
-                    context,
-                  ).pushReplacementNamed(LoginPage.routeName);
+                  Navigator.of(context)
+                      .pushReplacementNamed(LoginPage.routeName);
                 },
                 style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                  backgroundColor: const Color(0xFF0C4A6E),
+                  minimumSize: const Size.fromHeight(56),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(AppRadii.button),
                   ),
                 ),
                 child: const Text(
                   '进入登录',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
                 ),
               ),
             ),

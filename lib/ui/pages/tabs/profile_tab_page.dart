@@ -1,21 +1,23 @@
 import 'dart:io';
-import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../common/app_assets.dart';
 import '../../../common/profile_image_store.dart';
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
+import '../../../database/source_document_repository.dart';
 import '../../../database/llm_config_repository.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/llm_provider_config.dart';
 import '../../../database/models/user_profile.dart';
 import '../../../llm/llm_model_catalog.dart';
+import '../../theme/app_theme.dart';
 import '../login_page.dart';
+import 'knowledge_tab_page.dart';
+import 'tasks_tab_page.dart';
 
-// ========== 参数配置 ==========
-// 这里集中放“我的”页用到的预设项和常量。
 const List<String> _genderOptions = ['保密', '女生', '男生'];
 
 const List<_AvatarPreset> _avatarPresets = [
@@ -52,7 +54,7 @@ const List<_AvatarPreset> _avatarPresets = [
     label: 'Logo',
     icon: Icons.auto_stories_rounded,
     gradientColors: [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
-    foregroundColor: Color(0xFF0C4A6E),
+    foregroundColor: AppColors.primary,
     useLogoAsset: true,
   ),
 ];
@@ -80,41 +82,116 @@ const List<_BackgroundPreset> _backgroundPresets = [
   _BackgroundPreset(
     id: ProfilePresetIds.backgroundSunrise,
     label: '晨曦',
-    gradientColors: [Color(0xFF7C2D12), Color(0xFFEA580C), Color(0xFFFBBF24)],
+    gradientColors: [Color(0xFF0F766E), Color(0xFF14B8A6), Color(0xFF99F6E4)],
     overlayOpacity: 0.2,
   ),
 ];
 
-// ========== 页面入口 ==========
-// 个人中心主页面，承载展示和交互。
 class ProfileTabPage extends StatefulWidget {
-  const ProfileTabPage({super.key});
+  const ProfileTabPage({
+    this.authRepository,
+    this.sourceDocumentRepository,
+    this.llmConfigRepository,
+    this.aiGenerationRepository,
+    this.refreshVersion = 0,
+    this.refreshListenable,
+    this.activeTabListenable,
+    this.tabIndex,
+    this.onOpenTab,
+    this.onDataChanged,
+    super.key,
+  });
+
+  final AuthRepository? authRepository;
+  final SourceDocumentRepository? sourceDocumentRepository;
+  final LlmConfigRepository? llmConfigRepository;
+  final AiGenerationRepository? aiGenerationRepository;
+  final int refreshVersion;
+  final ValueListenable<int>? refreshListenable;
+  final ValueListenable<int>? activeTabListenable;
+  final int? tabIndex;
+  final ValueChanged<int>? onOpenTab;
+  final VoidCallback? onDataChanged;
 
   @override
   State<ProfileTabPage> createState() => _ProfileTabPageState();
 }
 
 class _ProfileTabPageState extends State<ProfileTabPage> {
-  final AuthRepository _authRepository = AuthRepository();
-  final LlmConfigRepository _llmConfigRepository = LlmConfigRepository();
-  final AiGenerationRepository _aiGenerationRepository =
-      AiGenerationRepository();
+  late final AuthRepository _authRepository;
+  late final SourceDocumentRepository _sourceDocumentRepository;
+  late final LlmConfigRepository _llmConfigRepository;
+  late final AiGenerationRepository _aiGenerationRepository;
   final ProfileImageStore _imageStore = ProfileImageStore();
 
   UserProfile? _profile;
   LlmProviderConfig? _llmConfig;
   StudyOverviewStats? _studyStats;
+  late int _handledRefreshVersion;
+  bool _reloadScheduled = false;
   bool _isLoading = true;
   bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
+    _authRepository = widget.authRepository ?? AuthRepository();
+    _sourceDocumentRepository =
+        widget.sourceDocumentRepository ?? SourceDocumentRepository();
+    _llmConfigRepository = widget.llmConfigRepository ?? LlmConfigRepository();
+    _aiGenerationRepository =
+        widget.aiGenerationRepository ?? AiGenerationRepository();
+    _handledRefreshVersion = widget.refreshVersion;
+    widget.refreshListenable?.addListener(_handleExternalRefresh);
+    widget.activeTabListenable?.addListener(_handleExternalRefresh);
     _loadProfile();
   }
 
-  // ========== 数据读取 ==========
-  // 这里放用户资料加载逻辑。
+  @override
+  void didUpdateWidget(covariant ProfileTabPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshListenable != widget.refreshListenable) {
+      oldWidget.refreshListenable?.removeListener(_handleExternalRefresh);
+      widget.refreshListenable?.addListener(_handleExternalRefresh);
+    }
+    if (oldWidget.activeTabListenable != widget.activeTabListenable) {
+      oldWidget.activeTabListenable?.removeListener(_handleExternalRefresh);
+      widget.activeTabListenable?.addListener(_handleExternalRefresh);
+    }
+    if (widget.refreshVersion != _handledRefreshVersion) {
+      _handledRefreshVersion = widget.refreshVersion;
+      _scheduleReload();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.refreshListenable?.removeListener(_handleExternalRefresh);
+    widget.activeTabListenable?.removeListener(_handleExternalRefresh);
+    super.dispose();
+  }
+
+  bool get _canHandleExternalRefresh {
+    final tabIndex = widget.tabIndex;
+    final activeTab = widget.activeTabListenable?.value;
+    return tabIndex == null || activeTab == null || activeTab == tabIndex;
+  }
+
+  void _handleExternalRefresh() {
+    if (!_canHandleExternalRefresh) return;
+    _scheduleReload();
+  }
+
+  void _scheduleReload() {
+    if (!mounted || _reloadScheduled) return;
+    _reloadScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _reloadScheduled = false;
+      _loadProfile();
+    });
+  }
+
   Future<void> _loadProfile() async {
     try {
       await _authRepository.ensureInitialized();
@@ -127,11 +204,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           : await _aiGenerationRepository.fetchStudyOverviewStats(
               currentProfile.id,
             );
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _profile = currentProfile;
         _llmConfig = llmConfig;
@@ -139,72 +212,42 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
         _isLoading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isLoading = false;
-      });
+      if (!mounted) return;
+      setState(() => _isLoading = false);
       _showMessage('加载资料失败：$error');
     }
   }
 
-  // ========== 数据保存 ==========
-  // 这里放资料更新与持久化逻辑。
   Future<bool> _saveProfile(
     UserProfile profile, {
     required String successMessage,
   }) async {
-    setState(() {
-      _isSaving = true;
-    });
-
+    setState(() => _isSaving = true);
     try {
       final savedProfile = await _authRepository.saveUserProfile(profile);
-
-      if (!mounted) {
-        return false;
-      }
-
-      setState(() {
-        _profile = savedProfile;
-      });
+      if (!mounted) return false;
+      setState(() => _profile = savedProfile);
       _showMessage(successMessage);
       return true;
     } catch (error) {
-      if (!mounted) {
-        return false;
-      }
+      if (!mounted) return false;
       _showMessage('保存失败：$error');
       return false;
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  // ========== 交互逻辑 ==========
-  // 这里放页面按钮行为、弹窗与跳转。
   Future<void> _editProfile() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final result = await Navigator.of(context).push<_ProfileEditDraft>(
       MaterialPageRoute(
         builder: (_) =>
             _EditProfilePage(profile: profile, genderOptions: _genderOptions),
       ),
     );
-
-    if (result == null) {
-      return;
-    }
-
+    if (result == null) return;
     await _saveProfile(
       profile.copyWith(
         displayName: result.displayName,
@@ -218,89 +261,81 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
 
   Future<void> _showAvatarActions() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return _ActionListSheet(
-          title: '设置头像',
-          description: '支持从本地相册选择，也可以恢复默认或切换预设头像。',
-          actions: [
-            _ActionItem(
-              icon: Icons.photo_library_rounded,
-              title: '从相册选择',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickAvatarFromGallery();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.style_rounded,
-              title: '选择预设头像',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickAvatarStyle();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.restart_alt_rounded,
-              title: '恢复默认头像',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _resetAvatarToDefault();
-              },
-            ),
-          ],
-        );
-      },
+      isScrollControlled: true,
+      builder: (sheetContext) => _ActionListSheet(
+        title: '设置头像',
+        description: '支持从本地相册选择，也可以恢复默认或切换预设头像。',
+        actions: [
+          _ActionItem(
+            icon: Icons.photo_library_rounded,
+            title: '从相册选择',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickAvatarFromGallery();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.style_rounded,
+            title: '选择预设头像',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickAvatarStyle();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.restart_alt_rounded,
+            title: '恢复默认头像',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _resetAvatarToDefault();
+            },
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _showBackgroundActions() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return _ActionListSheet(
-          title: '设置背景',
-          description: '支持从本地相册选择背景图，也可切换预设背景。',
-          actions: [
-            _ActionItem(
-              icon: Icons.photo_size_select_actual_rounded,
-              title: '从相册选择',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickBackgroundFromGallery();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.palette_rounded,
-              title: '选择预设背景',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickBackgroundStyle();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.restart_alt_rounded,
-              title: '恢复默认背景',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _resetBackgroundToDefault();
-              },
-            ),
-          ],
-        );
-      },
+      isScrollControlled: true,
+      builder: (sheetContext) => _ActionListSheet(
+        title: '设置背景',
+        description: '支持从本地相册选择背景图，也可切换预设背景。',
+        actions: [
+          _ActionItem(
+            icon: Icons.photo_size_select_actual_rounded,
+            title: '从相册选择',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickBackgroundFromGallery();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.palette_rounded,
+            title: '选择预设背景',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickBackgroundStyle();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.restart_alt_rounded,
+            title: '恢复默认背景',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _resetBackgroundToDefault();
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -308,116 +343,91 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return _ActionListSheet(
-          title: '个人信息设置',
-          description: '统一管理姓名、简介、头像、背景、性别和年龄等资料。',
-          actions: [
-            _ActionItem(
-              icon: Icons.edit_note_rounded,
-              title: '编辑个人资料',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _editProfile();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.photo_filter_rounded,
-              title: '设置头像',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _showAvatarActions();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.wallpaper_rounded,
-              title: '设置背景',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _showBackgroundActions();
-              },
-            ),
-            _ActionItem(
-              icon: Icons.info_outline_rounded,
-              title: '账号信息',
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _showAccountInfo();
-              },
-            ),
-          ],
-        );
-      },
+      isScrollControlled: true,
+      builder: (sheetContext) => _ActionListSheet(
+        title: '个人信息设置',
+        description: '统一管理姓名、简介、头像、背景、性别和年龄等资料。',
+        actions: [
+          _ActionItem(
+            icon: Icons.edit_note_rounded,
+            title: '编辑个人资料',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _editProfile();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.photo_filter_rounded,
+            title: '设置头像',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _showAvatarActions();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.wallpaper_rounded,
+            title: '设置背景',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _showBackgroundActions();
+            },
+          ),
+          _ActionItem(
+            icon: Icons.info_outline_rounded,
+            title: '账号信息',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _showAccountInfo();
+            },
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _editLlmConfig() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final currentConfig =
         _llmConfig ?? LlmProviderConfig.emptyForUser(profile.id);
     final result = await Navigator.of(context).push<LlmProviderConfig>(
       MaterialPageRoute(
-        builder: (_) => _EditLlmConfigPage(config: currentConfig),
+        builder: (_) => LlmConfigEditPage(config: currentConfig),
       ),
     );
+    if (result == null) return;
 
-    if (result == null) {
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-    });
-
+    setState(() => _isSaving = true);
     try {
       final saved = await _llmConfigRepository.save(result);
-      final profile = _profile;
-      final latestStats = profile == null
+      final p = _profile;
+      final latestStats = p == null
           ? null
-          : await _aiGenerationRepository.fetchStudyOverviewStats(profile.id);
-      if (!mounted) {
-        return;
-      }
+          : await _aiGenerationRepository.fetchStudyOverviewStats(p.id);
+      if (!mounted) return;
       setState(() {
         _llmConfig = saved;
         _studyStats = latestStats;
       });
       _showMessage('AI 大模型配置已保存');
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       _showMessage('保存 AI 配置失败：$error');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   Future<void> _pickAvatarFromGallery() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final imagePath = await _imageStore.pickAndPersist(ProfileImageKind.avatar);
-    if (imagePath == null) {
-      return;
-    }
-
+    if (imagePath == null) return;
     final oldPath = profile.avatarImagePath;
     final saved = await _saveProfile(
       profile.copyWith(avatarImagePath: imagePath),
       successMessage: '头像已更新',
     );
-
     if (saved) {
       await _imageStore.deleteIfManaged(oldPath);
     } else {
@@ -427,23 +437,16 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
 
   Future<void> _pickBackgroundFromGallery() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final imagePath = await _imageStore.pickAndPersist(
       ProfileImageKind.background,
     );
-    if (imagePath == null) {
-      return;
-    }
-
+    if (imagePath == null) return;
     final oldPath = profile.backgroundImagePath;
     final saved = await _saveProfile(
       profile.copyWith(backgroundImagePath: imagePath),
       successMessage: '背景已更新',
     );
-
     if (saved) {
       await _imageStore.deleteIfManaged(oldPath);
     } else {
@@ -453,13 +456,11 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
 
   Future<void> _pickAvatarStyle() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final selectedAvatar = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => _AvatarPickerSheet(
         currentAvatarId: profile.avatarStyle,
         presets: _avatarPresets,
@@ -472,41 +473,28 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
         ),
       ),
     );
-
-    if (selectedAvatar == null) {
-      return;
-    }
-
+    if (selectedAvatar == null) return;
     final oldPath = profile.avatarImagePath;
     final saved = await _saveProfile(
       profile.copyWith(avatarStyle: selectedAvatar, avatarImagePath: null),
       successMessage: '头像样式已更新',
     );
-
-    if (saved) {
-      await _imageStore.deleteIfManaged(oldPath);
-    }
+    if (saved) await _imageStore.deleteIfManaged(oldPath);
   }
 
   Future<void> _pickBackgroundStyle() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final selectedBackground = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => _BackgroundPickerSheet(
         currentBackgroundId: profile.backgroundStyle,
         presets: _backgroundPresets,
       ),
     );
-
-    if (selectedBackground == null) {
-      return;
-    }
-
+    if (selectedBackground == null) return;
     final oldPath = profile.backgroundImagePath;
     final saved = await _saveProfile(
       profile.copyWith(
@@ -515,18 +503,12 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       ),
       successMessage: '背景样式已更新',
     );
-
-    if (saved) {
-      await _imageStore.deleteIfManaged(oldPath);
-    }
+    if (saved) await _imageStore.deleteIfManaged(oldPath);
   }
 
   Future<void> _resetAvatarToDefault() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final oldPath = profile.avatarImagePath;
     final saved = await _saveProfile(
       profile.copyWith(
@@ -535,18 +517,12 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       ),
       successMessage: '已恢复默认头像',
     );
-
-    if (saved) {
-      await _imageStore.deleteIfManaged(oldPath);
-    }
+    if (saved) await _imageStore.deleteIfManaged(oldPath);
   }
 
   Future<void> _resetBackgroundToDefault() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     final oldPath = profile.backgroundImagePath;
     final saved = await _saveProfile(
       profile.copyWith(
@@ -555,21 +531,16 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       ),
       successMessage: '已恢复默认背景',
     );
-
-    if (saved) {
-      await _imageStore.deleteIfManaged(oldPath);
-    }
+    if (saved) await _imageStore.deleteIfManaged(oldPath);
   }
 
   Future<void> _showAccountInfo() async {
     final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
+    if (profile == null) return;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => _AccountInfoSheet(profile: profile),
     );
   }
@@ -592,48 +563,72 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
         ],
       ),
     );
+    if (shouldLogout != true) return;
 
-    if (shouldLogout != true) {
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-    });
-
+    setState(() => _isSaving = true);
     try {
       await _authRepository.logoutCurrentUser();
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       Navigator.of(
         context,
       ).pushNamedAndRemoveUntil(LoginPage.routeName, (route) => false);
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       _showMessage('退出失败：$error');
-      setState(() {
-        _isSaving = false;
-      });
+      setState(() => _isSaving = false);
     }
   }
 
-  // ========== 视图构建 ==========
-  // 这里放页面结构与样式组件拼装。
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+  Future<void> _openWrongQuestionsEntry() async {
+    final onOpenTab = widget.onOpenTab;
+    if (onOpenTab != null) {
+      onOpenTab(2);
+      return;
     }
 
-    final profile = _profile;
-    if (profile == null) {
-      return _ProfileUnavailableState(onRetry: _loadProfile);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TaskListPage(
+          kind: TaskListKind.wrongQuestions,
+          authRepository: _authRepository,
+          sourceDocumentRepository: _sourceDocumentRepository,
+          aiGenerationRepository: _aiGenerationRepository,
+          onDataChanged: widget.onDataChanged,
+        ),
+      ),
+    );
+    if (mounted) {
+      widget.onDataChanged?.call();
+      await _loadProfile();
     }
+  }
+
+  Future<void> _openKnowledgeEntry() async {
+    final onOpenTab = widget.onOpenTab;
+    if (onOpenTab != null) {
+      onOpenTab(1);
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Knowledge')),
+          body: KnowledgeTabPage(onDataChanged: widget.onDataChanged),
+        ),
+      ),
+    );
+    if (mounted) {
+      widget.onDataChanged?.call();
+      await _loadProfile();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    final profile = _profile;
+    if (profile == null) return _ProfileUnavailableState(onRetry: _loadProfile);
 
     return Stack(
       children: [
@@ -671,174 +666,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     );
   }
 
-  // ignore: unused_element
-  Widget _buildHeroSection(BuildContext context, UserProfile profile) {
-    final backgroundPreset = _backgroundPresetFor(profile.backgroundStyle);
-    final textTheme = Theme.of(context).textTheme;
-    final genderIcon = profile.gender == '男生'
-        ? Icons.male_rounded
-        : profile.gender == '女生'
-        ? Icons.female_rounded
-        : Icons.shield_outlined;
-    final ageLabel = profile.age == null ? '年龄未设置' : '${profile.age} 岁';
-
-    return SizedBox(
-      height: 438,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _BackgroundPreview(
-            preset: backgroundPreset,
-            backgroundImagePath: profile.backgroundImagePath,
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: const [0, 0.35, 1],
-                colors: [
-                  Colors.black.withValues(alpha: 0.10),
-                  Colors.black.withValues(alpha: 0.24),
-                  Colors.black.withValues(alpha: 0.68),
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            left: 18,
-            top: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.22),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-              ),
-              child: Text(
-                '我的',
-                style: textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 18,
-            top: 16,
-            child: _HeaderIconButton(
-              icon: Icons.wallpaper_rounded,
-              tooltip: '设置背景',
-              onTap: _showBackgroundActions,
-            ),
-          ),
-          Positioned(
-            left: 18,
-            right: 18,
-            bottom: 52,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        _AvatarView(profile: profile, size: 96),
-                        Positioned(
-                          right: -2,
-                          bottom: -2,
-                          child: _HeaderIconButton(
-                            icon: Icons.camera_alt_rounded,
-                            tooltip: '设置头像',
-                            size: 30,
-                            onTap: _showAvatarActions,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Text(
-                                  profile.primaryName,
-                                  style: textTheme.headlineMedium?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w900,
-                                    height: 1.05,
-                                  ),
-                                ),
-                                _MetaChip(
-                                  icon: genderIcon,
-                                  label: profile.gender,
-                                ),
-                                _MetaChip(
-                                  icon: Icons.cake_rounded,
-                                  label: ageLabel,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '账号 ID: ${profile.username}',
-                              style: textTheme.bodyMedium?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.82),
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.20),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.14),
-                    ),
-                  ),
-                  child: Text(
-                    profile.bio,
-                    style: textTheme.bodyLarge?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.96),
-                      height: 1.45,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '个人资料、头像和账号信息可从右上角三个点进入。',
-                  style: textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.78),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildHeroHeader(BuildContext context, UserProfile profile) {
     final backgroundPreset = _backgroundPresetFor(profile.backgroundStyle);
     final textTheme = Theme.of(context).textTheme;
@@ -850,7 +677,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     final ageLabel = profile.age == null ? '年龄未设置' : '${profile.age} 岁';
 
     return SizedBox(
-      height: 438,
+      height: 420,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -866,8 +693,8 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
                 stops: const [0, 0.35, 1],
                 colors: [
                   Colors.black.withValues(alpha: 0.10),
-                  Colors.black.withValues(alpha: 0.24),
-                  Colors.black.withValues(alpha: 0.68),
+                  Colors.black.withValues(alpha: 0.22),
+                  Colors.black.withValues(alpha: 0.60),
                 ],
               ),
             ),
@@ -884,7 +711,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           Positioned(
             left: 18,
             right: 18,
-            bottom: 52,
+            bottom: 40,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -953,189 +780,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     );
   }
 
-  // ignore: unused_element
-  Widget _buildLegacyHeroSection(BuildContext context, UserProfile profile) {
-    final backgroundPreset = _backgroundPresetFor(profile.backgroundStyle);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(30),
-      child: SizedBox(
-        height: 392,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _BackgroundPreview(
-              preset: backgroundPreset,
-              backgroundImagePath: profile.backgroundImagePath,
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.08),
-                    Colors.black.withValues(alpha: 0.20),
-                    Colors.black.withValues(alpha: 0.45),
-                  ],
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(26),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(26),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.20),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '我的',
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  _AvatarView(profile: profile, size: 96),
-                                  Positioned(
-                                    right: -2,
-                                    bottom: -2,
-                                    child: GestureDetector(
-                                      onTap: _showAvatarActions,
-                                      child: Container(
-                                        width: 30,
-                                        height: 30,
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          shape: BoxShape.circle,
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withValues(
-                                                alpha: 0.14,
-                                              ),
-                                              blurRadius: 10,
-                                              offset: const Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        child: const Icon(
-                                          Icons.camera_alt_rounded,
-                                          size: 16,
-                                          color: Color(0xFF0F172A),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      profile.primaryName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineSmall
-                                          ?.copyWith(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w900,
-                                            height: 1.1,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      '账号：${profile.username}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: Colors.white.withValues(
-                                              alpha: 0.84,
-                                            ),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        _MetaChip(
-                                          icon: profile.gender == '男生'
-                                              ? Icons.male_rounded
-                                              : profile.gender == '女生'
-                                              ? Icons.female_rounded
-                                              : Icons.shield_outlined,
-                                          label: profile.gender,
-                                        ),
-                                        _MetaChip(
-                                          icon: Icons.cake_rounded,
-                                          label: profile.age == null
-                                              ? '年龄未设置'
-                                              : '${profile.age} 岁',
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            profile.bio,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.92),
-                                  height: 1.45,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            '个人资料、头像和账号信息可从右上角三个点进入。',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.78),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildSettingsSection(BuildContext context) {
     final stats = _studyStats;
 
@@ -1143,14 +787,14 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: const BorderRadius.vertical(
           top: Radius.circular(34),
-          bottom: Radius.circular(28),
+          bottom: Radius.circular(AppRadii.card),
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F172A).withValues(alpha: 0.06),
+            color: const Color(0xFF111827).withValues(alpha: 0.06),
             blurRadius: 18,
             offset: const Offset(0, -2),
           ),
@@ -1159,20 +803,11 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '我的学习资产',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: const Color(0xFF0F172A),
-              fontWeight: FontWeight.w900,
-            ),
-          ),
+          Text('我的学习资产', style: AppTextStyles.h2(context)),
           const SizedBox(height: 6),
           Text(
             '资料、错题和模型配置集中在这里；个人资料从右上角三个点进入。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF64748B),
-              fontWeight: FontWeight.w500,
-            ),
+            style: AppTextStyles.bodySmall(context),
           ),
           const SizedBox(height: 16),
           _SettingTile(
@@ -1181,7 +816,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
             subtitle: stats == null
                 ? '待同步'
                 : '待处理 ${stats.wrongQuestionCount} 题，已掌握 ${stats.masteredQuestionCount} 题',
-            onTap: () => _showMessage('请到任务页查看和处理错题'),
+            onTap: _openWrongQuestionsEntry,
           ),
           _SettingTile(
             icon: Icons.collections_bookmark_rounded,
@@ -1189,7 +824,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
             subtitle: stats == null
                 ? '待同步'
                 : '${stats.documentCount} 份资料，${stats.generatedResultCount} 条学习成果',
-            onTap: () => _showMessage('请到知识库页查看全部资料和成果'),
+            onTap: _openKnowledgeEntry,
           ),
           _SettingTile(
             icon: Icons.auto_awesome_rounded,
@@ -1213,11 +848,11 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
               icon: const Icon(Icons.logout_rounded),
               label: const Text('退出登录'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFB91C1C),
+                foregroundColor: AppColors.error,
                 side: const BorderSide(color: Color(0xFFFCA5A5)),
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppRadii.button),
                 ),
               ),
             ),
@@ -1241,11 +876,9 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   }
 }
 
-// ========== 顶部视觉组件 ==========
-// 这里放头像、背景预览与顶层按钮组件。
+// ========== Avatar & Background views ==========
 class _AvatarView extends StatelessWidget {
   const _AvatarView({required this.profile, required this.size});
-
   final UserProfile profile;
   final double size;
 
@@ -1255,7 +888,6 @@ class _AvatarView extends StatelessWidget {
       (item) => item.id == profile.avatarStyle,
       orElse: () => _avatarPresets.first,
     );
-
     return Container(
       width: size,
       height: size,
@@ -1301,7 +933,6 @@ class _AvatarFallback extends StatelessWidget {
     required this.preset,
     required this.size,
   });
-
   final UserProfile profile;
   final _AvatarPreset preset;
   final double size;
@@ -1359,7 +990,6 @@ class _AvatarFallback extends StatelessWidget {
 
 class _BackgroundPreview extends StatelessWidget {
   const _BackgroundPreview({required this.preset, this.backgroundImagePath});
-
   final _BackgroundPreset preset;
   final String? backgroundImagePath;
 
@@ -1419,7 +1049,6 @@ class _BackgroundPreview extends StatelessWidget {
 
 class _MetaChip extends StatelessWidget {
   const _MetaChip({required this.icon, required this.label});
-
   final IconData icon;
   final String label;
 
@@ -1455,13 +1084,10 @@ class _HeaderIconButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.size = 42,
   });
-
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
-  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -1473,8 +1099,8 @@ class _HeaderIconButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
           child: Ink(
-            width: size,
-            height: size,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.24),
               shape: BoxShape.circle,
@@ -1487,7 +1113,7 @@ class _HeaderIconButton extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(icon, size: size * 0.44, color: Colors.white),
+            child: Icon(icon, size: 18, color: Colors.white),
           ),
         ),
       ),
@@ -1495,8 +1121,7 @@ class _HeaderIconButton extends StatelessWidget {
   }
 }
 
-// ========== 设置区组件 ==========
-// 这里放基础设置列表和空态展示。
+// ========== Settings section ==========
 class _SettingTile extends StatelessWidget {
   const _SettingTile({
     required this.icon,
@@ -1504,10 +1129,8 @@ class _SettingTile extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
   });
-
   final IconData icon;
-  final String title;
-  final String subtitle;
+  final String title, subtitle;
   final VoidCallback onTap;
 
   @override
@@ -1518,24 +1141,24 @@ class _SettingTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppRadii.cardSmall),
           child: Ink(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 40,
-                  height: 40,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE2E8F0),
+                    color: AppColors.primarySoft,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(icon, color: const Color(0xFF0F172A), size: 20),
+                  child: Icon(icon, color: AppColors.primary, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1545,24 +1168,23 @@ class _SettingTile extends StatelessWidget {
                       Text(
                         title,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: const Color(0xFF0F172A),
+                          color: AppColors.textPrimary,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         subtitle,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF64748B),
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: AppTextStyles.caption(
+                          context,
+                        ).copyWith(fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
                 ),
                 const Icon(
                   Icons.chevron_right_rounded,
-                  color: Color(0xFF94A3B8),
+                  color: AppColors.textTertiary,
                 ),
               ],
             ),
@@ -1575,7 +1197,6 @@ class _SettingTile extends StatelessWidget {
 
 class _ProfileUnavailableState extends StatelessWidget {
   const _ProfileUnavailableState({required this.onRetry});
-
   final Future<void> Function() onRetry;
 
   @override
@@ -1590,13 +1211,13 @@ class _ProfileUnavailableState extends StatelessWidget {
               width: 74,
               height: 74,
               decoration: BoxDecoration(
-                color: const Color(0xFFE2E8F0),
+                color: AppColors.primarySoft,
                 borderRadius: BorderRadius.circular(22),
               ),
               child: const Icon(
                 Icons.person_off_rounded,
                 size: 36,
-                color: Color(0xFF475569),
+                color: AppColors.primary,
               ),
             ),
             const SizedBox(height: 16),
@@ -1608,11 +1229,11 @@ class _ProfileUnavailableState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '请重新登录后再进入“我的”页。',
+              '请重新登录后再进入"我的"页。',
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: const Text('重新加载')),
@@ -1623,11 +1244,9 @@ class _ProfileUnavailableState extends StatelessWidget {
   }
 }
 
-// ========== 编辑资料页 ==========
-// 这里放独立编辑页面，保存后回传草稿数据。
+// ========== Edit profile page ==========
 class _EditProfilePage extends StatefulWidget {
   const _EditProfilePage({required this.profile, required this.genderOptions});
-
   final UserProfile profile;
   final List<String> genderOptions;
 
@@ -1664,27 +1283,22 @@ class _EditProfilePageState extends State<_EditProfilePage> {
     final displayName = _nameController.text.trim();
     final bio = _bioController.text.trim();
     final ageText = _ageController.text.trim();
-
     if (displayName.isEmpty) {
       _showError('昵称不能为空');
       return;
     }
-
     if (displayName.length > 12) {
       _showError('昵称建议控制在 12 个字以内');
       return;
     }
-
     if (bio.isEmpty) {
       _showError('简介不能为空');
       return;
     }
-
     if (bio.length > 60) {
       _showError('简介建议控制在 60 个字以内');
       return;
     }
-
     int? age;
     if (ageText.isNotEmpty) {
       age = int.tryParse(ageText);
@@ -1693,7 +1307,6 @@ class _EditProfilePageState extends State<_EditProfilePage> {
         return;
       }
     }
-
     Navigator.of(context).pop(
       _ProfileEditDraft(
         displayName: displayName,
@@ -1753,29 +1366,21 @@ class _EditProfilePageState extends State<_EditProfilePage> {
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
-                children: widget.genderOptions.map((option) {
-                  return ChoiceChip(
-                    label: Text(option),
-                    selected: _gender == option,
-                    onSelected: (_) {
-                      setState(() {
-                        _gender = option;
-                      });
-                    },
-                  );
-                }).toList(),
+                children: widget.genderOptions
+                    .map(
+                      (option) => ChoiceChip(
+                        label: Text(option),
+                        selected: _gender == option,
+                        onSelected: (_) => setState(() => _gender = option),
+                      ),
+                    )
+                    .toList(),
               ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: _submit,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
                   child: const Text('保存资料'),
                 ),
               ),
@@ -1790,25 +1395,27 @@ class _EditProfilePageState extends State<_EditProfilePage> {
     return InputDecoration(
       labelText: label,
       hintText: hintText,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadii.input),
+      ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFF0C4A6E), width: 1.5),
+        borderRadius: BorderRadius.circular(AppRadii.input),
+        borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
       ),
     );
   }
 }
 
-class _EditLlmConfigPage extends StatefulWidget {
-  const _EditLlmConfigPage({required this.config});
-
+// ========== LLM config page ==========
+class LlmConfigEditPage extends StatefulWidget {
+  const LlmConfigEditPage({super.key, required this.config});
   final LlmProviderConfig config;
 
   @override
-  State<_EditLlmConfigPage> createState() => _EditLlmConfigPageState();
+  State<LlmConfigEditPage> createState() => _LlmConfigEditPageState();
 }
 
-class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
+class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
   late final TextEditingController _providerController;
   late final TextEditingController _apiKeyController;
   late final TextEditingController _baseUrlController;
@@ -1867,13 +1474,10 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
         : _indexForSelectedModel(_modelController.text, nextOptions);
     final shouldSelectFirstModel =
         _modelController.text.trim().isEmpty && nextOptions.isNotEmpty;
-
     setState(() {
       _modelOptions = nextOptions;
       _selectedModelIndex = shouldSelectFirstModel ? 0 : nextIndex;
-      if (shouldSelectFirstModel) {
-        _modelController.text = nextOptions.first.id;
-      }
+      if (shouldSelectFirstModel) _modelController.text = nextOptions.first.id;
       _modelListMessage = '${preset.label} 已填入默认接口地址，可继续滑动选择模型。';
     });
   }
@@ -1884,36 +1488,27 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
       baseUrl: _baseUrlController.text,
       currentModel: _modelController.text,
     );
-
     setState(() {
       _modelOptions = nextOptions;
       _selectedModelIndex = _indexForSelectedModel(
         _modelController.text,
         nextOptions,
       );
-      _modelListMessage = null;
     });
   }
 
   Future<void> _refreshRemoteModels() async {
-    if (_isRefreshingModels) {
-      return;
-    }
-
+    if (_isRefreshingModels) return;
     setState(() {
       _isRefreshingModels = true;
       _modelListMessage = null;
     });
-
     try {
       final remoteModels = await LlmModelCatalog.fetchModels(
         baseUrl: _baseUrlController.text,
         apiKey: _apiKeyController.text,
       );
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       final nextOptions = _includeCurrentModel(remoteModels);
       var nextIndex = _indexForSelectedModel(
         _modelController.text,
@@ -1923,31 +1518,21 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
         _modelController.text = nextOptions.first.id;
         nextIndex = 0;
       }
-
       setState(() {
         _modelOptions = nextOptions;
         _selectedModelIndex = nextIndex;
         _modelListMessage = '已从接口读取 ${nextOptions.length} 个可用模型。';
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       _showError(error.toString());
     } finally {
-      if (mounted) {
-        setState(() {
-          _isRefreshingModels = false;
-        });
-      }
+      if (mounted) setState(() => _isRefreshingModels = false);
     }
   }
 
   void _selectModel(int index) {
-    if (index < 0 || index >= _modelOptions.length) {
-      return;
-    }
-
+    if (index < 0 || index >= _modelOptions.length) return;
     setState(() {
       _selectedModelIndex = index;
       _modelController.text = _modelOptions[index].id;
@@ -1963,7 +1548,6 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
         )) {
       return models;
     }
-
     return [
       ...models,
       LlmModelOption(
@@ -1979,10 +1563,7 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
     List<LlmModelOption> models,
   ) {
     final selected = selectedModel.trim().toLowerCase();
-    if (models.isEmpty || selected.isEmpty) {
-      return 0;
-    }
-
+    if (models.isEmpty || selected.isEmpty) return 0;
     final index = models.indexWhere(
       (model) => model.id.toLowerCase() == selected,
     );
@@ -2006,13 +1587,11 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
       _showError('请填写模型 ID');
       return;
     }
-
     final maxTokens = int.tryParse(_maxTokensController.text.trim());
     if (maxTokens == null || maxTokens < 512) {
       _showError('最大输出 Token 至少为 512');
       return;
     }
-
     Navigator.of(context).pop(
       widget.config.copyWith(
         provider: provider.isEmpty ? LlmProvider.custom : provider,
@@ -2035,30 +1614,35 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF7FCFB),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0C4A6E),
+        foregroundColor: Colors.white,
         title: const Text('AI 大模型配置'),
-        backgroundColor: Colors.transparent,
-        foregroundColor: const Color(0xFF0B1324),
-        actions: [TextButton(onPressed: _submit, child: const Text('保存'))],
+        actions: [
+          TextButton(
+            onPressed: _submit,
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
+            child: const Text('保存'),
+          ),
+        ],
       ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
           children: [
-            Text(
+            const Text(
               '通用大模型',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF0B1324),
+              ),
             ),
             const SizedBox(height: 6),
-            Text(
-              '这里按 OpenAI-compatible 接口调用。你填哪个服务商的 Base URL、API Key 和模型 ID，AI 生成结果就调用哪个模型。',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF64748B),
-                height: 1.45,
-              ),
+            const Text(
+              '这里按 OpenAI-compatible 接口调用。',
+              style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
             ),
             const SizedBox(height: 16),
             _ProviderPresetSelector(
@@ -2117,9 +1701,6 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
               onPressed: _submit,
               icon: const Icon(Icons.save_rounded),
               label: const Text('保存 AI 配置'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
             ),
           ],
         ),
@@ -2131,15 +1712,18 @@ class _EditLlmConfigPageState extends State<_EditLlmConfigPage> {
     return InputDecoration(
       labelText: label,
       hintText: hintText,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadii.input),
+      ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFF0C4A6E), width: 1.5),
+        borderRadius: BorderRadius.circular(AppRadii.input),
+        borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
       ),
     );
   }
 }
 
+// ========== Provider preset selector ==========
 class _ProviderPresetSelector extends StatelessWidget {
   const _ProviderPresetSelector({
     required this.presets,
@@ -2147,10 +1731,8 @@ class _ProviderPresetSelector extends StatelessWidget {
     required this.baseUrl,
     required this.onSelected,
   });
-
   final List<LlmProviderPreset> presets;
-  final String provider;
-  final String baseUrl;
+  final String provider, baseUrl;
   final ValueChanged<LlmProviderPreset> onSelected;
 
   @override
@@ -2159,15 +1741,16 @@ class _ProviderPresetSelector extends StatelessWidget {
       provider: provider,
       baseUrl: baseUrl,
     );
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           '常用服务商',
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w900,
+            color: Color(0xFF0B1324),
+          ),
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -2175,7 +1758,6 @@ class _ProviderPresetSelector extends StatelessWidget {
           runSpacing: 8,
           children: presets.map((preset) {
             final isSelected = selectedPreset?.provider == preset.provider;
-
             return ChoiceChip(
               selected: isSelected,
               label: Text(preset.label),
@@ -2184,17 +1766,15 @@ class _ProviderPresetSelector extends StatelessWidget {
                 size: 18,
               ),
               onSelected: (_) => onSelected(preset),
-              selectedColor: const Color(0xFFE0F2FE),
+              selectedColor: AppColors.primarySoft,
               labelStyle: TextStyle(
                 color: isSelected
-                    ? const Color(0xFF075985)
-                    : const Color(0xFF334155),
+                    ? AppColors.primaryDark
+                    : AppColors.textSecondary,
                 fontWeight: FontWeight.w700,
               ),
               side: BorderSide(
-                color: isSelected
-                    ? const Color(0xFF0EA5E9)
-                    : const Color(0xFFE2E8F0),
+                color: isSelected ? AppColors.primary : AppColors.border,
               ),
             );
           }).toList(),
@@ -2204,6 +1784,7 @@ class _ProviderPresetSelector extends StatelessWidget {
   }
 }
 
+// ========== Model slider selector ==========
 class _ModelSliderSelector extends StatelessWidget {
   const _ModelSliderSelector({
     required this.models,
@@ -2213,7 +1794,6 @@ class _ModelSliderSelector extends StatelessWidget {
     required this.onRefresh,
     this.message,
   });
-
   final List<LlmModelOption> models;
   final int selectedIndex;
   final bool isRefreshing;
@@ -2221,24 +1801,25 @@ class _ModelSliderSelector extends StatelessWidget {
   final VoidCallback onRefresh;
   final String? message;
 
+  int _safeIndex() {
+    if (models.isEmpty) return 0;
+    if (selectedIndex < 0) return 0;
+    if (selectedIndex >= models.length) return models.length - 1;
+    return selectedIndex;
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasModels = models.isNotEmpty;
-    final safeIndex = !hasModels
-        ? 0
-        : selectedIndex < 0
-        ? 0
-        : selectedIndex >= models.length
-        ? models.length - 1
-        : selectedIndex;
+    final safeIndex = _safeIndex();
     final selectedModel = hasModels ? models[safeIndex] : null;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2248,12 +1829,19 @@ class _ModelSliderSelector extends StatelessWidget {
               Expanded(
                 child: Text(
                   '滑动选择模型',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF0B1324),
+                  ),
                 ),
               ),
               OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 onPressed: isRefreshing ? null : onRefresh,
                 icon: isRefreshing
                     ? const SizedBox(
@@ -2268,29 +1856,27 @@ class _ModelSliderSelector extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           if (!hasModels)
-            Text(
+            const Text(
               '选择上方服务商会出现官方模型预设；填好 API Key 后，也可以刷新接口读取账号可用模型。',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF64748B),
-                height: 1.45,
-              ),
+              style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
             )
           else ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppColors.surfaceAlt,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: AppColors.border),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     selectedModel!.label,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: const Color(0xFF0F172A),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: Color(0xFF111827),
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -2299,8 +1885,9 @@ class _ModelSliderSelector extends StatelessWidget {
                     selectedModel.id,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF0EA5E9),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF14B8A6),
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -2308,9 +1895,9 @@ class _ModelSliderSelector extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       selectedModel.description,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF64748B),
-                        height: 1.35,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF6B7280),
                       ),
                     ),
                   ],
@@ -2328,27 +1915,22 @@ class _ModelSliderSelector extends StatelessWidget {
                 onChanged: (value) => onChanged(value.round()),
               )
             else
-              Text(
+              const Text(
                 '当前列表只有一个模型，已自动选中。',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF64748B),
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
               ),
             Text(
               '${safeIndex + 1} / ${models.length}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF94A3B8),
-                fontWeight: FontWeight.w700,
-              ),
+              style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
             ),
           ],
           if (message != null) ...[
             const SizedBox(height: 10),
             Text(
               message!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF0F766E),
+              style: const TextStyle(
+                fontSize: 14,
+                color: Color(0xFF0EA5A4),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -2359,11 +1941,9 @@ class _ModelSliderSelector extends StatelessWidget {
   }
 }
 
-// ========== 底部面板 ==========
-// 这里放头像/背景选择、账号信息等弹层组件。
+// ========== Bottom sheets ==========
 class _SheetContainer extends StatelessWidget {
   const _SheetContainer({required this.child});
-
   final Widget child;
 
   @override
@@ -2373,8 +1953,10 @@ class _SheetContainer extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(top: 48),
         decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadii.sheet),
+          ),
         ),
         child: child,
       ),
@@ -2388,52 +1970,42 @@ class _ActionListSheet extends StatelessWidget {
     required this.description,
     required this.actions,
   });
-
-  final String title;
-  final String description;
+  final String title, description;
   final List<_ActionItem> actions;
 
   @override
   Widget build(BuildContext context) {
     return _SheetContainer(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(999),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              description,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
-            ),
-            const SizedBox(height: 16),
-            ...actions.map(
-              (action) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _ActionTile(item: action),
+              const SizedBox(height: 16),
+              Text(title, style: AppTextStyles.h2(context)),
+              const SizedBox(height: 6),
+              Text(description, style: AppTextStyles.bodySmall(context)),
+              const SizedBox(height: 16),
+              ...actions.map(
+                (action) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _ActionTile(item: action),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2442,7 +2014,6 @@ class _ActionListSheet extends StatelessWidget {
 
 class _ActionTile extends StatelessWidget {
   const _ActionTile({required this.item});
-
   final _ActionItem item;
 
   @override
@@ -2455,9 +2026,9 @@ class _ActionTile extends StatelessWidget {
         child: Ink(
           padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: AppColors.surfaceAlt,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            border: Border.all(color: AppColors.border),
           ),
           child: Row(
             children: [
@@ -2465,14 +2036,10 @@ class _ActionTile extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
+                  color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(
-                  item.icon,
-                  color: const Color(0xFF0F172A),
-                  size: 19,
-                ),
+                child: Icon(item.icon, color: AppColors.primary, size: 19),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -2483,7 +2050,10 @@ class _ActionTile extends StatelessWidget {
                   ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.textTertiary,
+              ),
             ],
           ),
         ),
@@ -2498,7 +2068,6 @@ class _AvatarPickerSheet extends StatelessWidget {
     required this.presets,
     required this.previewBuilder,
   });
-
   final String currentAvatarId;
   final List<_AvatarPreset> presets;
   final Widget Function(_AvatarPreset preset, double size) previewBuilder;
@@ -2506,88 +2075,82 @@ class _AvatarPickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _SheetContainer(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(999),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '选择预设头像',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '如果你不想用本地头像，可以选择这里的预设样式。',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
-            ),
-            const SizedBox(height: 18),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: presets.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.84,
+              const SizedBox(height: 16),
+              Text('选择预设头像', style: AppTextStyles.h2(context)),
+              const SizedBox(height: 6),
+              Text(
+                '如果你不想用本地头像，可以选择这里的预设样式。',
+                style: AppTextStyles.bodySmall(context),
               ),
-              itemBuilder: (context, index) {
-                final preset = presets[index];
-                final isSelected = preset.id == currentAvatarId;
-
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => Navigator.of(context).pop(preset.id),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Ink(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? const Color(0xFFE0F2FE)
-                            : const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
+              const SizedBox(height: 18),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: presets.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.84,
+                ),
+                itemBuilder: (context, index) {
+                  final preset = presets[index];
+                  final isSelected = preset.id == currentAvatarId;
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(preset.id),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Ink(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
                           color: isSelected
-                              ? const Color(0xFF0EA5E9)
-                              : const Color(0xFFE2E8F0),
-                          width: isSelected ? 1.5 : 1,
+                              ? AppColors.primarySoft
+                              : AppColors.surfaceAlt,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isSelected
+                                ? AppColors.primary
+                                : AppColors.border,
+                            width: isSelected ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            previewBuilder(preset, 58),
+                            const SizedBox(height: 10),
+                            Text(
+                              preset.label,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          previewBuilder(preset, 58),
-                          const SizedBox(height: 10),
-                          Text(
-                            preset.label,
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
-                );
-              },
-            ),
-          ],
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2599,111 +2162,104 @@ class _BackgroundPickerSheet extends StatelessWidget {
     required this.currentBackgroundId,
     required this.presets,
   });
-
   final String currentBackgroundId;
   final List<_BackgroundPreset> presets;
 
   @override
   Widget build(BuildContext context) {
     return _SheetContainer(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(999),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '选择预设背景',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '没有本地背景图时，会使用这里选择的默认背景。',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
-            ),
-            const SizedBox(height: 18),
-            ...presets.map((preset) {
-              final isSelected = preset.id == currentBackgroundId;
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => Navigator.of(context).pop(preset.id),
-                    borderRadius: BorderRadius.circular(22),
-                    child: Ink(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(
-                          color: isSelected
-                              ? const Color(0xFF0EA5E9)
-                              : const Color(0xFFE2E8F0),
-                          width: isSelected ? 1.5 : 1,
+              const SizedBox(height: 16),
+              Text('选择预设背景', style: AppTextStyles.h2(context)),
+              const SizedBox(height: 6),
+              Text(
+                '没有本地背景图时，会使用这里选择的默认背景。',
+                style: AppTextStyles.bodySmall(context),
+              ),
+              const SizedBox(height: 18),
+              ...presets.map((preset) {
+                final isSelected = preset.id == currentBackgroundId;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(preset.id),
+                      borderRadius: BorderRadius.circular(22),
+                      child: Ink(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceAlt,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: isSelected
+                                ? AppColors.primary
+                                : AppColors.border,
+                            width: isSelected ? 1.5 : 1,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 116,
-                            height: 74,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: _BackgroundPreview(preset: preset),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 116,
+                              height: 74,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: _BackgroundPreview(preset: preset),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  preset.label,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w800),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  isSelected ? '当前使用中' : '点击切换这个背景',
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: const Color(0xFF64748B),
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                ),
-                              ],
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    preset.label,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    isSelected ? '当前使用中' : '点击切换这个背景',
+                                    style: AppTextStyles.caption(
+                                      context,
+                                    ).copyWith(fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          if (isSelected)
-                            const Icon(
-                              Icons.check_circle_rounded,
-                              color: Color(0xFF0EA5E9),
-                            ),
-                        ],
+                            if (isSelected)
+                              const Icon(
+                                Icons.check_circle_rounded,
+                                color: AppColors.primary,
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              );
-            }),
-          ],
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -2712,7 +2268,6 @@ class _BackgroundPickerSheet extends StatelessWidget {
 
 class _AccountInfoSheet extends StatelessWidget {
   const _AccountInfoSheet({required this.profile});
-
   final UserProfile profile;
 
   @override
@@ -2723,39 +2278,36 @@ class _AccountInfoSheet extends StatelessWidget {
               '${profile.lastLoginAt!.hour.toString().padLeft(2, '0')}:${profile.lastLoginAt!.minute.toString().padLeft(2, '0')}';
 
     return _SheetContainer(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(999),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '账号信息',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 16),
-            _InfoRow(label: '昵称', value: profile.primaryName),
-            _InfoRow(label: '账号', value: profile.username),
-            _InfoRow(label: '性别', value: profile.gender),
-            _InfoRow(
-              label: '年龄',
-              value: profile.age == null ? '未设置' : '${profile.age} 岁',
-            ),
-            _InfoRow(label: '最近登录', value: lastLoginText),
-          ],
+              const SizedBox(height: 16),
+              Text('账号信息', style: AppTextStyles.h2(context)),
+              const SizedBox(height: 16),
+              _InfoRow(label: '昵称', value: profile.primaryName),
+              _InfoRow(label: '账号', value: profile.username),
+              _InfoRow(label: '性别', value: profile.gender),
+              _InfoRow(
+                label: '年龄',
+                value: profile.age == null ? '未设置' : '${profile.age} 岁',
+              ),
+              _InfoRow(label: '最近登录', value: lastLoginText),
+            ],
+          ),
         ),
       ),
     );
@@ -2764,9 +2316,7 @@ class _AccountInfoSheet extends StatelessWidget {
 
 class _InfoRow extends StatelessWidget {
   const _InfoRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
+  final String label, value;
 
   @override
   Widget build(BuildContext context) {
@@ -2775,28 +2325,22 @@ class _InfoRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
+          color: AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
+          border: Border.all(color: AppColors.border),
         ),
         child: Row(
           children: [
             SizedBox(
               width: 74,
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF64748B),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              child: Text(label, style: AppTextStyles.bodySmall(context)),
             ),
             Expanded(
               child: Text(
                 value,
                 textAlign: TextAlign.right,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: const Color(0xFF0F172A),
+                  color: AppColors.textPrimary,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -2808,8 +2352,7 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-// ========== 局部模型 ==========
-// 这里放页面内部用的小型模型结构。
+// ========== Local models ==========
 class _ProfileEditDraft {
   const _ProfileEditDraft({
     required this.displayName,
@@ -2817,10 +2360,7 @@ class _ProfileEditDraft {
     required this.gender,
     required this.age,
   });
-
-  final String displayName;
-  final String bio;
-  final String gender;
+  final String displayName, bio, gender;
   final int? age;
 }
 
@@ -2830,7 +2370,6 @@ class _ActionItem {
     required this.title,
     required this.onTap,
   });
-
   final IconData icon;
   final String title;
   final VoidCallback onTap;
@@ -2845,9 +2384,7 @@ class _AvatarPreset {
     required this.foregroundColor,
     this.useLogoAsset = false,
   });
-
-  final String id;
-  final String label;
+  final String id, label;
   final IconData icon;
   final List<Color> gradientColors;
   final Color foregroundColor;
@@ -2862,9 +2399,7 @@ class _BackgroundPreset {
     this.imageAsset,
     this.overlayOpacity = 0.2,
   });
-
-  final String id;
-  final String label;
+  final String id, label;
   final List<Color> gradientColors;
   final String? imageAsset;
   final double overlayOpacity;

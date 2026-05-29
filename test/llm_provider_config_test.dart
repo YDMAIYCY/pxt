@@ -150,5 +150,47 @@ void main() {
       expect(config.model, isEmpty);
       expect(config.isConfigured, isFalse);
     });
+
+    test('infers MiniMax token-plan mode from sk-cp API keys', () {
+      final apiMode = LlmProviderConfig.inferApiMode(
+        provider: 'minimax',
+        apiKey: '  sk-cp-user-key  ',
+        baseUrl: '',
+        currentApiMode: LlmApiMode.openAiCompatible,
+      );
+
+      expect(apiMode, LlmApiMode.tokenPlan);
+    });
+
+    test('preserves an existing MiniMax token-plan config while editing', () {
+      final apiMode = LlmProviderConfig.inferApiMode(
+        provider: 'minimax',
+        apiKey: 'sk-user-key',
+        baseUrl: '',
+        currentApiMode: LlmApiMode.tokenPlan,
+      );
+
+      expect(apiMode, LlmApiMode.tokenPlan);
+    });
+
+    test('routes MiniMax token-plan configs away from compatible v1 bases', () {
+      final config = LlmProviderConfig(
+        id: 5,
+        userId: 7,
+        provider: LlmProvider.minimax,
+        apiMode: LlmApiMode.tokenPlan,
+        apiKey: 'sk-cp-user-key',
+        baseUrl: 'https://api.minimax.io/v1',
+        model: 'MiniMax-M2.7',
+        maxTokens: 4096,
+        createdAt: DateTime.utc(2026, 4, 26),
+        updatedAt: DateTime.utc(2026, 4, 26),
+      );
+
+      expect(
+        config.effectiveEndpoint.toString(),
+        'https://api.minimax.io/anthropic/v1/messages',
+      );
+    });
   });
 }

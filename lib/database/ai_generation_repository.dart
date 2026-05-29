@@ -339,6 +339,7 @@ class AiGenerationRepository {
     addUserAndLibrary();
     addUserAndLibrary();
     addUserAndLibrary();
+    args.add(PracticeQuestionKind.normal);
     args.add(limit);
 
     final rows = await db.rawQuery('''
@@ -378,6 +379,7 @@ class AiGenerationRepository {
       JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id
       WHERE documents.user_id = ?
         $libraryClause
+        AND questions.question_kind = ?
       ORDER BY created_at DESC
       LIMIT ?
       ''', args);
@@ -799,9 +801,9 @@ class AiGenerationRepository {
           (SELECT COUNT(*) FROM ${AppDatabase.tableKnowledgeCards} cards JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = cards.document_id WHERE documents.user_id = ?) +
           (SELECT COUNT(*) FROM ${AppDatabase.tableReviewOutlines} outlines JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = outlines.document_id WHERE documents.user_id = ?) +
           (SELECT COUNT(*) FROM ${AppDatabase.tableMindmapTexts} mindmaps JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = mindmaps.document_id WHERE documents.user_id = ?) +
-          (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ?)
+          (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.question_kind = ?)
         ) AS generated_result_count,
-        (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ?) AS practice_question_count,
+        (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.question_kind = ?) AS practice_question_count,
         (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.review_status = 'pending') AS pending_practice_count,
         (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.review_status = 'wrong') AS wrong_question_count,
         (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.review_status = 'mastered') AS mastered_question_count
@@ -813,7 +815,9 @@ class AiGenerationRepository {
         userId,
         userId,
         userId,
+        PracticeQuestionKind.normal,
         userId,
+        PracticeQuestionKind.normal,
         userId,
         userId,
         userId,

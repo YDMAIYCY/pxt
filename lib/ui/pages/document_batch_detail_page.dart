@@ -4,6 +4,7 @@ import '../../database/auth_repository.dart';
 import '../../database/document_batch_repository.dart';
 import '../../database/models/document_batch_record.dart';
 import '../../database/models/source_document_record.dart';
+import '../theme/app_theme.dart';
 import 'document_detail_page.dart';
 
 // ========== 学习包详情页 ==========
@@ -79,11 +80,11 @@ class _DocumentBatchDetailPageState extends State<DocumentBatchDetailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('学习包详情'),
         backgroundColor: Colors.transparent,
-        foregroundColor: const Color(0xFF0B1324),
+        foregroundColor: AppColors.textPrimary,
       ),
       body: FutureBuilder<DocumentBatchWithPages>(
         future: _future,
@@ -148,7 +149,7 @@ class _BatchHeader extends StatelessWidget {
             ),
             child: const Icon(
               Icons.folder_copy_rounded,
-              color: Color(0xFF0C4A6E),
+              color: AppColors.primary,
             ),
           ),
           const SizedBox(width: 12),
@@ -161,7 +162,7 @@ class _BatchHeader extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: const Color(0xFF0B1324),
+                    color: AppColors.textPrimary,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -202,7 +203,7 @@ class _PageList extends StatelessWidget {
           Text(
             '页资料',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: const Color(0xFF0B1324),
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -211,7 +212,7 @@ class _PageList extends StatelessWidget {
             Text(
               '这个学习包暂时没有页资料。',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF64748B),
+                color: AppColors.textSecondary,
                 fontWeight: FontWeight.w600,
               ),
             )
@@ -244,7 +245,7 @@ class _PageTile extends StatelessWidget {
           child: Ink(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: AppColors.background,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
@@ -260,7 +261,7 @@ class _PageTile extends StatelessWidget {
                   child: Text(
                     '${page.pageNumber ?? 1}',
                     style: const TextStyle(
-                      color: Color(0xFF0C4A6E),
+                      color: AppColors.primary,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -275,7 +276,7 @@ class _PageTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: const Color(0xFF0B1324),
+                          color: AppColors.textPrimary,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -283,7 +284,7 @@ class _PageTile extends StatelessWidget {
                       Text(
                         'OCR ${page.ocrStatusLabel} / AI ${page.aiDone ? '已生成' : '待生成'}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -324,7 +325,7 @@ class _StatePanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: const Color(0xFF64748B)),
+            Icon(icon, size: 48, color: AppColors.textSecondary),
             const SizedBox(height: 12),
             Text(
               title,
@@ -338,7 +339,7 @@ class _StatePanel extends StatelessWidget {
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
             FilledButton(
