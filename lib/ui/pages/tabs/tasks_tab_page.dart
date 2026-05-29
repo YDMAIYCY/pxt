@@ -893,6 +893,7 @@ String _questionMeta(PracticeQuestionWithDocument item) {
 
 String _statusLabel(String status) {
   if (status == SourceDocumentOcrStatus.processing) return '进行中';
+  if (status == SourceDocumentOcrStatus.needsReview) return '待校对';
   if (status == SourceDocumentOcrStatus.success) return '已完成';
   if (status == SourceDocumentOcrStatus.failed) return '失败';
   switch (status) {
@@ -910,6 +911,9 @@ String _statusLabel(String status) {
 
 Color _statusColor(String status) {
   if (status == SourceDocumentOcrStatus.processing) return AppColors.info;
+  if (status == SourceDocumentOcrStatus.needsReview) {
+    return const Color(0xFFF59E0B);
+  }
   if (status == SourceDocumentOcrStatus.success) return AppColors.success;
   if (status == SourceDocumentOcrStatus.failed) return AppColors.error;
   switch (status) {

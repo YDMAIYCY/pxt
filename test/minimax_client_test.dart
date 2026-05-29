@@ -251,6 +251,120 @@ void main() {
         ),
       );
     });
+
+    test('sends plain OpenAI-compatible chat without JSON response format',
+        () async {
+      Map<String, dynamic>? requestBody;
+      final config = LlmProviderConfig(
+        id: 1,
+        userId: 7,
+        provider: 'deepseek',
+        apiMode: LlmApiMode.openAiCompatible,
+        apiKey: 'sk-deepseek-key',
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
+        maxTokens: 4096,
+        createdAt: DateTime.utc(2026, 5, 29),
+        updatedAt: DateTime.utc(2026, 5, 29),
+      );
+      final client = MiniMaxClient.fromConfig(
+        config,
+        httpClient: MockClient((request) async {
+          requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return _jsonResponse({
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {'role': 'assistant', 'content': '可以，我们来复习。'},
+              },
+            ],
+          });
+        }),
+      );
+
+      final reply = await client.generateChatReply(
+        systemPrompt: '你是学习助手',
+        messages: const [
+          {'role': 'user', 'content': '讲一下导数'},
+        ],
+      );
+
+      expect(requestBody?.containsKey('response_format'), isFalse);
+      expect(requestBody?['messages'], [
+        {'role': 'system', 'content': '你是学习助手'},
+        {'role': 'user', 'content': '讲一下导数'},
+      ]);
+      expect(reply, '可以，我们来复习。');
+    });
+
+    test('sends plain Token Plan chat without JSON response format', () async {
+      Map<String, dynamic>? requestBody;
+      final client = MiniMaxClient(
+        apiKey: 'sk-cp-test-token-plan-key',
+        endpoint: Uri.parse('https://example.com/anthropic/v1/messages'),
+        httpClient: MockClient((request) async {
+          requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return _jsonResponse({
+            'content': [
+              {'type': 'text', 'text': '当然可以。'},
+            ],
+            'stop_reason': 'end_turn',
+          });
+        }),
+      );
+
+      final reply = await client.generateChatReply(
+        systemPrompt: '你是学习助手',
+        messages: const [
+          {'role': 'user', 'content': '帮我规划复习'},
+        ],
+      );
+
+      expect(requestBody?.containsKey('response_format'), isFalse);
+      expect(requestBody?['system'], '你是学习助手');
+      expect(requestBody?['messages'], [
+        {'role': 'user', 'content': '帮我规划复习'},
+      ]);
+      expect(reply, '当然可以。');
+    });
+
+    test('sends plain MiniMax chat without structured output schema', () async {
+      Map<String, dynamic>? requestBody;
+      final client = MiniMaxClient(
+        apiKey: 'test-key',
+        apiMode: LlmApiMode.openPlatform,
+        endpoint: Uri.parse('https://example.com/v1/text/chatcompletion_v2'),
+        httpClient: MockClient((request) async {
+          requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return _jsonResponse({
+            'choices': [
+              {
+                'finish_reason': 'stop',
+                'message': {'content': '先看定义，再做例题。'},
+              },
+            ],
+          });
+        }),
+      );
+
+      final reply = await client.generateChatReply(
+        systemPrompt: '你是学习助手',
+        messages: const [
+          {'role': 'user', 'content': '函数怎么学'},
+          {'role': 'assistant', 'content': '先理解图像。'},
+          {'role': 'user', 'content': '然后呢'},
+        ],
+      );
+
+      expect(requestBody?.containsKey('response_format'), isFalse);
+      expect(requestBody?['messages'], [
+        {'role': 'system', 'content': '你是学习助手'},
+        {'role': 'user', 'content': '函数怎么学'},
+        {'role': 'assistant', 'content': '先理解图像。'},
+        {'role': 'user', 'content': '然后呢'},
+      ]);
+      expect(reply, '先看定义，再做例题。');
+    });
   });
 }
 

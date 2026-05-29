@@ -6,11 +6,13 @@ import 'package:pxt1/database/models/ai_result_records.dart';
 void main() {
   group('Stage 12 review metadata', () {
     test('database version and training table are registered', () {
-      expect(AppDatabase.databaseVersion, 9);
+      expect(AppDatabase.databaseVersion, 10);
       expect(
         AppDatabase.tableWrongQuestionTrainings,
         'wrong_question_trainings',
       );
+      expect(AppDatabase.tableAiChatSessions, 'ai_chat_sessions');
+      expect(AppDatabase.tableAiChatMessages, 'ai_chat_messages');
     });
 
     test('practice question reads spaced review metadata', () {

@@ -197,6 +197,29 @@ void main() {
     expect(find.text('ai-${_ocrCompleteBatchPage.id}'), findsOneWidget);
   });
 
+  testWidgets('Home AI Chat quick entry opens the chat page', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        HomeTabPage(
+          refreshVersion: 0,
+          authRepository: _FakeAuthRepository(),
+          sourceDocumentRepository: _FakeSourceDocumentRepository(),
+          aiGenerationRepository: _FakeAiGenerationRepository(),
+          documentBatchRepository: _FakeDocumentBatchRepository(),
+          knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+          aiChatPageBuilder: () => const _MarkerPage('ai-chat'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('AI Chat'));
+    await tester.tap(find.text('AI Chat'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ai-chat'), findsOneWidget);
+  });
+
   testWidgets('Profile entries switch bottom tabs when callback is available', (
     tester,
   ) async {

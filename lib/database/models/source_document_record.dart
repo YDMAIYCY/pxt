@@ -14,6 +14,7 @@ class SourceDocumentOcrStatus {
 
   static const String pending = 'pending';
   static const String processing = 'processing';
+  static const String needsReview = 'needs_review';
   static const String success = 'success';
   static const String failed = 'failed';
 
@@ -22,6 +23,7 @@ class SourceDocumentOcrStatus {
     switch (raw) {
       case pending:
       case processing:
+      case needsReview:
       case success:
       case failed:
         return raw;
@@ -75,6 +77,8 @@ class SourceDocumentRecord {
         return '待识别';
       case SourceDocumentOcrStatus.processing:
         return '识别中';
+      case SourceDocumentOcrStatus.needsReview:
+        return '待校对';
       case SourceDocumentOcrStatus.success:
         return '识别成功';
       case SourceDocumentOcrStatus.failed:

@@ -2,6 +2,7 @@ import '../database/models/ocr_text_record.dart';
 import '../database/models/source_document_record.dart';
 import '../database/ocr_text_repository.dart';
 import '../ocr/local_ocr_client.dart';
+import '../ocr/ocr_text_quality_evaluator.dart';
 
 class OcrRunResult {
   const OcrRunResult({
@@ -28,12 +29,15 @@ class OcrPipelineService {
   Future<OcrRunResult> runForDocument({
     required SourceDocumentRecord document,
     String language = 'zh-CN',
+    String? imagePathOverride,
   }) async {
     await _ocrTextRepository.markOcrProcessing(documentId: document.id);
 
     try {
       final result = await _localOcrClient.recognizeImage(
-        imagePath: document.imagePath,
+        imagePath: imagePathOverride?.trim().isNotEmpty == true
+            ? imagePathOverride!.trim()
+            : document.imagePath,
         language: language,
       );
 
@@ -43,11 +47,25 @@ class OcrPipelineService {
         throw const EmptyOcrResultException('识别为空，请重试或更换清晰图片');
       }
 
+      final quality = OcrTextQualityEvaluator.evaluate(
+        rawText: rawText.isEmpty ? cleanText : rawText,
+        cleanText: cleanText.isEmpty ? rawText : cleanText,
+      );
+      final needsReview = !quality.isUsableForAutomation;
+      final message = needsReview
+          ? 'OCR 质量较低，已保存为“待校对”，请框选重试、AI 修复或人工确认 finalText'
+          : 'OCR 识别成功';
+
       await _ocrTextRepository.upsertOcrText(
         documentId: document.id,
         rawText: rawText.isEmpty ? cleanText : rawText,
         cleanText: cleanText.isEmpty ? rawText : cleanText,
+        quality: quality,
         language: result.language,
+        ocrStatus: needsReview
+            ? SourceDocumentOcrStatus.needsReview
+            : SourceDocumentOcrStatus.success,
+        ocrErrorMessage: needsReview ? message : null,
       );
 
       final savedRecord = await _ocrTextRepository.getByDocumentId(document.id);
@@ -56,8 +74,8 @@ class OcrPipelineService {
       }
 
       return OcrRunResult(
-        success: true,
-        message: 'OCR 识别成功',
+        success: !needsReview,
+        message: message,
         record: savedRecord,
       );
     } catch (error) {

@@ -20,8 +20,10 @@ import '../../../pipeline/document_ingest_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../ai_generation_page.dart';
+import '../ai_chat_page.dart';
 import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
+import '../image_crop_selection_page.dart';
 import '../../../game/games_hub_page.dart';
 import '../practice_review_page.dart';
 
@@ -35,6 +37,7 @@ class HomeTabPage extends StatefulWidget {
     this.documentIngestService,
     this.detailPageBuilder,
     this.aiGenerationPageBuilder,
+    this.aiChatPageBuilder,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
@@ -51,6 +54,7 @@ class HomeTabPage extends StatefulWidget {
   final DocumentIngestService? documentIngestService;
   final Widget Function(int documentId)? detailPageBuilder;
   final Widget Function(int documentId)? aiGenerationPageBuilder;
+  final Widget Function()? aiChatPageBuilder;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
@@ -205,12 +209,33 @@ class _HomeTabPageState extends State<HomeTabPage> {
         source: source,
       );
       if (!mounted || document == null) return;
+      await _offerCropForImportedDocument(document);
+      if (!mounted) return;
       await _openDocument(document.id);
     } catch (error) {
       if (mounted) _showMessage('导入失败：$error');
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
+  }
+
+  Future<void> _offerCropForImportedDocument(
+    SourceDocumentRecord document,
+  ) async {
+    final croppedPath = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => ImageCropSelectionPage(imagePath: document.imagePath),
+      ),
+    );
+    if (!mounted || croppedPath == null || croppedPath.trim().isEmpty) {
+      return;
+    }
+
+    await _sourceDocumentRepository.updateDocumentImagePath(
+      userId: document.userId,
+      documentId: document.id,
+      imagePath: croppedPath,
+    );
   }
 
   Future<void> _handleBatchImport(BatchDocumentInputSource source) async {
@@ -368,6 +393,11 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _afterDataChanged();
   }
 
+  Future<void> _openAiChat() async {
+    final page = widget.aiChatPageBuilder?.call() ?? const AiChatPage();
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
   Future<void> _openPractice() async {
     await Navigator.of(
       context,
@@ -432,6 +462,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
                         onPdf: () =>
                             _handleBatchImport(BatchDocumentInputSource.pdf),
                         onAi: _openAiGeneration,
+                        onAiChat: _openAiChat,
                         onPractice: _openPractice,
                         onGames: _openGames,
                       ),
@@ -511,6 +542,7 @@ class _QuickActions extends StatelessWidget {
     required this.onMultiImage,
     required this.onPdf,
     required this.onAi,
+    required this.onAiChat,
     required this.onPractice,
     required this.onGames,
   });
@@ -521,6 +553,7 @@ class _QuickActions extends StatelessWidget {
   final VoidCallback onMultiImage;
   final VoidCallback onPdf;
   final VoidCallback onAi;
+  final VoidCallback onAiChat;
   final VoidCallback onPractice;
   final VoidCallback onGames;
 
@@ -574,6 +607,14 @@ class _QuickActions extends StatelessWidget {
                   iconAsset: AppAssets.iconAi,
                   title: '生成 AI 结果',
                   onTap: onAi,
+                ),
+              ),
+              SizedBox(
+                width: width,
+                child: _ActionTile(
+                  icon: Icons.smart_toy_rounded,
+                  title: 'AI Chat',
+                  onTap: onAiChat,
                 ),
               ),
               SizedBox(

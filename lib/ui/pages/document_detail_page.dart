@@ -286,15 +286,54 @@ class _OcrSection extends StatelessWidget {
       title: 'OCR 文本',
       child: ocrRecord == null
           ? const _EmptyHint(text: '暂无 OCR 文本，请先执行 OCR。')
-          : SelectableText(
-              ocrRecord!.cleanText.trim().isNotEmpty
-                  ? ocrRecord!.cleanText
-                  : ocrRecord!.rawText,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.textPrimary,
-                height: 1.5,
-              ),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (ocrRecord!.isLowQuality && !ocrRecord!.hasFinalText) ...[
+                  const _QualityWarning(
+                    text: 'OCR 质量较低，建议进入 OCR 页面框选重试、AI 修复或确认 finalText 后再生成。',
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                if (ocrRecord!.hasFinalText) ...[
+                  const _Tag(text: '已使用 finalText'),
+                  const SizedBox(height: 10),
+                ],
+                SelectableText(
+                  ocrRecord!.effectiveText,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textPrimary,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
+    );
+  }
+}
+
+class _QualityWarning extends StatelessWidget {
+  const _QualityWarning({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: const Color(0xFF9A3412),
+          fontWeight: FontWeight.w700,
+          height: 1.4,
+        ),
+      ),
     );
   }
 }

@@ -231,6 +231,31 @@ class SourceDocumentRepository {
     });
   }
 
+  Future<void> updateDocumentImagePath({
+    required int userId,
+    required int documentId,
+    required String imagePath,
+  }) async {
+    await _database.ensureSchemaReady();
+    final db = await _database.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final updated = await db.update(
+      AppDatabase.tableSourceDocuments,
+      {
+        'image_path': imagePath.trim(),
+        'ocr_status': SourceDocumentOcrStatus.pending,
+        'ocr_error_message': null,
+        'ocr_updated_at': now,
+      },
+      where: 'id = ? AND user_id = ?',
+      whereArgs: [documentId, userId],
+    );
+
+    if (updated == 0) {
+      throw StateError('资料不存在或无权更新图片');
+    }
+  }
+
   Future<void> deleteDocument({
     required int userId,
     required int documentId,

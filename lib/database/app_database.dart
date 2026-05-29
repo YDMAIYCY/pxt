@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 9;
+  static const int databaseVersion = 10;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -27,6 +27,8 @@ class AppDatabase {
   static const String tableWrongQuestionExplanations =
       'wrong_question_explanations';
   static const String tableWrongQuestionTrainings = 'wrong_question_trainings';
+  static const String tableAiChatSessions = 'ai_chat_sessions';
+  static const String tableAiChatMessages = 'ai_chat_messages';
 
   Database? _database;
 
@@ -144,6 +146,10 @@ class AppDatabase {
         document_id INTEGER NOT NULL UNIQUE,
         raw_text TEXT NOT NULL,
         clean_text TEXT,
+        final_text TEXT,
+        quality_score INTEGER,
+        quality_level TEXT,
+        quality_reasons_json TEXT,
         language TEXT NOT NULL DEFAULT 'zh-CN',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -265,6 +271,31 @@ class AppDatabase {
       );
     ''');
 
+    await db.execute('''
+      CREATE TABLE $tableAiChatSessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        last_message_preview TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE $tableAiChatMessages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES $tableAiChatSessions(id) ON DELETE CASCADE
+      );
+    ''');
+
     await db.execute(
       'CREATE INDEX idx_users_username ON $tableUsers(username);',
     );
@@ -319,6 +350,18 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_llm_configs_user_id ON $tableLlmProviderConfigs(user_id);',
     );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_sessions_user_id ON $tableAiChatSessions(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_sessions_updated_at ON $tableAiChatSessions(updated_at);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_messages_session_id ON $tableAiChatMessages(session_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_messages_created_at ON $tableAiChatMessages(created_at);',
+    );
   }
 
   Future<void> _upgradeTables(
@@ -349,6 +392,10 @@ class AppDatabase {
     }
     if (oldVersion < 9) {
       await _upgradePracticeSchedulingToV9(db);
+    }
+    if (oldVersion < 10) {
+      await _upgradeOcrQualityToV10(db);
+      await _upgradeAiChatToV10(db);
     }
   }
 
@@ -397,7 +444,8 @@ class AppDatabase {
       SET
         ocr_status = 'success',
         ocr_updated_at = COALESCE(ocr_updated_at, created_at)
-      WHERE id IN (SELECT document_id FROM $tableOcrTexts);
+      WHERE id IN (SELECT document_id FROM $tableOcrTexts)
+        AND (ocr_status IS NULL OR TRIM(ocr_status) = '' OR ocr_status = 'pending');
       ''');
   }
 
@@ -646,6 +694,62 @@ class AppDatabase {
     );
   }
 
+  Future<void> _upgradeAiChatToV10(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableAiChatSessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        last_message_preview TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableAiChatMessages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES $tableAiChatSessions(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_sessions_user_id ON $tableAiChatSessions(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_sessions_updated_at ON $tableAiChatSessions(updated_at);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_session_id ON $tableAiChatMessages(session_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created_at ON $tableAiChatMessages(created_at);',
+    );
+  }
+
+  Future<void> _upgradeOcrQualityToV10(Database db) async {
+    if (!await _tableExists(db, tableOcrTexts)) {
+      return;
+    }
+
+    await _addColumnIfMissing(db, tableOcrTexts, 'final_text', 'TEXT');
+    await _addColumnIfMissing(db, tableOcrTexts, 'quality_score', 'INTEGER');
+    await _addColumnIfMissing(db, tableOcrTexts, 'quality_level', 'TEXT');
+    await _addColumnIfMissing(
+      db,
+      tableOcrTexts,
+      'quality_reasons_json',
+      'TEXT',
+    );
+  }
+
   // 兼容历史版本中“版本号已升级但列缺失”的异常状态，启动时自动补齐。
   Future<void> _ensureSchemaConsistency(Database db) async {
     await db.execute('''
@@ -740,7 +844,12 @@ class AppDatabase {
           SET
             ocr_status = 'success',
             ocr_updated_at = COALESCE(ocr_updated_at, created_at)
-          WHERE id IN (SELECT document_id FROM $tableOcrTexts);
+          WHERE id IN (SELECT document_id FROM $tableOcrTexts)
+            AND (
+              ocr_status IS NULL
+              OR TRIM(ocr_status) = ''
+              OR ocr_status = 'pending'
+            );
           ''');
       }
 
@@ -774,6 +883,7 @@ class AppDatabase {
 
     if (await _tableExists(db, tableOcrTexts)) {
       await _addColumnIfMissing(db, tableOcrTexts, 'updated_at', 'TEXT');
+      await _upgradeOcrQualityToV10(db);
       await db.execute('''
         UPDATE $tableOcrTexts
         SET updated_at = COALESCE(updated_at, created_at)
@@ -809,6 +919,8 @@ class AppDatabase {
     await _upgradeLlmConfigsToV6(db);
     await _upgradePracticeQuestionsToV7(db);
     await _upgradePracticeSchedulingToV9(db);
+    await _upgradeOcrQualityToV10(db);
+    await _upgradeAiChatToV10(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

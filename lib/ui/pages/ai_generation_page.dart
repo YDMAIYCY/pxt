@@ -161,7 +161,7 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     try {
       final result = await _aiGenerationOrchestrator.generateSingle(
         documentId: document!.id,
-        ocrText: ocrRecord!.cleanText,
+        ocrText: ocrRecord!.effectiveText,
         taskType: taskType,
         llmConfig: llmConfig,
       );
@@ -209,7 +209,7 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     try {
       final batchResult = await _aiGenerationOrchestrator.generateAll(
         documentId: document!.id,
-        ocrText: ocrRecord!.cleanText,
+        ocrText: ocrRecord!.effectiveText,
         llmConfig: llmConfig,
       );
 
@@ -245,8 +245,12 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
       _showMessage('资料信息未加载完成，请稍后再试');
       return false;
     }
-    if (ocrRecord == null || ocrRecord.cleanText.trim().isEmpty) {
-      _showMessage('请先完成 OCR，并确保清洗后文本不为空');
+    if (ocrRecord == null || ocrRecord.effectiveText.trim().isEmpty) {
+      _showMessage('请先完成 OCR，并确保 finalText 或清洗后文本不为空');
+      return false;
+    }
+    if (!ocrRecord.isUsableForAutomation) {
+      _showMessage('OCR 质量较低，请先在 OCR 页面框选重试、AI 修复或确认 finalText');
       return false;
     }
     if (llmConfig == null || !llmConfig.isConfigured) {
@@ -291,7 +295,7 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
           final data = snapshot.data!;
           final canGenerate =
               data.ocrRecord != null &&
-              data.ocrRecord!.cleanText.trim().isNotEmpty &&
+              data.ocrRecord!.isUsableForAutomation &&
               data.llmConfig != null &&
               data.llmConfig!.isConfigured;
 
