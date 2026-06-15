@@ -79,7 +79,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
     await _authRepository.ensureInitialized();
     final currentUser = await _authRepository.getCurrentUserProfile();
     if (currentUser == null) {
-      throw StateError('?????????????');
+      throw StateError('登录状态已失效，请重新登录');
     }
 
     final document = await _sourceDocumentRepository.getSourceDocumentById(
@@ -87,7 +87,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
       documentId: widget.documentId,
     );
     if (document == null) {
-      throw StateError('??????????');
+      throw StateError('资料不存在或无权访问');
     }
 
     final ocrRecord = await _ocrTextRepository.getByDocumentId(
@@ -117,7 +117,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
 
     final document = _document;
     if (document == null) {
-      _showMessage('???????????????');
+      _showMessage('当前资料未加载完成，请稍后再试');
       return;
     }
 
@@ -140,7 +140,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
       await _reloadPageData();
     } catch (_) {
       if (mounted) {
-        _showMessage('OCR ????????????????????');
+        _showMessage('OCR 执行完成，但页面刷新失败，请手动下拉重试');
       }
     } finally {
       if (mounted) {
@@ -158,7 +158,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
 
     final document = _document;
     if (document == null) {
-      _showMessage('???????????????');
+      _showMessage('当前资料未加载完成，请稍后再试');
       return;
     }
 
@@ -180,7 +180,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
       await _runOcr(imagePathOverride: croppedPath);
     } catch (error) {
       if (mounted) {
-        _showMessage('?????????$error');
+        _showMessage('框选重试失败：$error');
       }
     }
   }
@@ -192,7 +192,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
 
     final document = _document;
     if (document == null) {
-      _showMessage('???????????????');
+      _showMessage('当前资料未加载完成，请稍后再试');
       return;
     }
 
@@ -201,7 +201,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
     final finalText = _finalTextController.text.trim();
 
     if (rawText.isEmpty && cleanText.isEmpty && finalText.isEmpty) {
-      _showMessage('??????????????AI ???????');
+      _showMessage('识别文本不能为空，请先识别、手动输入或填写 finalText');
       return;
     }
 
@@ -232,20 +232,18 @@ class _OcrResultPageState extends State<OcrResultPage> {
         ocrStatus: needsReview
             ? SourceDocumentOcrStatus.needsReview
             : SourceDocumentOcrStatus.success,
-        ocrErrorMessage: needsReview
-            ? 'OCR ???????????AI ????? finalText'
-            : null,
+        ocrErrorMessage: needsReview ? 'OCR 质量较低，请先 AI 修复或确认 finalText' : null,
       );
 
       if (!mounted) {
         return;
       }
 
-      _showMessage(needsReview ? '??????? OCR ?????????' : 'OCR ?????????');
+      _showMessage(needsReview ? '已保存，OCR 质量仍需校对' : 'OCR 文本已保存');
       await _reloadPageData();
     } catch (error) {
       if (mounted) {
-        _showMessage('?????$error');
+        _showMessage('保存失败：$error');
       }
     } finally {
       if (mounted) {
@@ -259,13 +257,13 @@ class _OcrResultPageState extends State<OcrResultPage> {
   Future<void> _confirmFinalText() async {
     final document = _document;
     if (document == null) {
-      _showMessage('???????????????');
+      _showMessage('当前资料未加载完成，请稍后再试');
       return;
     }
 
     final finalText = _resolveFinalTextCandidate();
     if (finalText.isEmpty) {
-      _showMessage('finalText ??????? AI ?????????');
+      _showMessage('finalText 不能为空，请先识别或手动输入文本');
       return;
     }
 
@@ -277,11 +275,11 @@ class _OcrResultPageState extends State<OcrResultPage> {
       );
       if (!mounted) return;
       _finalTextController.text = finalText;
-      _showMessage('finalText ?????????? AI ????????');
+      _showMessage('finalText 已确认，后续 AI 生成将优先使用');
       await _reloadPageData();
     } catch (error) {
       if (mounted) {
-        _showMessage('?? finalText ???$error');
+        _showMessage('确认 finalText 失败：$error');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -295,27 +293,27 @@ class _OcrResultPageState extends State<OcrResultPage> {
 
     final document = _document;
     if (document == null) {
-      _showMessage('???????????????');
+      _showMessage('当前资料未加载完成，请稍后再试');
       return;
     }
 
     final rawText = _rawTextController.text.trim();
     final cleanText = _cleanTextController.text.trim();
     if (rawText.isEmpty && cleanText.isEmpty) {
-      _showMessage('?? OCR ????? rawText/cleanText???? AI ??');
+      _showMessage('请先 OCR 或填写 rawText/cleanText，再使用 AI 修复');
       return;
     }
 
     final currentUser = await _authRepository.getCurrentUserProfile();
     if (!mounted) return;
     if (currentUser == null) {
-      _showMessage('?????????????');
+      _showMessage('登录状态已失效，请重新登录');
       return;
     }
     final llmConfig = await _llmConfigRepository.getByUserId(currentUser.id);
     if (!mounted) return;
     if (llmConfig == null || !llmConfig.isConfigured) {
-      _showMessage('?????????? AI ??? API Key');
+      _showMessage('请先到“我的”页配置 AI 大模型 API Key');
       return;
     }
 
@@ -336,13 +334,13 @@ class _OcrResultPageState extends State<OcrResultPage> {
       _finalTextController.text = repaired.finalText;
       _showMessage(
         repaired.summary.isEmpty
-            ? 'AI ????????? finalText'
-            : 'AI ?????${repaired.summary}',
+            ? 'AI 已修复并生成 finalText'
+            : 'AI 修复完成：${repaired.summary}',
       );
       await _reloadPageData();
     } catch (error) {
       if (mounted) {
-        _showMessage('AI ?????$error');
+        _showMessage('AI 修复失败：$error');
       }
     } finally {
       if (mounted) setState(() => _isRepairing = false);
@@ -368,7 +366,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('OCR ??'),
+        title: const Text('OCR 结果'),
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
       ),
@@ -382,9 +380,9 @@ class _OcrResultPageState extends State<OcrResultPage> {
           if (snapshot.hasError) {
             return _OcrStatePanel(
               icon: Icons.error_outline_rounded,
-              title: 'OCR ??????',
-              description: '??????????????????',
-              actionLabel: '????',
+              title: 'OCR 页面加载失败',
+              description: '请稍后重试，或返回资料详情重新进入。',
+              actionLabel: '重新加载',
               onPressed: _reloadPageData,
             );
           }
@@ -444,8 +442,8 @@ class _OcrResultPageState extends State<OcrResultPage> {
                     const SizedBox(height: 8),
                     Text(
                       data.document.ocrErrorMessage?.trim().isNotEmpty == true
-                          ? '???${data.document.ocrErrorMessage}'
-                          : '?????????? OCR???????????? AI ???? AI ??????? finalText?',
+                          ? '失败原因：${data.document.ocrErrorMessage}'
+                          : '支持识别后重试；也可以框选范围、AI 修复，或手动确认 finalText。',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
                         height: 1.45,
@@ -473,20 +471,20 @@ class _OcrResultPageState extends State<OcrResultPage> {
               _QualityPanel(record: data.ocrRecord),
               const SizedBox(height: 16),
               _TextEditorCard(
-                title: '?????? rawText',
-                hintText: '????? OCR??????????????????',
+                title: '原始识别文本 rawText',
+                hintText: '点击“开始 OCR”后会展示原始文本；你也可手动输入。',
                 controller: _rawTextController,
               ),
               const SizedBox(height: 14),
               _TextEditorCard(
-                title: '????? cleanText',
-                hintText: '??????????????????????? AI ???',
+                title: '清洗后文本 cleanText',
+                hintText: '建议保留结构清晰的可读版本，作为后续 AI 生成输入。',
                 controller: _cleanTextController,
               ),
               const SizedBox(height: 14),
               _TextEditorCard(
-                title: '???? finalText',
-                hintText: 'AI ?????????????????? AI ??????????',
+                title: '确认文本 finalText',
+                hintText: 'AI 生成会优先使用这里的最终文本；为空时使用清洗后文本。',
                 controller: _finalTextController,
               ),
               if (data.ocrRecord == null) ...[
@@ -498,7 +496,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Text(
-                    '???? OCR ??????????????????????????????',
+                    '当前尚无 OCR 入库记录。完成识别或保存后，这里会进入数据库并同步首页状态。',
                     style: TextStyle(
                       color: Color(0xFF854D0E),
                       fontWeight: FontWeight.w600,
@@ -552,7 +550,7 @@ class _OcrActionButtons extends StatelessWidget {
                 icon: Icon(
                   hasSuccess ? Icons.refresh_rounded : Icons.play_arrow_rounded,
                 ),
-                label: Text(hasSuccess ? '?? OCR' : '?? OCR'),
+                label: Text(hasSuccess ? '重试 OCR' : '开始 OCR'),
               ),
             ),
             const SizedBox(width: 10),
@@ -560,7 +558,7 @@ class _OcrActionButtons extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: isBusy ? null : onCropAndRunOcr,
                 icon: const Icon(Icons.crop_rounded),
-                label: const Text('????'),
+                label: const Text('框选重试'),
               ),
             ),
           ],
@@ -578,7 +576,7 @@ class _OcrActionButtons extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.auto_fix_high_rounded),
-                label: const Text('AI ??'),
+                label: const Text('AI 修复'),
               ),
             ),
             const SizedBox(width: 10),
@@ -592,7 +590,7 @@ class _OcrActionButtons extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.save_rounded),
-                label: const Text('????'),
+                label: const Text('保存修改'),
               ),
             ),
           ],
@@ -603,7 +601,7 @@ class _OcrActionButtons extends StatelessWidget {
           child: FilledButton.tonalIcon(
             onPressed: isBusy ? null : onConfirmFinalText,
             icon: const Icon(Icons.verified_rounded),
-            label: const Text('?? finalText??????? AI ??'),
+            label: const Text('确认 finalText 并用于后续 AI 生成'),
           ),
         ),
       ],
@@ -644,7 +642,7 @@ class _QualityPanel extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                'OCR ????',
+                'OCR 质量',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.w800,
@@ -655,8 +653,8 @@ class _QualityPanel extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             qualityScore == null
-                ? '??????? OCR ????????????'
-                : '?? $qualityScore / 100 ? ${_qualityLevelLabel(qualityLevel)}',
+                ? '尚未评估 OCR 质量'
+                : '评分 $qualityScore / 100 · ${_qualityLevelLabel(qualityLevel)}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: isLow ? const Color(0xFF9A3412) : AppColors.textSecondary,
               fontWeight: FontWeight.w700,
@@ -666,7 +664,7 @@ class _QualityPanel extends StatelessWidget {
           if (isLow) ...[
             const SizedBox(height: 6),
             Text(
-              '??????????? AI ???????????????? AI ??/???? finalText?',
+              '低质量文本会影响 AI 生成，请优先使用框选重试、AI 修复或确认 finalText。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: const Color(0xFF9A3412),
                 height: 1.45,
@@ -866,30 +864,30 @@ _OcrStatusStyle _ocrStyleOf(String status) {
 String _qualityLevelLabel(String? level) {
   switch (level) {
     case 'high':
-      return '???';
+      return '高质量';
     case 'medium':
-      return '????';
+      return '中等质量';
     case 'low':
-      return '???';
+      return '低质量';
     default:
-      return '???';
+      return '未评估';
   }
 }
 
 String _qualityReasonLabel(String reason) {
   switch (reason) {
     case 'ui_noise':
-      return '??????';
+      return '界面噪声较多';
     case 'ineffective_cleaning':
-      return '???????';
+      return '清洗效果有限';
     case 'too_short':
-      return '????';
+      return '文本过短';
     case 'too_many_symbols':
-      return '??????';
+      return '符号过多';
     case 'low_chinese_ratio':
-      return '??????';
+      return '中文占比较低';
     case 'suspicious_structure':
-      return '????';
+      return '结构可疑';
     default:
       return reason;
   }

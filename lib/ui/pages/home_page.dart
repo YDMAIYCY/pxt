@@ -7,12 +7,14 @@ import '../theme/app_theme.dart';
 import 'login_page.dart';
 import 'tabs/home_tab_page.dart';
 import 'tabs/knowledge_tab_page.dart';
+import 'tabs/focus_tab_page.dart';
 import 'tabs/profile_tab_page.dart';
 import 'tabs/tasks_tab_page.dart';
 
 const List<_BottomDockItem> _bottomDockItems = [
   _BottomDockItem(label: '首页', iconAsset: AppAssets.navHome),
   _BottomDockItem(label: '知识库', iconAsset: AppAssets.navKnowledge),
+  _BottomDockItem(label: '专注', icon: Icons.timer_rounded),
   _BottomDockItem(label: '任务', iconAsset: AppAssets.navTask),
   _BottomDockItem(label: '我的', iconAsset: AppAssets.navProfile),
 ];
@@ -94,14 +96,20 @@ class _HomePageState extends State<HomePage> {
         activeTabListenable: _activeTabNotifier,
         onDataChanged: _notifyDataChanged,
       ),
-      TasksTabPage(
+      FocusTabPage(
         tabIndex: 2,
         refreshListenable: _refreshNotifier,
         activeTabListenable: _activeTabNotifier,
         onDataChanged: _notifyDataChanged,
       ),
-      ProfileTabPage(
+      TasksTabPage(
         tabIndex: 3,
+        refreshListenable: _refreshNotifier,
+        activeTabListenable: _activeTabNotifier,
+        onDataChanged: _notifyDataChanged,
+      ),
+      ProfileTabPage(
+        tabIndex: 4,
         refreshListenable: _refreshNotifier,
         activeTabListenable: _activeTabNotifier,
         onOpenTab: _selectTab,
@@ -205,15 +213,22 @@ class _DockButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const SizedBox(height: 2),
-              SvgPicture.asset(
-                item.iconAsset,
-                width: 22,
-                height: 22,
-                colorFilter: ColorFilter.mode(
-                  isSelected ? AppColors.primary : AppColors.textTertiary,
-                  BlendMode.srcIn,
+              if (item.iconAsset != null)
+                SvgPicture.asset(
+                  item.iconAsset!,
+                  width: 22,
+                  height: 22,
+                  colorFilter: ColorFilter.mode(
+                    isSelected ? AppColors.primary : AppColors.textTertiary,
+                    BlendMode.srcIn,
+                  ),
+                )
+              else if (item.icon != null)
+                Icon(
+                  item.icon,
+                  size: 22,
+                  color: isSelected ? AppColors.primary : AppColors.textTertiary,
                 ),
-              ),
               const SizedBox(height: 2),
               Text(
                 item.label,
@@ -234,8 +249,9 @@ class _DockButton extends StatelessWidget {
 }
 
 class _BottomDockItem {
-  const _BottomDockItem({required this.label, required this.iconAsset});
+  const _BottomDockItem({required this.label, this.iconAsset, this.icon});
 
   final String label;
-  final String iconAsset;
+  final String? iconAsset;
+  final IconData? icon;
 }

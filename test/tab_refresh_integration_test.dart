@@ -241,10 +241,15 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.report_problem_rounded));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.collections_bookmark_rounded).last);
+    await tester.scrollUntilVisible(
+      find.text('我的知识库收藏'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('我的知识库收藏'));
     await tester.pumpAndSettle();
 
-    expect(openedTabs, [2, 1]);
+    expect(openedTabs, [3, 1]);
   });
 }
 

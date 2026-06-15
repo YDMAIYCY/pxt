@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 10;
+  static const int databaseVersion = 11;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -29,6 +29,9 @@ class AppDatabase {
   static const String tableWrongQuestionTrainings = 'wrong_question_trainings';
   static const String tableAiChatSessions = 'ai_chat_sessions';
   static const String tableAiChatMessages = 'ai_chat_messages';
+  static const String tablePomodoroTasks = 'pomodoro_tasks';
+  static const String tablePomodoroRecords = 'pomodoro_records';
+  static const String tableCheckinRecords = 'checkin_records';
 
   Database? _database;
 
@@ -397,6 +400,9 @@ class AppDatabase {
       await _upgradeOcrQualityToV10(db);
       await _upgradeAiChatToV10(db);
     }
+    if (oldVersion < 11) {
+      await _upgradeFocusToV11(db);
+    }
   }
 
   Future<void> _upgradeUsersToV2(Database db) async {
@@ -750,6 +756,69 @@ class AppDatabase {
     );
   }
 
+  Future<void> _upgradeFocusToV11(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tablePomodoroTasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        estimated_pomodoros INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tablePomodoroRecords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        task_id INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        duration_seconds INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        pomodoro_mode TEXT NOT NULL DEFAULT '25/5',
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(task_id) REFERENCES $tablePomodoroTasks(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableCheckinRecords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        study_seconds INTEGER NOT NULL DEFAULT 0,
+        pomodoro_count INTEGER NOT NULL DEFAULT 0,
+        points_earned INTEGER NOT NULL DEFAULT 0,
+        is_makeup INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_tasks_user_id ON $tablePomodoroTasks(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_records_user_id ON $tablePomodoroRecords(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_records_task_id ON $tablePomodoroRecords(task_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_records_started_at ON $tablePomodoroRecords(started_at);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_checkin_records_user_id ON $tableCheckinRecords(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_checkin_records_date ON $tableCheckinRecords(date);',
+    );
+  }
+
   // 兼容历史版本中“版本号已升级但列缺失”的异常状态，启动时自动补齐。
   Future<void> _ensureSchemaConsistency(Database db) async {
     await db.execute('''
@@ -921,6 +990,7 @@ class AppDatabase {
     await _upgradePracticeSchedulingToV9(db);
     await _upgradeOcrQualityToV10(db);
     await _upgradeAiChatToV10(db);
+    await _upgradeFocusToV11(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

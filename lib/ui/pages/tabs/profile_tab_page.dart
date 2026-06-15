@@ -582,7 +582,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   Future<void> _openWrongQuestionsEntry() async {
     final onOpenTab = widget.onOpenTab;
     if (onOpenTab != null) {
-      onOpenTab(2);
+      onOpenTab(3);
       return;
     }
 
