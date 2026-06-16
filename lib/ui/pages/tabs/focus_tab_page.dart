@@ -11,19 +11,6 @@ import '../../../focus/models/checkin_record.dart';
 import '../../../focus/repository/focus_repository.dart';
 import '../../theme/app_theme.dart';
 
-// ========== 番茄钟模式 ==========
-enum PomodoroMode {
-  short('25/5', '25分钟专注', 25, 5),
-  long('45/15', '45分钟专注', 45, 15),
-  intensive('50/10', '50分钟专注', 50, 10);
-
-  const PomodoroMode(this.label, this.description, this.focusMinutes, this.breakMinutes);
-  final String label;
-  final String description;
-  final int focusMinutes;
-  final int breakMinutes;
-}
-
 const List<Color> _pieColors = [
   Color(0xFF14B8A6),
   Color(0xFF4FA3FF),
@@ -71,15 +58,11 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
   bool _reloadScheduled = false;
 
   // Timer state
-  PomodoroMode _currentMode = PomodoroMode.short;
   bool _isTimerRunning = false;
-  bool _isBreakPhase = false;
-  int _secondsRemaining = 25 * 60;
-  int _totalPhaseSeconds = 25 * 60;
+  int _secondsElapsed = 0;
   int? _activeTaskId;
   int? _activeRecordId;
   Timer? _timer;
-  int _sessionCompletedCount = 0;
 
   @override
   void initState() {
@@ -190,11 +173,8 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
   void _startTimer(int taskId) {
     setState(() {
       _isTimerRunning = true;
-      _isBreakPhase = false;
       _activeTaskId = taskId;
-      _secondsRemaining = _currentMode.focusMinutes * 60;
-      _totalPhaseSeconds = _secondsRemaining;
-      _sessionCompletedCount = 0;
+      _secondsElapsed = 0;
     });
     _startActiveTimer();
     _createTimerRecord(taskId);
@@ -212,17 +192,16 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
 
   void _stopTimer() {
     _timer?.cancel();
+    final elapsed = _secondsElapsed;
     if (_activeRecordId != null) {
-      _focusRepository.cancelRecord(_activeRecordId!);
+      _focusRepository.completeRecord(_activeRecordId!, elapsed);
     }
+    _updateCheckinAfterFocus(elapsed);
     setState(() {
       _isTimerRunning = false;
-      _isBreakPhase = false;
       _activeTaskId = null;
       _activeRecordId = null;
-      _secondsRemaining = _currentMode.focusMinutes * 60;
-      _totalPhaseSeconds = _secondsRemaining;
-      _sessionCompletedCount = 0;
+      _secondsElapsed = 0;
     });
   }
 
@@ -231,63 +210,16 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {
-        if (_secondsRemaining > 0) {
-          _secondsRemaining--;
-        } else {
-          _phaseComplete();
-        }
+        _secondsElapsed++;
       });
     });
   }
 
-  void _phaseComplete() {
-    _timer?.cancel();
-    if (!_isBreakPhase) {
-      // Focus phase finished
-      _sessionCompletedCount++;
-      final seconds = _currentMode.focusMinutes * 60;
-      if (_activeRecordId != null) {
-        _focusRepository.completeRecord(_activeRecordId!, seconds);
-      }
-      // Auto-start break
-      setState(() {
-        _isBreakPhase = true;
-        _secondsRemaining = _currentMode.breakMinutes * 60;
-        _totalPhaseSeconds = _secondsRemaining;
-      });
-      _startActiveTimer();
-      // Update checkin
-      _updateCheckinAfterPomodoro();
-    } else {
-      // Break phase finished
-      setState(() {
-        _isBreakPhase = false;
-        _secondsRemaining = _currentMode.focusMinutes * 60;
-        _totalPhaseSeconds = _secondsRemaining;
-      });
-      _startActiveTimer();
-      // Create new record for next session
-      if (_activeTaskId != null) {
-        _createTimerRecord(_activeTaskId!);
-      }
-    }
-  }
-
-  Future<void> _createTimerRecord(int taskId) async {
-    if (_user == null) return;
-    final record = await _focusRepository.startRecord(
-      userId: _user!.id,
-      taskId: taskId,
-      pomodoroMode: _currentMode.label,
-    );
-    if (mounted) setState(() => _activeRecordId = record.id);
-  }
-
-  Future<void> _updateCheckinAfterPomodoro() async {
-    if (_user == null) return;
+  Future<void> _updateCheckinAfterFocus(int elapsedSeconds) async {
+    if (_user == null || elapsedSeconds <= 0) return;
     await _focusRepository.checkInToday(_user!.id);
     final stats = await _focusRepository.fetchStats(_user!.id);
-    final seconds = stats.todaySeconds + _currentMode.focusMinutes * 60;
+    final seconds = stats.todaySeconds + elapsedSeconds;
     final count = stats.todayPomodoros + 1;
     await _focusRepository.updateCheckinStudyTime(_user!.id, seconds, count);
     if (mounted) {
@@ -305,14 +237,14 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
     }
   }
 
-  void _setMode(PomodoroMode mode) {
-    if (_isTimerRunning) return;
-    setState(() {
-      _currentMode = mode;
-      _secondsRemaining = mode.focusMinutes * 60;
-      _totalPhaseSeconds = _secondsRemaining;
-      _isBreakPhase = false;
-    });
+  Future<void> _createTimerRecord(int taskId) async {
+    if (_user == null) return;
+    final record = await _focusRepository.startRecord(
+      userId: _user!.id,
+      taskId: taskId,
+      pomodoroMode: '正向',
+    );
+    if (mounted) setState(() => _activeRecordId = record.id);
   }
 
   // ========== Task CRUD ==========
@@ -487,13 +419,6 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('专注打卡', style: AppTextStyles.h2(context)),
-                    const SizedBox(height: 2),
-                    Text(
-                      stats != null
-                          ? '🔥 连续 ${stats.currentStreak} 天 · 最长 ${stats.longestStreak} 天 · ⭐ ${stats.totalPoints} 积分'
-                          : '开始今天的专注之旅吧',
-                      style: AppTextStyles.bodySmall(context).copyWith(fontWeight: FontWeight.w600),
-                    ),
                   ],
                 ),
               ),
@@ -542,7 +467,6 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
   // ========== Timer Card ==========
 
   Widget _buildTimerCard() {
-    final progress = _totalPhaseSeconds > 0 ? _secondsRemaining / _totalPhaseSeconds : 0.0;
     final isRunning = _isTimerRunning;
 
     return Container(
@@ -555,70 +479,43 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
       ),
       child: Column(
         children: [
-          // Mode selector
-          if (!isRunning)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: PomodoroMode.values.map((mode) {
-                  final isSelected = _currentMode == mode;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ChoiceChip(
-                      label: Text(mode.label),
-                      selected: isSelected,
-                      selectedColor: AppColors.primarySoft,
-                      labelStyle: TextStyle(
-                        color: isSelected ? AppColors.primaryDark : AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                      side: BorderSide(
-                        color: isSelected ? AppColors.primary : AppColors.border,
-                      ),
-                      onSelected: (_) => _setMode(mode),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-
-          // Timer circle
+          // Timer display
           SizedBox(
             width: 200,
             height: 200,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                SizedBox(
+                Container(
                   width: 200,
                   height: 200,
-                  child: CircularProgressIndicator(
-                    value: progress,
-                    strokeWidth: 10,
-                    backgroundColor: AppColors.borderLight,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      _isBreakPhase ? AppColors.accentOrange : AppColors.primary,
-                    ),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.primarySoft.withValues(alpha: 0.3),
                   ),
                 ),
                 Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      _isBreakPhase ? '休息' : (_activeTaskId != null ? _tasks.where((t) => t.id == _activeTaskId).map((t) => t.title).firstOrNull ?? '专注' : '专注'),
-                      style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
-                    ),
+                    if (_activeTaskId != null)
+                      Text(
+                        _tasks.where((t) => t.id == _activeTaskId).map((t) => t.title).firstOrNull ?? '专注',
+                        style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
+                      )
+                    else
+                      Text(
+                        '专注',
+                        style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
+                      ),
                     const SizedBox(height: 4),
                     Text(
-                      _formatTimer(_secondsRemaining),
+                      _formatTimer(_secondsElapsed),
                       style: AppTextStyles.display(context).copyWith(fontSize: 42, fontWeight: FontWeight.w800),
                     ),
-                    if (isRunning && _activeTaskId != null)
+                    if (isRunning)
                       Text(
-                        '已完成 $_sessionCompletedCount 个番茄',
-                        style: AppTextStyles.caption(context),
+                        '计时中',
+                        style: AppTextStyles.caption(context).copyWith(color: AppColors.primary),
                       ),
                   ],
                 ),
@@ -1262,92 +1159,103 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
           ),
           const SizedBox(height: 12),
 
-          // Weekday headers
-          Row(
-            children: weekdays.map((w) {
-              return SizedBox(
-                width: (MediaQuery.of(context).size.width - 64) / 7,
-                child: Center(
-                  child: Text(w, style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w700)),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 8),
+          // Calendar grid with LayoutBuilder for overflow-safe sizing
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cellWidth = (constraints.maxWidth) / 7;
 
-          // Calendar grid
-          if (_isLoading)
-            const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-          else
-            Builder(builder: (context) {
-              final cells = <Widget>[];
-              for (int i = 1; i < firstWeekday; i++) {
-                cells.add(const SizedBox());
-              }
-              for (int day = 1; day <= daysInMonth; day++) {
-                final date = DateTime(_currentMonth.year, _currentMonth.month, day);
-                final key = '${_currentMonth.year}-${_currentMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
-                final record = recordMap[key];
-                final isToday = key == todayKey;
-                final isPast = date.isBefore(DateTime(now.year, now.month, now.day));
-                final canMakeup = isPast && record == null && date.isAfter(now.subtract(const Duration(days: 30)));
-
-                cells.add(
-                  GestureDetector(
-                    onLongPress: canMakeup ? () => _makeupCheckin(date) : null,
-                    child: Container(
-                      margin: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: record != null
-                            ? (record.isMakeup ? AppColors.secondaryPurple.withValues(alpha: 0.2) : AppColors.primarySoft)
-                            : (isToday ? AppColors.primaryLight : AppColors.surfaceAlt),
-                        borderRadius: BorderRadius.circular(12),
-                        border: isToday ? Border.all(color: AppColors.primary, width: 1.5) : null,
-                      ),
-                      child: AspectRatio(
-                        aspectRatio: 1,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '$day',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
-                                color: record != null ? AppColors.primaryDark : (isToday ? AppColors.primary : AppColors.textPrimary),
-                              ),
-                            ),
-                            if (record != null)
-                              Text(
-                                record.isMakeup ? '补' : '✓',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: record.isMakeup ? AppColors.secondaryPurple : AppColors.success,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            if (canMakeup && record == null)
-                              const Text('·', style: TextStyle(fontSize: 10, color: AppColors.textTertiary)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }
-
+              // Weekday headers
               return Column(
                 children: [
-                  for (int row = 0; row < (cells.length / 7).ceil(); row++)
-                    Row(
-                      children: List.generate(7, (col) {
-                        final idx = row * 7 + col;
-                        return Expanded(child: idx < cells.length ? cells[idx] : const SizedBox());
-                      }),
-                    ),
+                  Row(
+                    children: weekdays.map((w) {
+                      return SizedBox(
+                        width: cellWidth,
+                        child: Center(
+                          child: Text(w, style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w700)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Calendar grid
+                  if (_isLoading)
+                    const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+                  else
+                    Builder(builder: (context) {
+                      final cells = <Widget>[];
+                      for (int i = 1; i < firstWeekday; i++) {
+                        cells.add(const SizedBox());
+                      }
+                      for (int day = 1; day <= daysInMonth; day++) {
+                        final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+                        final key = '${_currentMonth.year}-${_currentMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+                        final record = recordMap[key];
+                        final isToday = key == todayKey;
+                        final isPast = date.isBefore(DateTime(now.year, now.month, now.day));
+                        final canMakeup = isPast && record == null && date.isAfter(now.subtract(const Duration(days: 30)));
+
+                        cells.add(
+                          GestureDetector(
+                            onLongPress: canMakeup ? () => _makeupCheckin(date) : null,
+                            child: Container(
+                              margin: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: record != null
+                                    ? (record.isMakeup ? AppColors.secondaryPurple.withValues(alpha: 0.2) : AppColors.primarySoft)
+                                    : (isToday ? AppColors.primaryLight : AppColors.surfaceAlt),
+                                borderRadius: BorderRadius.circular(12),
+                                border: isToday ? Border.all(color: AppColors.primary, width: 1.5) : null,
+                              ),
+                              child: AspectRatio(
+                                aspectRatio: 1,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      '$day',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+                                        color: record != null ? AppColors.primaryDark : (isToday ? AppColors.primary : AppColors.textPrimary),
+                                      ),
+                                    ),
+                                    if (record != null)
+                                      Text(
+                                        record.isMakeup ? '补' : '✓',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: record.isMakeup ? AppColors.secondaryPurple : AppColors.success,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    if (canMakeup && record == null)
+                                      const Text('·', style: TextStyle(fontSize: 9, color: AppColors.textTertiary)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+
+                      return Column(
+                        children: [
+                          for (int row = 0; row < (cells.length / 7).ceil(); row++)
+                            Row(
+                              children: List.generate(7, (col) {
+                                final idx = row * 7 + col;
+                                return Expanded(child: idx < cells.length ? cells[idx] : const SizedBox());
+                              }),
+                            ),
+                        ],
+                      );
+                    }),
                 ],
               );
-            }),
+            },
+          ),
 
           const SizedBox(height: 16),
           Text('长按灰色日期可以补签（消耗 ${FocusPoints.makeupCost} 积分，仅限过去30天）', style: AppTextStyles.caption(context)),

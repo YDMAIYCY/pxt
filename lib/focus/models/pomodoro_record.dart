@@ -9,7 +9,7 @@ class PomodoroRecord {
     this.endedAt,
     this.durationSeconds = 0,
     this.completed = false,
-    this.pomodoroMode = '25/5',
+    this.pomodoroMode = '正向',
     this.taskTitle = '',
   });
 
@@ -40,6 +40,8 @@ class PomodoroRecord {
         return '45+15';
       case '50/10':
         return '50+10';
+      case '正向':
+        return '正向';
       default:
         return pomodoroMode;
     }
@@ -70,7 +72,7 @@ class PomodoroRecord {
           : null,
       durationSeconds: (map['duration_seconds'] as int?) ?? 0,
       completed: (map['completed'] as int?) == 1,
-      pomodoroMode: (map['pomodoro_mode'] as String?) ?? '25/5',
+      pomodoroMode: (map['pomodoro_mode'] as String?) ?? '正向',
       taskTitle: (map['task_title'] as String?) ?? '',
     );
   }

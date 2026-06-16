@@ -779,7 +779,7 @@ class AppDatabase {
         ended_at TEXT,
         duration_seconds INTEGER NOT NULL DEFAULT 0,
         completed INTEGER NOT NULL DEFAULT 0,
-        pomodoro_mode TEXT NOT NULL DEFAULT '25/5',
+        pomodoro_mode TEXT NOT NULL DEFAULT '正向',
         FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
         FOREIGN KEY(task_id) REFERENCES $tablePomodoroTasks(id) ON DELETE CASCADE
       );
