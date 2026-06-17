@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
 import '../../../database/document_batch_repository.dart';
+import '../../../database/knowledge_graph_repository.dart';
 import '../../../database/knowledge_library_repository.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/document_batch_record.dart';
+import '../../../database/models/knowledge_graph_records.dart';
 import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
@@ -21,6 +23,7 @@ class KnowledgeTabPage extends StatefulWidget {
     this.sourceDocumentRepository,
     this.aiGenerationRepository,
     this.documentBatchRepository,
+    this.knowledgeGraphRepository,
     this.knowledgeLibraryRepository,
     this.refreshVersion = 0,
     this.refreshListenable,
@@ -34,6 +37,7 @@ class KnowledgeTabPage extends StatefulWidget {
   final SourceDocumentRepository? sourceDocumentRepository;
   final AiGenerationRepository? aiGenerationRepository;
   final DocumentBatchRepository? documentBatchRepository;
+  final KnowledgeGraphRepository? knowledgeGraphRepository;
   final KnowledgeLibraryRepository? knowledgeLibraryRepository;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
@@ -50,6 +54,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   late final SourceDocumentRepository _sourceDocumentRepository;
   late final AiGenerationRepository _aiGenerationRepository;
   late final DocumentBatchRepository _documentBatchRepository;
+  late final KnowledgeGraphRepository _knowledgeGraphRepository;
   late final KnowledgeLibraryRepository _knowledgeLibraryRepository;
   late Future<_KnowledgeData> _future;
   late int _handledRefreshVersion;
@@ -67,6 +72,8 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         widget.aiGenerationRepository ?? AiGenerationRepository();
     _documentBatchRepository =
         widget.documentBatchRepository ?? DocumentBatchRepository();
+    _knowledgeGraphRepository =
+        widget.knowledgeGraphRepository ?? KnowledgeGraphRepository();
     _knowledgeLibraryRepository =
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
     _handledRefreshVersion = widget.refreshVersion;
@@ -149,6 +156,11 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
           reviewStatus: PracticeQuestionReviewStatus.wrong,
           limit: 300,
         );
+    final weakConcepts = await _knowledgeGraphRepository.fetchWeakConcepts(
+      userId: user.id,
+      libraryId: selectedLibrary.id,
+      limit: 80,
+    );
 
     return _KnowledgeData(
       userId: user.id,
@@ -158,6 +170,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       documents: documents,
       contents: contents,
       wrongQuestions: wrongQuestions,
+      weakConcepts: weakConcepts,
     );
   }
 
@@ -180,7 +193,9 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
 
   Future<_KnowledgeData> _reload() {
     final future = _loadData();
-    setState(() => _future = future);
+    setState(() {
+      _future = future;
+    });
     return future;
   }
 
@@ -514,6 +529,13 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         color: const Color(0xFFFDF2F8),
       ),
       _KnowledgeTypeItem(
+        type: _KnowledgeType.graph,
+        title: '知识图谱',
+        count: data.weakConcepts.length,
+        icon: Icons.hub_rounded,
+        color: const Color(0xFFEFF6FF),
+      ),
+      _KnowledgeTypeItem(
         type: _KnowledgeType.wrongQuestions,
         title: '错题讲解',
         count: data.wrongQuestions.length,
@@ -584,6 +606,24 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             .toList(growable: false),
       );
     }
+    if (_selectedType == _KnowledgeType.graph) {
+      if (data.weakConcepts.isEmpty) {
+        return const _EmptyListHint(text: '生成 AI 学习成果后，这里会展示知识点和薄弱程度。');
+      }
+      return Column(
+        children: data.weakConcepts
+            .map(
+              (item) => _ConceptTile(
+                item: item,
+                onTap: item.concept.documentId == null
+                    ? () {}
+                    : () => _openDocument(item.concept.documentId!),
+              ),
+            )
+            .toList(growable: false),
+      );
+    }
+
     final contents = data.contentsOf(_selectedType);
     if (contents.isEmpty) return const _EmptyListHint(text: '这个知识库的分类还没有真实结果。');
     return Column(
@@ -864,6 +904,34 @@ class _ContentTile extends StatelessWidget {
   }
 }
 
+class _ConceptTile extends StatelessWidget {
+  const _ConceptTile({required this.item, required this.onTap});
+
+  final KnowledgeConceptWithDocument item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final concept = item.concept;
+    final bodyParts = <String>[
+      if (concept.summary?.isNotEmpty == true) concept.summary!,
+      if (concept.evidenceText?.isNotEmpty == true)
+        '证据：${concept.evidenceText!}',
+    ];
+
+    return _BaseTile(
+      icon: Icons.hub_rounded,
+      title: concept.name,
+      subtitle:
+          '${item.documentTitle} / 薄弱 ${concept.weaknessScore} / 掌握 ${concept.masteryScore}',
+      body: bodyParts.join('\n'),
+      onTap: onTap,
+      onMove: null,
+      onDelete: () {},
+    );
+  }
+}
+
 class _BaseTile extends StatelessWidget {
   const _BaseTile({
     required this.icon,
@@ -1081,6 +1149,7 @@ class _KnowledgeData {
     required this.documents,
     required this.contents,
     required this.wrongQuestions,
+    required this.weakConcepts,
   });
 
   final int userId;
@@ -1090,12 +1159,14 @@ class _KnowledgeData {
   final List<SourceDocumentRecord> documents;
   final List<GeneratedContentRecord> contents;
   final List<PracticeQuestionWithDocument> wrongQuestions;
+  final List<KnowledgeConceptWithDocument> weakConcepts;
 
   int get totalCount =>
       batches.length +
       documents.length +
       contents.length +
-      wrongQuestions.length;
+      wrongQuestions.length +
+      weakConcepts.length;
   int countByType(String type) => contentsOf(type).length;
   List<GeneratedContentRecord> contentsOf(String type) => contents
       .where((item) => item.contentType == type)
@@ -1111,6 +1182,7 @@ class _KnowledgeType {
   static const String mindmaps = 'mindmap_text';
   static const String questions = 'practice_questions';
   static const String wrongQuestions = 'wrong_questions';
+  static const String graph = 'knowledge_graph';
 }
 
 class _KnowledgeTypeItem {

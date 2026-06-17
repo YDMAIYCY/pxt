@@ -24,6 +24,7 @@ import '../ai_chat_page.dart';
 import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
 import '../image_crop_selection_page.dart';
+import '../qsclaw_agent_page.dart';
 import '../../../game/games_hub_page.dart';
 import '../practice_review_page.dart';
 
@@ -38,6 +39,7 @@ class HomeTabPage extends StatefulWidget {
     this.detailPageBuilder,
     this.aiGenerationPageBuilder,
     this.aiChatPageBuilder,
+    this.qsClawPageBuilder,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
@@ -55,6 +57,7 @@ class HomeTabPage extends StatefulWidget {
   final Widget Function(int documentId)? detailPageBuilder;
   final Widget Function(int documentId)? aiGenerationPageBuilder;
   final Widget Function()? aiChatPageBuilder;
+  final Widget Function()? qsClawPageBuilder;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
@@ -179,7 +182,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
 
   Future<_HomeData> _reload() {
     final future = _loadData();
-    setState(() => _future = future);
+    setState(() {
+      _future = future;
+    });
     return future;
   }
 
@@ -398,6 +403,12 @@ class _HomeTabPageState extends State<HomeTabPage> {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
+  Future<void> _openQsClaw() async {
+    final page = widget.qsClawPageBuilder?.call() ?? const QsClawAgentPage();
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    if (mounted) await _afterDataChanged();
+  }
+
   Future<void> _openPractice() async {
     await Navigator.of(
       context,
@@ -463,6 +474,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
                             _handleBatchImport(BatchDocumentInputSource.pdf),
                         onAi: _openAiGeneration,
                         onAiChat: _openAiChat,
+                        onQsClaw: _openQsClaw,
                         onPractice: _openPractice,
                         onGames: _openGames,
                       ),
@@ -543,6 +555,7 @@ class _QuickActions extends StatelessWidget {
     required this.onPdf,
     required this.onAi,
     required this.onAiChat,
+    required this.onQsClaw,
     required this.onPractice,
     required this.onGames,
   });
@@ -554,6 +567,7 @@ class _QuickActions extends StatelessWidget {
   final VoidCallback onPdf;
   final VoidCallback onAi;
   final VoidCallback onAiChat;
+  final VoidCallback onQsClaw;
   final VoidCallback onPractice;
   final VoidCallback onGames;
 
@@ -615,6 +629,15 @@ class _QuickActions extends StatelessWidget {
                   icon: Icons.smart_toy_rounded,
                   title: 'AI Chat',
                   onTap: onAiChat,
+                ),
+              ),
+              SizedBox(
+                width: width,
+                child: _ActionTile(
+                  icon: Icons.psychology_rounded,
+                  title: 'QSClaw',
+                  onTap: onQsClaw,
+                  isPrimary: true,
                 ),
               ),
               SizedBox(

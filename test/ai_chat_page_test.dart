@@ -3,8 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:pxt1/database/ai_chat_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
+import 'package:pxt1/database/knowledge_context_repository.dart';
 import 'package:pxt1/database/llm_config_repository.dart';
 import 'package:pxt1/database/models/ai_chat_records.dart';
+import 'package:pxt1/database/models/knowledge_context_source.dart';
 import 'package:pxt1/database/models/llm_provider_config.dart';
 import 'package:pxt1/database/models/user_profile.dart';
 import 'package:pxt1/generator/ai_chat_service.dart';
@@ -22,6 +24,7 @@ void main() {
           authRepository: _FakeAuthRepository(),
           llmConfigRepository: _FakeLlmConfigRepository(),
           aiChatRepository: repository,
+          knowledgeContextRepository: _FakeKnowledgeContextRepository(),
           aiChatService: _FakeAiChatService(),
         ),
       ),
@@ -40,7 +43,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '帮我复习导数');
     await tester.tap(find.byTooltip('发送'));
     await tester.pumpAndSettle();
-    expect(find.text('这是 AI 回复'), findsOneWidget);
+    expect(find.textContaining('这是 AI 回复'), findsOneWidget);
 
     await tester.tap(find.byTooltip('聊天菜单'));
     await tester.pumpAndSettle();
@@ -110,8 +113,21 @@ class _FakeAiChatService extends AiChatService {
   Future<String> generateReply({
     required LlmProviderConfig config,
     required List<AiChatMessageRecord> messages,
+    List<KnowledgeContextSource> contextSources = const [],
   }) async {
     return '这是 AI 回复';
+  }
+}
+
+class _FakeKnowledgeContextRepository extends KnowledgeContextRepository {
+  @override
+  Future<List<KnowledgeContextSource>> search({
+    required int userId,
+    required String query,
+    int? libraryId,
+    int limit = 6,
+  }) async {
+    return const <KnowledgeContextSource>[];
   }
 }
 

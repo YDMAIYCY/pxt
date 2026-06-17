@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 11;
+  static const int databaseVersion = 12;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -32,6 +32,8 @@ class AppDatabase {
   static const String tablePomodoroTasks = 'pomodoro_tasks';
   static const String tablePomodoroRecords = 'pomodoro_records';
   static const String tableCheckinRecords = 'checkin_records';
+  static const String tableKnowledgeConcepts = 'knowledge_concepts';
+  static const String tableKnowledgeConceptLinks = 'knowledge_concept_links';
 
   Database? _database;
 
@@ -299,6 +301,8 @@ class AppDatabase {
       );
     ''');
 
+    await _createKnowledgeGraphTables(db);
+
     await db.execute(
       'CREATE INDEX idx_users_username ON $tableUsers(username);',
     );
@@ -365,6 +369,7 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_ai_chat_messages_created_at ON $tableAiChatMessages(created_at);',
     );
+    await _createKnowledgeGraphIndexes(db);
   }
 
   Future<void> _upgradeTables(
@@ -402,6 +407,9 @@ class AppDatabase {
     }
     if (oldVersion < 11) {
       await _upgradeFocusToV11(db);
+    }
+    if (oldVersion < 12) {
+      await _upgradeKnowledgeGraphToV12(db);
     }
   }
 
@@ -819,6 +827,71 @@ class AppDatabase {
     );
   }
 
+  Future<void> _upgradeKnowledgeGraphToV12(Database db) async {
+    await _createKnowledgeGraphTables(db);
+    await _createKnowledgeGraphIndexes(db);
+  }
+
+  Future<void> _createKnowledgeGraphTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableKnowledgeConcepts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        library_id INTEGER,
+        document_id INTEGER,
+        name TEXT NOT NULL,
+        summary TEXT,
+        evidence_text TEXT,
+        source_type TEXT NOT NULL DEFAULT 'generated',
+        source_id INTEGER,
+        mastery_score INTEGER NOT NULL DEFAULT 0,
+        weakness_score INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
+        FOREIGN KEY(document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableKnowledgeConceptLinks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        library_id INTEGER,
+        from_concept_id INTEGER NOT NULL,
+        to_concept_id INTEGER NOT NULL,
+        relation_label TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
+        FOREIGN KEY(from_concept_id) REFERENCES $tableKnowledgeConcepts(id) ON DELETE CASCADE,
+        FOREIGN KEY(to_concept_id) REFERENCES $tableKnowledgeConcepts(id) ON DELETE CASCADE
+      );
+    ''');
+  }
+
+  Future<void> _createKnowledgeGraphIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_user_id ON $tableKnowledgeConcepts(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_library_id ON $tableKnowledgeConcepts(library_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_document_id ON $tableKnowledgeConcepts(document_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_weakness_score ON $tableKnowledgeConcepts(weakness_score);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_links_library_id ON $tableKnowledgeConceptLinks(library_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_links_from_concept ON $tableKnowledgeConceptLinks(from_concept_id);',
+    );
+  }
+
   // 兼容历史版本中“版本号已升级但列缺失”的异常状态，启动时自动补齐。
   Future<void> _ensureSchemaConsistency(Database db) async {
     await db.execute('''
@@ -991,6 +1064,7 @@ class AppDatabase {
     await _upgradeOcrQualityToV10(db);
     await _upgradeAiChatToV10(db);
     await _upgradeFocusToV11(db);
+    await _upgradeKnowledgeGraphToV12(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

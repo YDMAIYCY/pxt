@@ -4,9 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/document_batch_repository.dart';
+import 'package:pxt1/database/knowledge_graph_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
 import 'package:pxt1/database/models/ai_result_records.dart';
 import 'package:pxt1/database/models/document_batch_record.dart';
+import 'package:pxt1/database/models/knowledge_graph_records.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
 import 'package:pxt1/database/models/user_profile.dart';
@@ -27,6 +29,7 @@ void main() {
               sourceDocumentRepository: _EmptySourceDocumentRepository(),
               aiGenerationRepository: _EmptyAiGenerationRepository(),
               documentBatchRepository: _EmptyDocumentBatchRepository(),
+              knowledgeGraphRepository: _EmptyKnowledgeGraphRepository(),
               knowledgeLibraryRepository: libraries,
             ),
           ),
@@ -142,5 +145,16 @@ class _EmptyAiGenerationRepository extends AiGenerationRepository {
     int limit = 100,
   }) async {
     return const <PracticeQuestionWithDocument>[];
+  }
+}
+
+class _EmptyKnowledgeGraphRepository extends KnowledgeGraphRepository {
+  @override
+  Future<List<KnowledgeConceptWithDocument>> fetchWeakConcepts({
+    required int userId,
+    int? libraryId,
+    int limit = 20,
+  }) async {
+    return const <KnowledgeConceptWithDocument>[];
   }
 }

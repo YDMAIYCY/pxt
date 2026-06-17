@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../database/ai_chat_repository.dart';
 import '../../database/auth_repository.dart';
+import '../../database/knowledge_context_repository.dart';
 import '../../database/llm_config_repository.dart';
 import '../../database/models/ai_chat_records.dart';
+import '../../database/models/knowledge_context_source.dart';
 import '../../database/models/user_profile.dart';
 import '../../generator/ai_chat_service.dart';
 import '../theme/app_theme.dart';
@@ -13,6 +15,7 @@ class AiChatPage extends StatefulWidget {
     this.authRepository,
     this.llmConfigRepository,
     this.aiChatRepository,
+    this.knowledgeContextRepository,
     this.aiChatService,
     super.key,
   });
@@ -20,6 +23,7 @@ class AiChatPage extends StatefulWidget {
   final AuthRepository? authRepository;
   final LlmConfigRepository? llmConfigRepository;
   final AiChatRepository? aiChatRepository;
+  final KnowledgeContextRepository? knowledgeContextRepository;
   final AiChatService? aiChatService;
 
   @override
@@ -30,6 +34,7 @@ class _AiChatPageState extends State<AiChatPage> {
   late final AuthRepository _authRepository;
   late final LlmConfigRepository _llmConfigRepository;
   late final AiChatRepository _aiChatRepository;
+  late final KnowledgeContextRepository _knowledgeContextRepository;
   late final AiChatService _aiChatService;
 
   final TextEditingController _inputController = TextEditingController();
@@ -46,9 +51,10 @@ class _AiChatPageState extends State<AiChatPage> {
   void initState() {
     super.initState();
     _authRepository = widget.authRepository ?? AuthRepository();
-    _llmConfigRepository =
-        widget.llmConfigRepository ?? LlmConfigRepository();
+    _llmConfigRepository = widget.llmConfigRepository ?? LlmConfigRepository();
     _aiChatRepository = widget.aiChatRepository ?? AiChatRepository();
+    _knowledgeContextRepository =
+        widget.knowledgeContextRepository ?? KnowledgeContextRepository();
     _aiChatService = widget.aiChatService ?? AiChatService();
     _loadInitialData();
   }
@@ -180,20 +186,26 @@ class _AiChatPageState extends State<AiChatPage> {
       });
       _scrollToBottom();
 
+      final contextSources = await _knowledgeContextRepository.search(
+        userId: user.id,
+        query: text,
+      );
       final reply = await _aiChatService.generateReply(
         config: config,
         messages: _messages,
+        contextSources: contextSources,
       );
+      final groundedReply = _appendSources(reply, contextSources);
       final assistantMessage = await _aiChatRepository.appendMessage(
         sessionId: session.id,
         role: AiChatMessageRole.assistant,
-        content: reply,
+        content: groundedReply,
         provider: config.provider,
         model: config.effectiveModel,
       );
       await _aiChatRepository.touchSessionPreview(
         sessionId: session.id,
-        preview: reply,
+        preview: groundedReply,
       );
 
       if (!mounted) return;
@@ -207,6 +219,26 @@ class _AiChatPageState extends State<AiChatPage> {
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
+  }
+
+  String _appendSources(
+    String reply,
+    List<KnowledgeContextSource> contextSources,
+  ) {
+    if (contextSources.isEmpty) {
+      return '$reply\n\n参考资料：当前知识库没有检索到强相关资料，本回答可能需要你补充更多资料后再确认。';
+    }
+
+    final sourceLines = contextSources
+        .asMap()
+        .entries
+        .map((entry) {
+          final index = entry.key + 1;
+          final source = entry.value;
+          return '$index. ${source.documentTitle} / ${source.citationTitle}';
+        })
+        .join('\n');
+    return '$reply\n\n参考资料：\n$sourceLines';
   }
 
   Future<void> _showHistorySheet() async {
@@ -249,8 +281,7 @@ class _AiChatPageState extends State<AiChatPage> {
                                   color: AppColors.primary,
                                 )
                               : null,
-                          onTap: () =>
-                              Navigator.of(sheetContext).pop(session),
+                          onTap: () => Navigator.of(sheetContext).pop(session),
                         );
                       },
                     ),
@@ -301,7 +332,6 @@ class _AiChatPageState extends State<AiChatPage> {
         );
       },
     );
-    controller.dispose();
 
     if (title == null) return;
     if (title.trim().isEmpty) {

@@ -4,10 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/document_batch_repository.dart';
+import 'package:pxt1/database/knowledge_graph_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
 import 'package:pxt1/database/llm_config_repository.dart';
 import 'package:pxt1/database/models/ai_result_records.dart';
 import 'package:pxt1/database/models/document_batch_record.dart';
+import 'package:pxt1/database/models/knowledge_graph_records.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
 import 'package:pxt1/database/models/llm_provider_config.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
@@ -62,6 +64,7 @@ void main() {
       tester,
     ) async {
       final libraries = _FakeKnowledgeLibraryRepository();
+      final graph = _FakeKnowledgeGraphRepository();
 
       await tester.pumpWidget(
         _wrap(
@@ -71,6 +74,7 @@ void main() {
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
             aiGenerationRepository: _FakeAiGenerationRepository(),
             documentBatchRepository: _FakeDocumentBatchRepository(),
+            knowledgeGraphRepository: graph,
             knowledgeLibraryRepository: libraries,
           ),
         ),
@@ -87,6 +91,7 @@ void main() {
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
             aiGenerationRepository: _FakeAiGenerationRepository(),
             documentBatchRepository: _FakeDocumentBatchRepository(),
+            knowledgeGraphRepository: graph,
             knowledgeLibraryRepository: libraries,
           ),
         ),
@@ -357,6 +362,20 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
         updatedAt: DateTime(2026, 5, 29),
       ),
     ];
+  }
+}
+
+class _FakeKnowledgeGraphRepository extends KnowledgeGraphRepository {
+  int fetchCalls = 0;
+
+  @override
+  Future<List<KnowledgeConceptWithDocument>> fetchWeakConcepts({
+    required int userId,
+    int? libraryId,
+    int limit = 20,
+  }) async {
+    fetchCalls++;
+    return const [];
   }
 }
 

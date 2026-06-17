@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import '../database/ai_generation_repository.dart';
+import '../database/knowledge_graph_repository.dart';
 import '../database/models/ai_generation_task_record.dart';
 import '../database/models/llm_provider_config.dart';
 import '../llm/minimax_client.dart';
+import 'knowledge_graph_extraction_service.dart';
 
 class AiSingleTaskResult {
   const AiSingleTaskResult({
@@ -29,12 +31,20 @@ class AiGenerationOrchestrator {
   AiGenerationOrchestrator({
     MiniMaxClient? miniMaxClient,
     AiGenerationRepository? aiGenerationRepository,
+    KnowledgeGraphRepository? knowledgeGraphRepository,
+    KnowledgeGraphExtractionService? knowledgeGraphExtractionService,
   }) : _miniMaxClient = miniMaxClient ?? MiniMaxClient(),
        _aiGenerationRepository =
-           aiGenerationRepository ?? AiGenerationRepository();
+           aiGenerationRepository ?? AiGenerationRepository(),
+       _knowledgeGraphRepository =
+           knowledgeGraphRepository ?? KnowledgeGraphRepository(),
+       _knowledgeGraphExtractionService =
+           knowledgeGraphExtractionService ?? KnowledgeGraphExtractionService();
 
   final MiniMaxClient _miniMaxClient;
   final AiGenerationRepository _aiGenerationRepository;
+  final KnowledgeGraphRepository _knowledgeGraphRepository;
+  final KnowledgeGraphExtractionService _knowledgeGraphExtractionService;
 
   Future<AiSingleTaskResult> generateSingle({
     required int documentId,
@@ -116,6 +126,12 @@ class AiGenerationOrchestrator {
         taskId: taskRecord.id,
         resultText: const JsonEncoder.withIndent('  ').convert(response),
       );
+      await _refreshKnowledgeGraph(
+        documentId: documentId,
+        ocrText: trimmedText,
+        response: response,
+        llmConfig: llmConfig,
+      );
 
       return AiSingleTaskResult(
         taskType: taskType,
@@ -171,6 +187,32 @@ class AiGenerationOrchestrator {
         return;
       default:
         throw FormatException('不支持的任务类型：$taskType');
+    }
+  }
+
+  Future<void> _refreshKnowledgeGraph({
+    required int documentId,
+    required String ocrText,
+    required Map<String, dynamic> response,
+    LlmProviderConfig? llmConfig,
+  }) async {
+    final scope = await _knowledgeGraphRepository.findDocumentScope(documentId);
+    if (scope == null) {
+      return;
+    }
+
+    try {
+      await _knowledgeGraphExtractionService.generateForDocument(
+        userId: scope.userId,
+        libraryId: scope.libraryId,
+        documentId: documentId,
+        sourceText:
+            '$ocrText\n\nAI 生成结果：\n${const JsonEncoder.withIndent('  ').convert(response)}',
+        llmConfig: llmConfig,
+      );
+    } catch (_) {
+      // Knowledge graph extraction is a secondary enrichment step. Keep the
+      // generated learning material available even when graph extraction fails.
     }
   }
 

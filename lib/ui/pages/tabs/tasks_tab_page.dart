@@ -151,7 +151,9 @@ class _TasksTabPageState extends State<TasksTabPage> {
 
   Future<_TaskCenterData> _reload() {
     final future = _loadData();
-    setState(() => _future = future);
+    setState(() {
+      _future = future;
+    });
     return future;
   }
 
@@ -300,7 +302,9 @@ class _TaskListPageState extends State<TaskListPage> {
 
   Future<void> _refresh() async {
     final future = _loadData();
-    setState(() => _future = future);
+    setState(() {
+      _future = future;
+    });
     await future;
   }
 
