@@ -4,6 +4,7 @@ import 'package:pxt1/agent/qsclaw_agent_service.dart';
 import 'package:pxt1/agent/qsclaw_tool_registry.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
+import 'package:pxt1/debug/debug_demo_data_seeder.dart';
 
 void main() {
   group('QSClaw general agent', () {
@@ -16,6 +17,7 @@ void main() {
       expect(registry.toolNames, contains('navigate_to_page'));
       expect(registry.toolNames, contains('search_documents'));
       expect(registry.toolNames, contains('move_document_to_library'));
+      expect(registry.toolNames, contains('seed_debug_demo_data'));
     });
 
     test('plans navigation commands as app actions', () async {
@@ -59,6 +61,28 @@ void main() {
         expect(result.library?.name, _mathKnowledgeLibrary);
       },
     );
+
+    test('executes demo data commands through an app tool', () async {
+      final seeder = _FakeDebugDemoDataSeeder();
+      final service = QsClawAgentService(
+        debugDemoDataSeeder: seeder,
+        toolRegistry: QsClawToolRegistry.withCoreTools(
+          knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+          debugDemoDataSeeder: seeder,
+        ),
+      );
+
+      final result = await service.runCommand(
+        userId: 7,
+        command: '\u690d\u5165\u6f14\u793a\u6570\u636e',
+      );
+
+      expect(seeder.seededUserId, 7);
+      expect(result.executedSteps.map((step) => step.toolName), [
+        'seed_debug_demo_data',
+      ]);
+      expect(result.status, QsClawRunStatus.completed);
+    });
   });
 }
 
@@ -88,6 +112,15 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
     );
     libraries.add(library);
     return library;
+  }
+}
+
+class _FakeDebugDemoDataSeeder extends DebugDemoDataSeeder {
+  int? seededUserId;
+
+  @override
+  Future<void> seedForUser(int userId) async {
+    seededUserId = userId;
   }
 }
 

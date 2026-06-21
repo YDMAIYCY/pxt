@@ -2,10 +2,10 @@ import '../database/knowledge_library_repository.dart';
 import '../database/models/knowledge_library_record.dart';
 import '../database/models/source_document_record.dart';
 import '../database/source_document_repository.dart';
+import '../debug/debug_demo_data_seeder.dart';
 
 // ========== QSClaw Tool Registry ==========
-// 把 App 内能力注册成可被 Agent 调用的安全工具。
-
+// Registers safe in-app capabilities that QSClaw can call from natural language.
 typedef QsClawToolHandler =
     Future<QsClawToolResult> Function(QsClawToolContext context);
 
@@ -16,11 +16,13 @@ class QsClawToolRegistry {
   factory QsClawToolRegistry.withCoreTools({
     SourceDocumentRepository? sourceDocumentRepository,
     KnowledgeLibraryRepository? knowledgeLibraryRepository,
+    DebugDemoDataSeeder? debugDemoDataSeeder,
   }) {
     final sourceDocuments =
         sourceDocumentRepository ?? SourceDocumentRepository();
     final libraries =
         knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
+    final demoSeeder = debugDemoDataSeeder ?? DebugDemoDataSeeder();
 
     return QsClawToolRegistry([
       QsClawTool(
@@ -42,7 +44,7 @@ class QsClawToolRegistry {
               );
           return QsClawToolResult(
             toolName: QsClawToolNames.createKnowledgeLibrary,
-            message: 'Created knowledge library: ${library.name}',
+            message: '已准备知识库：${library.name}',
             data: {'library': library},
           );
         },
@@ -66,7 +68,7 @@ class QsClawToolRegistry {
               .toList(growable: false);
           return QsClawToolResult(
             toolName: QsClawToolNames.searchDocuments,
-            message: 'Found ${matched.length} matching documents.',
+            message: '找到 ${matched.length} 份匹配资料。',
             data: {'documents': matched},
           );
         },
@@ -82,7 +84,7 @@ class QsClawToolRegistry {
           if (library == null || documents.isEmpty) {
             return const QsClawToolResult(
               toolName: QsClawToolNames.moveDocumentToLibrary,
-              message: 'No documents need to be moved.',
+              message: '没有需要移动的资料。',
             );
           }
 
@@ -99,7 +101,7 @@ class QsClawToolRegistry {
 
           return QsClawToolResult(
             toolName: QsClawToolNames.moveDocumentToLibrary,
-            message: 'Moved $movedCount documents.',
+            message: '已移动 $movedCount 份资料。',
             data: {'movedCount': movedCount},
           );
         },
@@ -111,8 +113,19 @@ class QsClawToolRegistry {
           final target = context.stringArg('target');
           return QsClawToolResult(
             toolName: QsClawToolNames.navigateToPage,
-            message: 'Navigate to $target.',
+            message: '正在打开：${QsClawNavigationTarget.labelOf(target)}。',
             data: {'navigationTarget': target},
+          );
+        },
+      ),
+      QsClawTool(
+        name: QsClawToolNames.seedDebugDemoData,
+        description: 'Seed local debug demo data for the current user.',
+        handler: (context) async {
+          await demoSeeder.seedForUser(context.userId);
+          return const QsClawToolResult(
+            toolName: QsClawToolNames.seedDebugDemoData,
+            message: '已为当前调试账号植入演示数据。',
           );
         },
       ),
@@ -148,7 +161,7 @@ class QsClawToolRegistry {
   }
 
   static bool _matchesTopic(SourceDocumentRecord document, String topic) {
-    if (topic.isEmpty) return true;
+    if (topic.isEmpty || topic == '学习资料') return true;
     final title = document.title.toLowerCase();
     return title.contains(topic) ||
         _topicTokens(topic).any((token) => title.contains(token));
@@ -156,15 +169,14 @@ class QsClawToolRegistry {
 
   static Iterable<String> _topicTokens(String topic) sync* {
     yield topic;
-    if (topic.contains('高等数学') || topic.contains('楂樼瓑鏁板')) {
+    if (topic.contains('高等数学') || topic.contains('数学')) {
       yield '高数';
-      yield '楂樻暟';
+      yield '函数';
       yield '极限';
-      yield '鏋侀檺';
       yield '导数';
-      yield '瀵兼暟';
+      yield '微分';
       yield '积分';
-      yield '绉垎';
+      yield '线代';
     }
   }
 }
@@ -243,4 +255,30 @@ class QsClawToolNames {
   static const String searchDocuments = 'search_documents';
   static const String moveDocumentToLibrary = 'move_document_to_library';
   static const String navigateToPage = 'navigate_to_page';
+  static const String seedDebugDemoData = 'seed_debug_demo_data';
+}
+
+class QsClawNavigationTarget {
+  const QsClawNavigationTarget._();
+
+  static const String home = 'home';
+  static const String aiChat = 'ai_chat';
+  static const String aiInterview = 'ai_interview';
+  static const String knowledge = 'knowledge';
+  static const String practice = 'practice';
+
+  static String labelOf(String target) {
+    switch (target) {
+      case aiChat:
+        return 'AI 伴学问答';
+      case aiInterview:
+        return 'AI 面试官';
+      case knowledge:
+        return '知识库';
+      case practice:
+        return '复习题';
+      default:
+        return '首页';
+    }
+  }
 }

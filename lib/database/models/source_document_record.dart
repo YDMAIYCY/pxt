@@ -74,30 +74,30 @@ class SourceDocumentRecord {
   String get ocrStatusLabel {
     switch (ocrStatus) {
       case SourceDocumentOcrStatus.pending:
-        return '待识别';
+        return '\u5f85\u8bc6\u522b';
       case SourceDocumentOcrStatus.processing:
-        return '识别中';
+        return '\u8bc6\u522b\u4e2d';
       case SourceDocumentOcrStatus.needsReview:
-        return '待校对';
+        return '\u5f85\u6821\u5bf9';
       case SourceDocumentOcrStatus.success:
-        return '识别成功';
+        return '\u8bc6\u522b\u6210\u529f';
       case SourceDocumentOcrStatus.failed:
-        return '识别失败';
+        return '\u8bc6\u522b\u5931\u8d25';
       default:
-        return '待识别';
+        return '\u5f85\u8bc6\u522b';
     }
   }
 
   String get sourceTypeLabel {
     switch (sourceType) {
       case SourceDocumentSourceType.cameraCapture:
-        return '拍照';
+        return '\u62cd\u7167';
       case SourceDocumentSourceType.galleryImport:
-        return '相册';
+        return '\u76f8\u518c';
       case SourceDocumentSourceType.pdfPage:
         return 'PDF';
       default:
-        return '资料';
+        return '\u8d44\u6599';
     }
   }
 

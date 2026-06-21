@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../agent/qsclaw_agent_service.dart';
+import '../../agent/qsclaw_tool_registry.dart';
 import '../../database/ai_chat_repository.dart';
 import '../../database/auth_repository.dart';
 import '../../database/knowledge_context_repository.dart';
@@ -9,6 +11,9 @@ import '../../database/models/knowledge_context_source.dart';
 import '../../database/models/user_profile.dart';
 import '../../generator/ai_chat_service.dart';
 import '../theme/app_theme.dart';
+import 'ai_interview_page.dart';
+import 'practice_review_page.dart';
+import 'tabs/knowledge_tab_page.dart';
 
 class AiChatPage extends StatefulWidget {
   const AiChatPage({
@@ -17,6 +22,7 @@ class AiChatPage extends StatefulWidget {
     this.aiChatRepository,
     this.knowledgeContextRepository,
     this.aiChatService,
+    this.qsClawAgentService,
     super.key,
   });
 
@@ -25,6 +31,7 @@ class AiChatPage extends StatefulWidget {
   final AiChatRepository? aiChatRepository;
   final KnowledgeContextRepository? knowledgeContextRepository;
   final AiChatService? aiChatService;
+  final QsClawAgentService? qsClawAgentService;
 
   @override
   State<AiChatPage> createState() => _AiChatPageState();
@@ -36,6 +43,7 @@ class _AiChatPageState extends State<AiChatPage> {
   late final AiChatRepository _aiChatRepository;
   late final KnowledgeContextRepository _knowledgeContextRepository;
   late final AiChatService _aiChatService;
+  late final QsClawAgentService _qsClawAgentService;
 
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -56,6 +64,7 @@ class _AiChatPageState extends State<AiChatPage> {
     _knowledgeContextRepository =
         widget.knowledgeContextRepository ?? KnowledgeContextRepository();
     _aiChatService = widget.aiChatService ?? AiChatService();
+    _qsClawAgentService = widget.qsClawAgentService ?? QsClawAgentService();
     _loadInitialData();
   }
 
@@ -91,7 +100,7 @@ class _AiChatPageState extends State<AiChatPage> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _showMessage('AI Chat 加载失败：$error');
+      _showMessage('QSClaw 加载失败：$error');
     }
   }
 
@@ -150,13 +159,7 @@ class _AiChatPageState extends State<AiChatPage> {
 
     final text = _inputController.text.trim();
     if (text.isEmpty) {
-      _showMessage('请输入聊天内容');
-      return;
-    }
-
-    final config = await _llmConfigRepository.getByUserId(user.id);
-    if (config == null || !config.isConfigured) {
-      _showMessage('请先到“我的”页配置 AI 大模型 API Key');
+      _showMessage('请输入指令或问题');
       return;
     }
 
@@ -186,39 +189,147 @@ class _AiChatPageState extends State<AiChatPage> {
       });
       _scrollToBottom();
 
-      final contextSources = await _knowledgeContextRepository.search(
-        userId: user.id,
-        query: text,
-      );
-      final reply = await _aiChatService.generateReply(
-        config: config,
-        messages: _messages,
-        contextSources: contextSources,
-      );
-      final groundedReply = _appendSources(reply, contextSources);
+      final isAgentCommand = _isAgentCommand(text);
+      final assistantContent = isAgentCommand
+          ? await _runAgentCommand(user.id, text)
+          : await _answerKnowledgeQuestion(user.id, text);
+
       final assistantMessage = await _aiChatRepository.appendMessage(
         sessionId: session.id,
         role: AiChatMessageRole.assistant,
-        content: groundedReply,
-        provider: config.provider,
-        model: config.effectiveModel,
+        content: assistantContent,
+        provider: isAgentCommand ? 'qsclaw' : null,
+        model: isAgentCommand ? 'app-tools' : null,
       );
       await _aiChatRepository.touchSessionPreview(
         sessionId: session.id,
-        preview: groundedReply,
+        preview: assistantContent,
       );
 
       if (!mounted) return;
-      setState(() {
-        _messages = [..._messages, assistantMessage];
-      });
+      setState(() => _messages = [..._messages, assistantMessage]);
       await _reloadSessions(preferSessionId: session.id);
       _scrollToBottom();
     } catch (error) {
-      if (mounted) _showMessage('AI Chat 发送失败：$error');
+      if (mounted) _showMessage('QSClaw 执行失败：$error');
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
+  }
+
+  Future<String> _answerKnowledgeQuestion(int userId, String text) async {
+    final config = await _llmConfigRepository.getByUserId(userId);
+    if (config == null || !config.isConfigured) {
+      return '我还不能回答资料问题。请先到“我的”页面配置 AI 大模型 API Key。';
+    }
+
+    final contextSources = await _knowledgeContextRepository.search(
+      userId: userId,
+      query: text,
+    );
+    final reply = await _aiChatService.generateReply(
+      config: config,
+      messages: _messages,
+      contextSources: contextSources,
+    );
+    return _appendSources(reply, contextSources);
+  }
+
+  Future<String> _runAgentCommand(int userId, String text) async {
+    final result = await _qsClawAgentService.runCommand(
+      userId: userId,
+      command: text,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _performNavigation(result);
+    });
+    return _formatAgentReport(result);
+  }
+
+  Future<void> _performNavigation(QsClawRunResult result) async {
+    final target = result.navigationTarget;
+    if (target == null || !mounted) return;
+
+    switch (target) {
+      case QsClawNavigationTarget.aiInterview:
+        await Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const AiInterviewPage()));
+        break;
+      case QsClawNavigationTarget.knowledge:
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => Scaffold(
+              appBar: AppBar(title: const Text('知识库')),
+              body: const KnowledgeTabPage(),
+            ),
+          ),
+        );
+        break;
+      case QsClawNavigationTarget.practice:
+        await Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const PracticeReviewPage()));
+        break;
+      case QsClawNavigationTarget.home:
+      case QsClawNavigationTarget.aiChat:
+        break;
+    }
+  }
+
+  String _formatAgentReport(QsClawRunResult result) {
+    final lines = <String>['已完成：'];
+    if (result.library != null) {
+      lines.add('- 准备知识库：${result.library!.name}');
+    }
+    if (result.matchedDocuments.isNotEmpty) {
+      lines.add('- 找到 ${result.matchedDocuments.length} 份匹配资料');
+    }
+    if (result.movedCount > 0) {
+      lines.add('- 移动 ${result.movedCount} 份资料到知识库');
+    }
+    if (result.navigationTarget != null) {
+      lines.add(
+        '- 打开${QsClawNavigationTarget.labelOf(result.navigationTarget!)}',
+      );
+    }
+    for (final step in result.executedSteps) {
+      lines.add('- ${step.message}');
+    }
+    if (result.status == QsClawRunStatus.waitingForSources) {
+      lines.add('\n没有找到匹配资料。你可以先导入资料，或者让我搜索全部资料。');
+    }
+    if (lines.length == 1) {
+      lines.add('- 我已处理这条指令');
+    }
+    return lines.join('\n');
+  }
+
+  bool _isAgentCommand(String text) {
+    final lower = text.toLowerCase();
+    const commandWords = [
+      '打开',
+      '进入',
+      '去',
+      '创建',
+      '新建',
+      '整理',
+      '移动',
+      '归类',
+      '生成',
+      '植入',
+      '注入',
+      '演示数据',
+      '复习',
+      '面试',
+      '知识库',
+      'pdf',
+      'qsclaw',
+    ];
+    return commandWords.any((word) => text.contains(word)) ||
+        lower.contains('open') ||
+        lower.contains('create') ||
+        lower.contains('move');
   }
 
   String _appendSources(
@@ -253,10 +364,10 @@ class _AiChatPageState extends State<AiChatPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('历史聊天', style: AppTextStyles.h3(sheetContext)),
+                Text('历史对话', style: AppTextStyles.h3(sheetContext)),
                 const SizedBox(height: 8),
                 if (_sessions.isEmpty)
-                  const _EmptyChatHint(text: '暂无历史聊天，先发送第一条消息。')
+                  const _EmptyChatHint(text: '暂无历史对话')
                 else
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 420),
@@ -270,7 +381,7 @@ class _AiChatPageState extends State<AiChatPage> {
                           title: Text(session.title),
                           subtitle: Text(
                             session.lastMessagePreview.isEmpty
-                                ? '空白聊天'
+                                ? '空白对话'
                                 : session.lastMessagePreview,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -302,7 +413,7 @@ class _AiChatPageState extends State<AiChatPage> {
     final user = _user;
     final session = _currentSession;
     if (user == null || session == null) {
-      _showMessage('请先发送一条消息，再重命名聊天');
+      _showMessage('请先发送一条消息，再重命名对话');
       return;
     }
 
@@ -311,12 +422,12 @@ class _AiChatPageState extends State<AiChatPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('重命名聊天'),
+          title: const Text('重命名对话'),
           content: TextField(
             controller: controller,
             autofocus: true,
             maxLength: 30,
-            decoration: const InputDecoration(hintText: '输入聊天标题'),
+            decoration: const InputDecoration(hintText: '输入对话标题'),
           ),
           actions: [
             TextButton(
@@ -335,7 +446,7 @@ class _AiChatPageState extends State<AiChatPage> {
 
     if (title == null) return;
     if (title.trim().isEmpty) {
-      _showMessage('聊天标题不能为空');
+      _showMessage('对话标题不能为空');
       return;
     }
 
@@ -351,7 +462,7 @@ class _AiChatPageState extends State<AiChatPage> {
     final user = _user;
     final session = _currentSession;
     if (user == null || session == null) {
-      _showMessage('当前没有可删除的聊天');
+      _showMessage('当前没有可删除的对话');
       return;
     }
 
@@ -359,7 +470,7 @@ class _AiChatPageState extends State<AiChatPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('删除聊天'),
+          title: const Text('删除对话'),
           content: Text('确定删除“${session.title}”吗？历史消息会一起删除。'),
           actions: [
             TextButton(
@@ -401,7 +512,7 @@ class _AiChatPageState extends State<AiChatPage> {
   String _titleFromMessage(String message) {
     final normalized = message.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (normalized.isEmpty) {
-      return '新的聊天';
+      return '新的对话';
     }
     return normalized.length > 18 ? normalized.substring(0, 18) : normalized;
   }
@@ -425,25 +536,23 @@ class _AiChatPageState extends State<AiChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _currentSession?.title ?? 'AI Chat';
-
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text(title),
+        title: const Text('QSClaw'),
         actions: [
           IconButton(
-            tooltip: '历史聊天',
+            tooltip: '历史对话',
             onPressed: _isLoading ? null : _showHistorySheet,
             icon: const Icon(Icons.history_rounded),
           ),
           PopupMenuButton<String>(
-            tooltip: '聊天菜单',
+            tooltip: '对话菜单',
             onSelected: _handleMenuAction,
             itemBuilder: (context) => const [
-              PopupMenuItem(value: 'new', child: Text('新建聊天')),
-              PopupMenuItem(value: 'rename', child: Text('重命名聊天')),
-              PopupMenuItem(value: 'delete', child: Text('删除聊天')),
+              PopupMenuItem(value: 'new', child: Text('新建对话')),
+              PopupMenuItem(value: 'rename', child: Text('重命名对话')),
+              PopupMenuItem(value: 'delete', child: Text('删除对话')),
             ],
           ),
         ],
@@ -454,7 +563,7 @@ class _AiChatPageState extends State<AiChatPage> {
               children: [
                 Expanded(
                   child: _messages.isEmpty
-                      ? const _EmptyChatHint(text: '开始新的 AI Chat')
+                      ? const _EmptyChatHint(text: 'QSClaw')
                       : ListView.builder(
                           controller: _scrollController,
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -497,10 +606,10 @@ class _MessageBubble extends StatelessWidget {
         decoration: BoxDecoration(
           color: isUser ? AppColors.primary : AppColors.surface,
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(isUser ? 18 : 6),
-            bottomRight: Radius.circular(isUser ? 6 : 18),
+            topLeft: const Radius.circular(8),
+            topRight: const Radius.circular(8),
+            bottomLeft: Radius.circular(isUser ? 8 : 2),
+            bottomRight: Radius.circular(isUser ? 2 : 8),
           ),
           boxShadow: isUser ? null : AppShadows.cardSoftList,
         ),
@@ -528,10 +637,10 @@ class _TypingBubble extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           boxShadow: AppShadows.cardSoftList,
         ),
-        child: Text('AI 正在思考...', style: AppTextStyles.bodySmall(context)),
+        child: Text('QSClaw 正在处理...', style: AppTextStyles.bodySmall(context)),
       ),
     );
   }
@@ -570,7 +679,7 @@ class _ChatInputBar extends StatelessWidget {
                   if (!isSending) onSend();
                 },
                 decoration: const InputDecoration(
-                  hintText: '输入你的问题',
+                  hintText: '问知识点，或让我操作 App',
                   contentPadding: EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 12,
@@ -610,32 +719,7 @@ class _EmptyChatHint extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.primarySoft,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: const Icon(
-                Icons.smart_toy_rounded,
-                color: AppColors.primary,
-                size: 34,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(text, style: AppTextStyles.h3(context)),
-            const SizedBox(height: 6),
-            Text(
-              '可以问知识点、让 AI 帮你规划复习，也可以继续历史聊天。',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.bodySmall(context),
-            ),
-          ],
-        ),
+        child: Text(text, style: AppTextStyles.h1(context)),
       ),
     );
   }

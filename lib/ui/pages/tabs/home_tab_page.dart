@@ -16,11 +16,12 @@ import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/models/user_profile.dart';
 import '../../../database/source_document_repository.dart';
+import '../../../debug/debug_demo_data_seeder.dart';
 import '../../../pipeline/document_ingest_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../ai_generation_page.dart';
-import '../ai_chat_page.dart';
+import '../ai_interview_page.dart';
 import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
 import '../image_crop_selection_page.dart';
@@ -39,7 +40,9 @@ class HomeTabPage extends StatefulWidget {
     this.detailPageBuilder,
     this.aiGenerationPageBuilder,
     this.aiChatPageBuilder,
+    this.aiInterviewPageBuilder,
     this.qsClawPageBuilder,
+    this.debugDemoDataSeeder,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
@@ -57,7 +60,9 @@ class HomeTabPage extends StatefulWidget {
   final Widget Function(int documentId)? detailPageBuilder;
   final Widget Function(int documentId)? aiGenerationPageBuilder;
   final Widget Function()? aiChatPageBuilder;
+  final Widget Function()? aiInterviewPageBuilder;
   final Widget Function()? qsClawPageBuilder;
+  final DebugDemoDataSeeder? debugDemoDataSeeder;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
@@ -79,6 +84,8 @@ class _HomeTabPageState extends State<HomeTabPage> {
   late int _handledRefreshVersion;
   bool _reloadScheduled = false;
   bool _isImporting = false;
+  bool _isSeedingDemoData = false;
+  String? _demoSeedStatusMessage;
 
   @override
   void initState() {
@@ -148,7 +155,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
   Future<_HomeData> _loadData() async {
     await _authRepository.ensureInitialized();
     final user = await _authRepository.getCurrentUserProfile();
-    if (user == null) throw StateError('登录状态已失效');
+    if (user == null) {
+      throw StateError('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
+    }
 
     final recentDocuments = await _sourceDocumentRepository
         .fetchRecentSourceDocuments(
@@ -203,7 +212,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
     try {
       final user = await _authRepository.getCurrentUserProfile();
       if (user == null) {
-        _showMessage('登录状态已失效');
+        _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
         return;
       }
       final library = await _chooseLibraryForImport(user.id);
@@ -218,7 +227,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
       if (!mounted) return;
       await _openDocument(document.id);
     } catch (error) {
-      if (mounted) _showMessage('导入失败：$error');
+      if (mounted) _showMessage('\u5bfc\u5165\u5931\u8d25\uff1a$error');
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -249,7 +258,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
     try {
       final user = await _authRepository.getCurrentUserProfile();
       if (user == null) {
-        _showMessage('登录状态已失效');
+        _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
         return;
       }
       final library = await _chooseLibraryForImport(user.id);
@@ -262,7 +271,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
       if (!mounted || batch == null) return;
       await _openBatch(batch.id);
     } catch (error) {
-      if (mounted) _showMessage('批量导入失败：$error');
+      if (mounted) {
+        _showMessage('\u6279\u91cf\u5bfc\u5165\u5931\u8d25\uff1a$error');
+      }
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -286,7 +297,10 @@ class _HomeTabPageState extends State<HomeTabPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('选择保存到哪个知识库', style: AppTextStyles.h3(sheetContext)),
+                  Text(
+                    '\u9009\u62e9\u4fdd\u5b58\u5230\u54ea\u4e2a\u77e5\u8bc6\u5e93',
+                    style: AppTextStyles.h3(sheetContext),
+                  ),
                   const SizedBox(height: 8),
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 420),
@@ -300,7 +314,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
                               color: AppColors.primary,
                             ),
                             title: Text(library.name),
-                            subtitle: Text('${library.documentCount} 份资料'),
+                            subtitle: Text(
+                              '${library.documentCount} \u4efd\u8d44\u6599',
+                            ),
                             onTap: () =>
                                 Navigator.of(sheetContext).pop(library.id),
                           ),
@@ -311,7 +327,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
                             Icons.add_rounded,
                             color: AppColors.primary,
                           ),
-                          title: const Text('新建知识库'),
+                          title: const Text('\u65b0\u5efa\u77e5\u8bc6\u5e93'),
                           onTap: () => Navigator.of(sheetContext).pop(-1),
                         ),
                       ],
@@ -347,7 +363,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
         name: name,
       );
     } catch (error) {
-      if (mounted) _showMessage('创建知识库失败：$error');
+      if (mounted) {
+        _showMessage('\u521b\u5efa\u77e5\u8bc6\u5e93\u5931\u8d25\uff1a$error');
+      }
       return null;
     }
   }
@@ -373,7 +391,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
     final user = await _authRepository.getCurrentUserProfile();
     if (!mounted) return;
     if (user == null) {
-      _showMessage('鐧诲綍鐘舵€佸凡澶辨晥');
+      _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
       return;
     }
     final documents = await _sourceDocumentRepository
@@ -388,7 +406,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
       orElse: () => null,
     );
     if (target == null) {
-      _showMessage('请先完成任意资料的 OCR，再生成 AI 结果');
+      _showMessage(
+        '\u8bf7\u5148\u5b8c\u6210\u4efb\u610f\u8d44\u6599\u7684 OCR\uff0c\u518d\u751f\u6210 AI \u7ed3\u679c',
+      );
       return;
     }
     final page =
@@ -398,8 +418,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _afterDataChanged();
   }
 
-  Future<void> _openAiChat() async {
-    final page = widget.aiChatPageBuilder?.call() ?? const AiChatPage();
+  Future<void> _openAiInterview() async {
+    final page =
+        widget.aiInterviewPageBuilder?.call() ?? const AiInterviewPage();
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
@@ -423,6 +444,51 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _refresh();
   }
 
+  Future<void> _seedDebugDemoData() async {
+    if (!kDebugMode || _isSeedingDemoData) {
+      return;
+    }
+    final user = await _authRepository.getCurrentUserProfile();
+    if (user == null) {
+      const message =
+          '\u8bf7\u5148\u767b\u5f55\u540e\u518d\u690d\u5165\u6f14\u793a\u6570\u636e';
+      setState(() => _demoSeedStatusMessage = message);
+      _showMessage(message);
+      return;
+    }
+
+    const loadingMessage =
+        '\u6b63\u5728\u690d\u5165\u6f14\u793a\u6570\u636e...';
+    setState(() {
+      _isSeedingDemoData = true;
+      _demoSeedStatusMessage = loadingMessage;
+    });
+    _showMessage(loadingMessage);
+    try {
+      await (widget.debugDemoDataSeeder ?? DebugDemoDataSeeder()).seedForUser(
+        user.id,
+      );
+      if (!mounted) return;
+      await _afterDataChanged();
+      if (!mounted) return;
+      const successMessage =
+          '\u6f14\u793a\u6570\u636e\u5df2\u690d\u5165\u5f53\u524d\u8c03\u8bd5\u8d26\u53f7';
+      setState(() => _demoSeedStatusMessage = successMessage);
+      _showMessage(successMessage);
+    } catch (error) {
+      if (mounted) {
+        final errorMessage =
+            '\u690d\u5165\u6f14\u793a\u6570\u636e\u5931\u8d25\uff1a$error';
+        setState(() => _demoSeedStatusMessage = errorMessage);
+        _showMessage(errorMessage);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSeedingDemoData = false);
+      }
+    }
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -441,8 +507,8 @@ class _HomeTabPageState extends State<HomeTabPage> {
         if (snapshot.hasError) {
           return _StatePanel(
             icon: Icons.error_outline_rounded,
-            title: '首页加载失败',
-            description: '请稍后重试。',
+            title: '\u9996\u9875\u52a0\u8f7d\u5931\u8d25',
+            description: '\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002',
             onPressed: _refresh,
           );
         }
@@ -460,7 +526,14 @@ class _HomeTabPageState extends State<HomeTabPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _WelcomeCard(user: data.user, stats: data.stats),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 12),
+                      _AgentCommandStrip(
+                        onOpenQsClaw: _openQsClaw,
+                        onSeedDemoData: kDebugMode ? _seedDebugDemoData : null,
+                        isSeedingDemoData: _isSeedingDemoData,
+                        statusMessage: _demoSeedStatusMessage,
+                      ),
+                      const SizedBox(height: 12),
                       _QuickActions(
                         isImporting: _isImporting,
                         onCamera: () =>
@@ -473,10 +546,13 @@ class _HomeTabPageState extends State<HomeTabPage> {
                         onPdf: () =>
                             _handleBatchImport(BatchDocumentInputSource.pdf),
                         onAi: _openAiGeneration,
-                        onAiChat: _openAiChat,
+                        onAiInterview: _openAiInterview,
                         onQsClaw: _openQsClaw,
                         onPractice: _openPractice,
                         onGames: _openGames,
+                        isSeedingDemoData: _isSeedingDemoData,
+                        demoSeedStatusMessage: _demoSeedStatusMessage,
+                        onSeedDemoData: kDebugMode ? _seedDebugDemoData : null,
                       ),
                       const SizedBox(height: 14),
                       _RecentBatchesSection(
@@ -507,7 +583,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
   }
 }
 
-// ========== 欢迎卡片 ==========
+// ========== Welcome Card ==========
 class _WelcomeCard extends StatelessWidget {
   const _WelcomeCard({required this.user, required this.stats});
   final UserProfile user;
@@ -515,28 +591,244 @@ class _WelcomeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pendingWork = stats.pendingPracticeCount + stats.wrongQuestionCount;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFCCFBF1), Color(0xFFF0FDFA)],
-        ),
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.primarySoft),
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('你好，${user.primaryName}', style: AppTextStyles.h1(context)),
-          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '\u5b66\u4e60\u9a7e\u9a76\u8231',
+                      style: AppTextStyles.h1(context),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '\u4f60\u597d\uff0c${user.primaryName}\u3002\u4eca\u5929\u8fd8\u6709 $pendingWork \u4e2a\u5b66\u4e60\u52a8\u4f5c\u53ef\u4ee5\u63a8\u8fdb\u3002',
+                      style: AppTextStyles.bodySmall(context).copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  '\u4eca\u65e5\u6982\u89c8',
+                  style: AppTextStyles.caption(context).copyWith(
+                    color: AppColors.primaryDark,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _PulseMetric(
+                  label: '\u8d44\u6599',
+                  value: stats.documentCount,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _PulseMetric(
+                  label: '\u6210\u679c',
+                  value: stats.generatedResultCount,
+                  color: AppColors.secondaryBlue,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _PulseMetric(
+                  label: '\u5f85\u5237',
+                  value: stats.pendingPracticeCount,
+                  color: AppColors.accentOrange,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _PulseMetric(
+                  label: '\u9519\u9898',
+                  value: stats.wrongQuestionCount,
+                  color: AppColors.error,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AgentCommandStrip extends StatelessWidget {
+  const _AgentCommandStrip({
+    required this.onOpenQsClaw,
+    required this.isSeedingDemoData,
+    this.onSeedDemoData,
+    this.statusMessage,
+  });
+
+  final VoidCallback onOpenQsClaw;
+  final VoidCallback? onSeedDemoData;
+  final bool isSeedingDemoData;
+  final String? statusMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.cardSoftList,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.textPrimary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.psychology_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'QSClaw \u6307\u6325\u53f0',
+                      style: AppTextStyles.h3(context),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '\u4e00\u53e5\u8bdd\u8ba9 App \u5efa\u5e93\u3001\u6574\u7406\u8d44\u6599\u3001\u6253\u5f00\u529f\u80fd\u6216\u690d\u5165\u8c03\u8bd5\u6570\u636e\u3002',
+                      style: AppTextStyles.caption(context),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onOpenQsClaw,
+                  icon: const Icon(Icons.keyboard_command_key_rounded),
+                  label: const Text('\u6253\u5f00\u667a\u80fd\u4f53'),
+                ),
+              ),
+              if (onSeedDemoData != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: isSeedingDemoData ? null : onSeedDemoData,
+                    icon: const Icon(Icons.data_object_rounded),
+                    label: Text(
+                      isSeedingDemoData
+                          ? '\u690d\u5165\u4e2d'
+                          : '\u6f14\u793a\u6570\u636e',
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (statusMessage?.isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              statusMessage!,
+              style: AppTextStyles.caption(context).copyWith(
+                color: AppColors.primaryDark,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PulseMetric extends StatelessWidget {
+  const _PulseMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final int value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 64),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
           Text(
-            '已保存 ${stats.documentCount} 份资料，生成 ${stats.generatedResultCount} 条学习成果。',
-            style: AppTextStyles.bodySmall(context).copyWith(
+            '$value',
+            style: AppTextStyles.h2(
+              context,
+            ).copyWith(color: color, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.caption(context).copyWith(
               color: AppColors.textSecondary,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -545,7 +837,7 @@ class _WelcomeCard extends StatelessWidget {
   }
 }
 
-// ========== 快速入口 ==========
+// ========== Quick Actions ==========
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.isImporting,
@@ -554,27 +846,33 @@ class _QuickActions extends StatelessWidget {
     required this.onMultiImage,
     required this.onPdf,
     required this.onAi,
-    required this.onAiChat,
+    required this.onAiInterview,
     required this.onQsClaw,
     required this.onPractice,
     required this.onGames,
+    required this.isSeedingDemoData,
+    this.demoSeedStatusMessage,
+    this.onSeedDemoData,
   });
 
   final bool isImporting;
+  final bool isSeedingDemoData;
+  final String? demoSeedStatusMessage;
   final VoidCallback onCamera;
   final VoidCallback onGallery;
   final VoidCallback onMultiImage;
   final VoidCallback onPdf;
   final VoidCallback onAi;
-  final VoidCallback onAiChat;
+  final VoidCallback onAiInterview;
   final VoidCallback onQsClaw;
   final VoidCallback onPractice;
   final VoidCallback onGames;
+  final VoidCallback? onSeedDemoData;
 
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '快速入口',
+      title: '\u5feb\u901f\u5165\u53e3',
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = (constraints.maxWidth - 10) / 2;
@@ -586,7 +884,7 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconCamera,
-                  title: '拍照资料',
+                  title: '\u62cd\u7167\u8d44\u6599',
                   onTap: isImporting ? null : onCamera,
                   isPrimary: true,
                 ),
@@ -595,7 +893,7 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconAlbum,
-                  title: '导入图片',
+                  title: '\u5bfc\u5165\u56fe\u7247',
                   onTap: isImporting ? null : onGallery,
                 ),
               ),
@@ -603,7 +901,7 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconPdfMulti,
-                  title: '多图导入',
+                  title: '\u591a\u56fe\u5bfc\u5165',
                   onTap: isImporting ? null : onMultiImage,
                 ),
               ),
@@ -611,7 +909,7 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconPdfMulti,
-                  title: '导入 PDF',
+                  title: '\u5bfc\u5165 PDF',
                   onTap: isImporting ? null : onPdf,
                 ),
               ),
@@ -619,16 +917,16 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconAi,
-                  title: '生成 AI 结果',
+                  title: '\u751f\u6210 AI \u7ed3\u679c',
                   onTap: onAi,
                 ),
               ),
               SizedBox(
                 width: width,
                 child: _ActionTile(
-                  icon: Icons.smart_toy_rounded,
-                  title: 'AI Chat',
-                  onTap: onAiChat,
+                  icon: Icons.video_camera_front_rounded,
+                  title: 'AI \u9762\u8bd5\u5b98',
+                  onTap: onAiInterview,
                 ),
               ),
               SizedBox(
@@ -644,18 +942,40 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.practiceQuestion,
-                  title: '刷复习题',
+                  title: '\u5237\u590d\u4e60\u9898',
                   onTap: onPractice,
                 ),
               ),
+              if (onSeedDemoData != null)
+                SizedBox(
+                  width: width,
+                  child: _ActionTile(
+                    icon: Icons.data_object_rounded,
+                    title: isSeedingDemoData
+                        ? '\u6b63\u5728\u690d\u5165'
+                        : '\u690d\u5165\u6f14\u793a\u6570\u636e',
+                    onTap: isSeedingDemoData ? null : onSeedDemoData,
+                  ),
+                ),
               SizedBox(
                 width: width,
                 child: _ActionTile(
                   icon: Icons.games_rounded,
-                  title: '益智游戏',
+                  title: '\u76ca\u667a\u6e38\u620f',
                   onTap: onGames,
                 ),
               ),
+              if (demoSeedStatusMessage?.isNotEmpty == true)
+                SizedBox(
+                  width: constraints.maxWidth,
+                  child: Text(
+                    demoSeedStatusMessage!,
+                    style: AppTextStyles.caption(context).copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -664,7 +984,7 @@ class _QuickActions extends StatelessWidget {
   }
 }
 
-// ========== 最近学习包 ==========
+// ========== Recent Batches ==========
 class _RecentBatchesSection extends StatelessWidget {
   const _RecentBatchesSection({
     required this.batches,
@@ -676,9 +996,12 @@ class _RecentBatchesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '最近学习包',
+      title: '\u6700\u8fd1\u5b66\u4e60\u5305',
       child: batches.isEmpty
-          ? const _EmptyHint(text: '多图或 PDF 导入后，会在这里形成学习包。')
+          ? const _EmptyHint(
+              text:
+                  '\u591a\u56fe\u6216 PDF \u5bfc\u5165\u540e\uff0c\u4f1a\u5728\u8fd9\u91cc\u5f62\u6210\u5b66\u4e60\u5305\u3002',
+            )
           : Column(
               children: batches
                   .map(
@@ -693,7 +1016,7 @@ class _RecentBatchesSection extends StatelessWidget {
   }
 }
 
-// ========== 最近处理资料 ==========
+// ========== Recent Documents ==========
 class _RecentDocumentsSection extends StatelessWidget {
   const _RecentDocumentsSection({
     required this.documents,
@@ -705,9 +1028,12 @@ class _RecentDocumentsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '最近处理资料',
+      title: '\u6700\u8fd1\u5904\u7406\u8d44\u6599',
       child: documents.isEmpty
-          ? const _EmptyHint(text: '还没有资料，先拍照或导入图片。')
+          ? const _EmptyHint(
+              text:
+                  '\u8fd8\u6ca1\u6709\u8d44\u6599\uff0c\u5148\u62cd\u7167\u6216\u5bfc\u5165\u56fe\u7247\u3002',
+            )
           : Column(
               children: documents
                   .map(
@@ -722,7 +1048,7 @@ class _RecentDocumentsSection extends StatelessWidget {
   }
 }
 
-// ========== 最近生成成果 ==========
+// ========== Recent Generated Results ==========
 class _RecentResultsSection extends StatelessWidget {
   const _RecentResultsSection({
     required this.contents,
@@ -734,9 +1060,12 @@ class _RecentResultsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '最近生成成果',
+      title: '\u6700\u8fd1\u751f\u6210\u6210\u679c',
       child: contents.isEmpty
-          ? const _EmptyHint(text: '生成知识卡片、提纲、导图或复习题后会出现在这里。')
+          ? const _EmptyHint(
+              text:
+                  '\u751f\u6210\u77e5\u8bc6\u5361\u7247\u3001\u63d0\u7eb2\u3001\u5bfc\u56fe\u6216\u590d\u4e60\u9898\u540e\u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc\u3002',
+            )
           : Column(
               children: contents
                   .map(
@@ -751,7 +1080,7 @@ class _RecentResultsSection extends StatelessWidget {
   }
 }
 
-// ========== 学习统计 ==========
+// ========== Study Stats ==========
 class _StatsSection extends StatelessWidget {
   const _StatsSection({required this.stats});
   final StudyOverviewStats stats;
@@ -759,16 +1088,40 @@ class _StatsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _StatItem('资料总数', stats.documentCount, const Color(0xFFF0FDFA)),
-      _StatItem('OCR 完成', stats.ocrSuccessCount, const Color(0xFFEFF6FF)),
-      _StatItem('学习成果', stats.generatedResultCount, const Color(0xFFF5F3FF)),
-      _StatItem('待刷题', stats.pendingPracticeCount, const Color(0xFFFFF7ED)),
-      _StatItem('待处理错题', stats.wrongQuestionCount, const Color(0xFFFEF2F2)),
-      _StatItem('已掌握', stats.masteredQuestionCount, const Color(0xFFF0FDF4)),
+      _StatItem(
+        '\u8d44\u6599\u603b\u6570',
+        stats.documentCount,
+        const Color(0xFFF0FDFA),
+      ),
+      _StatItem(
+        'OCR \u8bc6\u522b',
+        stats.ocrSuccessCount,
+        const Color(0xFFEFF6FF),
+      ),
+      _StatItem(
+        '\u5b66\u4e60\u6210\u679c',
+        stats.generatedResultCount,
+        const Color(0xFFF5F3FF),
+      ),
+      _StatItem(
+        '\u5f85\u5237\u9898',
+        stats.pendingPracticeCount,
+        const Color(0xFFFFF7ED),
+      ),
+      _StatItem(
+        '\u5f85\u5904\u7406\u9519\u9898',
+        stats.wrongQuestionCount,
+        const Color(0xFFFEF2F2),
+      ),
+      _StatItem(
+        '\u5df2\u638c\u63e1',
+        stats.masteredQuestionCount,
+        const Color(0xFFF0FDF4),
+      ),
     ];
 
     return _Section(
-      title: '学习统计',
+      title: '\u5b66\u4e60\u7edf\u8ba1',
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = (constraints.maxWidth - 10) / 2;
@@ -790,7 +1143,7 @@ class _StatsSection extends StatelessWidget {
   }
 }
 
-// ========== 通用组件 ==========
+// ========== Shared Components ==========
 class _Section extends StatelessWidget {
   const _Section({required this.title, required this.child});
   final String title;
@@ -803,7 +1156,7 @@ class _Section extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
+        borderRadius: BorderRadius.circular(8),
         boxShadow: AppShadows.cardSoftList,
       ),
       child: Column(
@@ -838,12 +1191,12 @@ class _ActionTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        borderRadius: BorderRadius.circular(8),
         child: Ink(
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
           decoration: BoxDecoration(
             color: isPrimary ? AppColors.primary : AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+            borderRadius: BorderRadius.circular(8),
             border: isPrimary ? null : Border.all(color: AppColors.border),
           ),
           child: Row(
@@ -909,7 +1262,7 @@ class _DocumentTile extends StatelessWidget {
       ),
       title: document.title,
       subtitle:
-          '${document.createdAtLabel} / OCR ${document.ocrStatusLabel} / AI ${document.aiDone ? '已生成' : '待生成'}',
+          '${document.createdAtLabel} / OCR ${document.ocrStatusLabel} / AI ${document.aiDone ? '\u5df2\u751f\u6210' : '\u5f85\u751f\u6210'}',
     );
   }
 }
@@ -934,7 +1287,7 @@ class _BatchTile extends StatelessWidget {
       ),
       title: batch.title,
       subtitle:
-          '${batch.sourceTypeLabel} / ${batch.pageCount} 页 / ${batch.createdAtLabel}',
+          '${batch.sourceTypeLabel} / ${batch.pageCount} \u9875 / ${batch.createdAtLabel}',
     );
   }
 }
@@ -1134,7 +1487,10 @@ class _StatePanel extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
-            FilledButton(onPressed: () => onPressed(), child: const Text('重试')),
+            FilledButton(
+              onPressed: () => onPressed(),
+              child: const Text('\u91cd\u8bd5'),
+            ),
           ],
         ),
       ),

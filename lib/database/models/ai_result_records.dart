@@ -100,6 +100,9 @@ class PracticeQuestionRecord {
     this.correctStreak = 0,
     this.parentQuestionId,
     this.questionKind = PracticeQuestionKind.normal,
+    this.optionsJson,
+    this.rubricJson,
+    this.expectedKeywordsJson,
   });
 
   final int id;
@@ -118,6 +121,9 @@ class PracticeQuestionRecord {
   final int correctStreak;
   final int? parentQuestionId;
   final String questionKind;
+  final String? optionsJson;
+  final String? rubricJson;
+  final String? expectedKeywordsJson;
   final DateTime createdAt;
 
   bool get isPending => reviewStatus == PracticeQuestionReviewStatus.pending;
@@ -127,6 +133,12 @@ class PracticeQuestionRecord {
   bool get isMastered => reviewStatus == PracticeQuestionReviewStatus.mastered;
 
   bool get isSimilarQuestion => questionKind == PracticeQuestionKind.similar;
+
+  List<String> get options => _decodeStringList(optionsJson);
+
+  Map<String, num> get rubric => _decodeNumberMap(rubricJson);
+
+  List<String> get expectedKeywords => _decodeStringList(expectedKeywordsJson);
 
   factory PracticeQuestionRecord.fromMap(Map<String, Object?> map) {
     final createdAt = (map['created_at'] as String?) ?? '';
@@ -158,8 +170,41 @@ class PracticeQuestionRecord {
       questionKind: PracticeQuestionKind.normalize(
         map['question_kind'] as String?,
       ),
+      optionsJson: (map['options_json'] as String?)?.trim(),
+      rubricJson: (map['rubric_json'] as String?)?.trim(),
+      expectedKeywordsJson: (map['expected_keywords_json'] as String?)?.trim(),
       createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
     );
+  }
+
+  static List<String> _decodeStringList(String? jsonText) {
+    final raw = (jsonText ?? '').trim();
+    if (raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Map<String, num> _decodeNumberMap(String? jsonText) {
+    final raw = (jsonText ?? '').trim();
+    if (raw.isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const {};
+      return decoded.map((key, value) {
+        final number = value is num ? value : num.tryParse('$value') ?? 0;
+        return MapEntry('$key', number);
+      });
+    } catch (_) {
+      return const {};
+    }
   }
 
   static int _readInt(Object? value) {
@@ -217,11 +262,45 @@ class PracticeQuestionKind {
 
   static const String normal = 'normal';
   static const String similar = 'similar';
+  static const String multipleChoice = 'multiple_choice';
+  static const String fillBlank = 'fill_blank';
+  static const String trueFalse = 'true_false';
+  static const String shortAnswer = 'short_answer';
+  static const String calculation = 'calculation';
+  static const String application = 'application';
+  static const String errorAnalysis = 'error_analysis';
+  static const String oral = 'oral';
 
   static String normalize(String? value) {
     switch ((value ?? '').trim().toLowerCase()) {
       case similar:
         return similar;
+      case multipleChoice:
+      case 'choice':
+      case 'single_choice':
+        return multipleChoice;
+      case fillBlank:
+      case 'blank':
+        return fillBlank;
+      case trueFalse:
+      case 'judge':
+      case 'judgement':
+        return trueFalse;
+      case shortAnswer:
+      case 'short':
+        return shortAnswer;
+      case calculation:
+      case 'compute':
+        return calculation;
+      case application:
+      case 'scenario':
+        return application;
+      case errorAnalysis:
+      case 'mistake_analysis':
+        return errorAnalysis;
+      case oral:
+      case 'interview':
+        return oral;
       case normal:
       default:
         return normal;

@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../database/ai_generation_repository.dart';
 import '../database/knowledge_graph_repository.dart';
 import '../database/models/ai_generation_task_record.dart';
+import '../database/models/ai_result_records.dart';
 import '../database/models/llm_provider_config.dart';
 import '../llm/minimax_client.dart';
 import 'knowledge_graph_extraction_service.dart';
@@ -216,6 +217,12 @@ class AiGenerationOrchestrator {
     }
   }
 
+  static List<Map<String, String>> parsePracticeQuestionsForTest(
+    Map<String, dynamic> data,
+  ) {
+    return AiGenerationOrchestrator()._parsePracticeQuestions(data);
+  }
+
   List<Map<String, String>> _parseKnowledgeCards(Map<String, dynamic> data) {
     final rawCards = _pickFirstList(data, const [
       'cards',
@@ -411,6 +418,14 @@ class AiGenerationOrchestrator {
               'explanation',
             ]),
             'difficulty': _pickFirstString(data, const ['difficulty']),
+            'question_kind': PracticeQuestionKind.normalize(
+              _pickFirstString(data, const ['question_kind', 'kind', 'type']),
+            ),
+            'options_json': _jsonListText(data['options'] ?? data['choices']),
+            'rubric_json': _jsonMapText(data['rubric'] ?? data['scoring']),
+            'expected_keywords_json': _jsonListText(
+              data['expected_keywords'] ?? data['keywords'],
+            ),
           },
         ];
       }
@@ -432,6 +447,15 @@ class AiGenerationOrchestrator {
                 .toString()
                 .trim(),
             'difficulty': (item['difficulty'] ?? '').toString().trim(),
+            'question_kind': PracticeQuestionKind.normalize(
+              (item['question_kind'] ?? item['kind'] ?? item['type'] ?? '')
+                  .toString(),
+            ),
+            'options_json': _jsonListText(item['options'] ?? item['choices']),
+            'rubric_json': _jsonMapText(item['rubric'] ?? item['scoring']),
+            'expected_keywords_json': _jsonListText(
+              item['expected_keywords'] ?? item['keywords'],
+            ),
           },
         )
         .where((item) => (item['question_text'] ?? '').isNotEmpty)
@@ -481,6 +505,10 @@ $ocrText
   }
 
   String _schemaOf(String taskType) {
+    if (taskType == AiTaskType.practiceQuestions) {
+      return '{"questions":[{"question_kind":"multiple_choice|fill_blank|true_false|short_answer|calculation|application|error_analysis|oral","question_text":"question","options":["A","B","C","D"],"answer_text":"answer","analysis_text":"analysis","difficulty":"easy|medium|hard","expected_keywords":["keyword"],"rubric":{"point":40}}]}';
+    }
+
     switch (taskType) {
       case AiTaskType.knowledgeCards:
         return '{"cards":[{"title":"卡片标题","content":"卡片内容"}]}';
@@ -496,6 +524,47 @@ $ocrText
   }
 
   Map<String, dynamic> _jsonSchemaOf(String taskType) {
+    if (taskType == AiTaskType.practiceQuestions) {
+      return {
+        'name': 'practice_questions_response',
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'questions': {
+              'type': 'array',
+              'items': {
+                'type': 'object',
+                'properties': {
+                  'question_kind': {'type': 'string'},
+                  'question_text': {'type': 'string'},
+                  'options': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                  },
+                  'answer_text': {'type': 'string'},
+                  'analysis_text': {'type': 'string'},
+                  'difficulty': {'type': 'string'},
+                  'expected_keywords': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                  },
+                  'rubric': {'type': 'object'},
+                },
+                'required': [
+                  'question_kind',
+                  'question_text',
+                  'answer_text',
+                  'analysis_text',
+                  'difficulty',
+                ],
+              },
+            },
+          },
+          'required': ['questions'],
+        },
+      };
+    }
+
     switch (taskType) {
       case AiTaskType.knowledgeCards:
         return {
@@ -601,6 +670,29 @@ $ocrText
     }
 
     return '';
+  }
+
+  static String _jsonListText(Object? value) {
+    if (value == null) return '';
+    if (value is List) {
+      return jsonEncode(
+        value
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false),
+      );
+    }
+    final text = value.toString().trim();
+    return text.isEmpty ? '' : jsonEncode([text]);
+  }
+
+  static String _jsonMapText(Object? value) {
+    if (value == null) return '';
+    if (value is Map) {
+      return jsonEncode(value);
+    }
+    final text = value.toString().trim();
+    return text.isEmpty ? '' : jsonEncode({'rubric': text});
   }
 
   static const String _systemPrompt =

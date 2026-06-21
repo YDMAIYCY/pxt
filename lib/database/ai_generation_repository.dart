@@ -312,7 +312,14 @@ class AiGenerationRepository {
           'review_interval_days': 0,
           'correct_streak': 0,
           'parent_question_id': null,
-          'question_kind': PracticeQuestionKind.normal,
+          'question_kind': PracticeQuestionKind.normalize(
+            question['question_kind'],
+          ),
+          'options_json': _normalizedJsonList(question['options_json']),
+          'rubric_json': _normalizedJsonMap(question['rubric_json']),
+          'expected_keywords_json': _normalizedJsonList(
+            question['expected_keywords_json'],
+          ),
           'created_at': now,
         });
       }
@@ -339,7 +346,7 @@ class AiGenerationRepository {
     addUserAndLibrary();
     addUserAndLibrary();
     addUserAndLibrary();
-    args.add(PracticeQuestionKind.normal);
+    args.add(PracticeQuestionKind.similar);
     args.add(limit);
 
     final rows = await db.rawQuery('''
@@ -379,7 +386,7 @@ class AiGenerationRepository {
       JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id
       WHERE documents.user_id = ?
         $libraryClause
-        AND questions.question_kind = ?
+        AND questions.question_kind != ?
       ORDER BY created_at DESC
       LIMIT ?
       ''', args);
@@ -637,6 +644,11 @@ class AiGenerationRepository {
           'correct_streak': 0,
           'parent_question_id': wrongQuestion.id,
           'question_kind': PracticeQuestionKind.similar,
+          'options_json': _normalizedJsonList(question['options_json']),
+          'rubric_json': _normalizedJsonMap(question['rubric_json']),
+          'expected_keywords_json': _normalizedJsonList(
+            question['expected_keywords_json'],
+          ),
           'created_at': now,
         });
       }
@@ -801,9 +813,9 @@ class AiGenerationRepository {
           (SELECT COUNT(*) FROM ${AppDatabase.tableKnowledgeCards} cards JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = cards.document_id WHERE documents.user_id = ?) +
           (SELECT COUNT(*) FROM ${AppDatabase.tableReviewOutlines} outlines JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = outlines.document_id WHERE documents.user_id = ?) +
           (SELECT COUNT(*) FROM ${AppDatabase.tableMindmapTexts} mindmaps JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = mindmaps.document_id WHERE documents.user_id = ?) +
-          (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.question_kind = ?)
+          (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.question_kind != ?)
         ) AS generated_result_count,
-        (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.question_kind = ?) AS practice_question_count,
+        (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.question_kind != ?) AS practice_question_count,
         (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.review_status = 'pending') AS pending_practice_count,
         (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.review_status = 'wrong') AS wrong_question_count,
         (SELECT COUNT(*) FROM ${AppDatabase.tablePracticeQuestions} questions JOIN ${AppDatabase.tableSourceDocuments} documents ON documents.id = questions.document_id WHERE documents.user_id = ? AND questions.review_status = 'mastered') AS mastered_question_count
@@ -815,9 +827,9 @@ class AiGenerationRepository {
         userId,
         userId,
         userId,
-        PracticeQuestionKind.normal,
+        PracticeQuestionKind.similar,
         userId,
-        PracticeQuestionKind.normal,
+        PracticeQuestionKind.similar,
         userId,
         userId,
         userId,
@@ -858,6 +870,10 @@ class AiGenerationRepository {
               'answer_text': item.answerText ?? '',
               'analysis_text': item.analysisText ?? '',
               'difficulty': item.difficulty ?? '',
+              'question_kind': item.questionKind,
+              'options_json': item.optionsJson ?? '',
+              'rubric_json': item.rubricJson ?? '',
+              'expected_keywords_json': item.expectedKeywordsJson ?? '',
             },
           )
           .toList(growable: false),
@@ -1058,6 +1074,30 @@ class AiGenerationRepository {
       return int.tryParse(value) ?? 0;
     }
     return 0;
+  }
+
+  String? _normalizedJsonList(String? raw) {
+    final text = (raw ?? '').trim();
+    if (text.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) {
+        return jsonEncode(decoded);
+      }
+    } catch (_) {}
+    return jsonEncode([text]);
+  }
+
+  String? _normalizedJsonMap(String? raw) {
+    final text = (raw ?? '').trim();
+    if (text.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) {
+        return jsonEncode(decoded);
+      }
+    } catch (_) {}
+    return jsonEncode(<String, Object?>{'rubric': text});
   }
 
   String _buildLibraryClause(int? libraryId) {

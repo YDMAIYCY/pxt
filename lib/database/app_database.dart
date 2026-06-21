@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 12;
+  static const int databaseVersion = 13;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -230,6 +230,9 @@ class AppDatabase {
         correct_streak INTEGER NOT NULL DEFAULT 0,
         parent_question_id INTEGER,
         question_kind TEXT NOT NULL DEFAULT 'normal',
+        options_json TEXT,
+        rubric_json TEXT,
+        expected_keywords_json TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY(document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE,
         FOREIGN KEY(parent_question_id) REFERENCES $tablePracticeQuestions(id) ON DELETE CASCADE
@@ -410,6 +413,9 @@ class AppDatabase {
     }
     if (oldVersion < 12) {
       await _upgradeKnowledgeGraphToV12(db);
+    }
+    if (oldVersion < 13) {
+      await _upgradeRichPracticeQuestionsToV13(db);
     }
   }
 
@@ -832,6 +838,27 @@ class AppDatabase {
     await _createKnowledgeGraphIndexes(db);
   }
 
+  Future<void> _upgradeRichPracticeQuestionsToV13(Database db) async {
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'options_json',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'rubric_json',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'expected_keywords_json',
+      'TEXT',
+    );
+  }
+
   Future<void> _createKnowledgeGraphTables(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS $tableKnowledgeConcepts (
@@ -1065,6 +1092,7 @@ class AppDatabase {
     await _upgradeAiChatToV10(db);
     await _upgradeFocusToV11(db);
     await _upgradeKnowledgeGraphToV12(db);
+    await _upgradeRichPracticeQuestionsToV13(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

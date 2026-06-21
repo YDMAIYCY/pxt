@@ -12,14 +12,17 @@ import 'tabs/profile_tab_page.dart';
 import 'tabs/tasks_tab_page.dart';
 
 const List<_BottomDockItem> _bottomDockItems = [
-  _BottomDockItem(label: '首页', iconAsset: AppAssets.navHome),
-  _BottomDockItem(label: '知识库', iconAsset: AppAssets.navKnowledge),
-  _BottomDockItem(label: '专注', icon: Icons.timer_rounded),
-  _BottomDockItem(label: '任务', iconAsset: AppAssets.navTask),
-  _BottomDockItem(label: '我的', iconAsset: AppAssets.navProfile),
+  _BottomDockItem(label: '\u9996\u9875', iconAsset: AppAssets.navHome),
+  _BottomDockItem(
+    label: '\u77e5\u8bc6\u5e93',
+    iconAsset: AppAssets.navKnowledge,
+  ),
+  _BottomDockItem(label: '\u4e13\u6ce8', icon: Icons.timer_rounded),
+  _BottomDockItem(label: '\u4efb\u52a1', iconAsset: AppAssets.navTask),
+  _BottomDockItem(label: '\u6211\u7684', iconAsset: AppAssets.navProfile),
 ];
 
-// ========== 主界面 ==========
+// ========== Main Shell ==========
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -140,7 +143,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ========== 底部导航 ==========
+// ========== Bottom Navigation ==========
 class _FloatingBottomDock extends StatelessWidget {
   const _FloatingBottomDock({
     required this.currentIndex,
@@ -227,7 +230,9 @@ class _DockButton extends StatelessWidget {
                 Icon(
                   item.icon,
                   size: 22,
-                  color: isSelected ? AppColors.primary : AppColors.textTertiary,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textTertiary,
                 ),
               const SizedBox(height: 2),
               Text(

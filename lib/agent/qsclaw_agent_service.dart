@@ -2,6 +2,7 @@ import '../database/knowledge_library_repository.dart';
 import '../database/models/knowledge_library_record.dart';
 import '../database/models/source_document_record.dart';
 import '../database/source_document_repository.dart';
+import '../debug/debug_demo_data_seeder.dart';
 import 'qsclaw_tool_registry.dart';
 
 // ========== QSClaw Agent Service ==========
@@ -11,12 +12,14 @@ class QsClawAgentService {
   QsClawAgentService({
     SourceDocumentRepository? sourceDocumentRepository,
     KnowledgeLibraryRepository? knowledgeLibraryRepository,
+    DebugDemoDataSeeder? debugDemoDataSeeder,
     QsClawToolRegistry? toolRegistry,
   }) : _toolRegistry =
            toolRegistry ??
            QsClawToolRegistry.withCoreTools(
              sourceDocumentRepository: sourceDocumentRepository,
              knowledgeLibraryRepository: knowledgeLibraryRepository,
+             debugDemoDataSeeder: debugDemoDataSeeder,
            );
 
   final QsClawToolRegistry _toolRegistry;
@@ -48,6 +51,22 @@ class QsClawAgentService {
     List<SourceDocumentRecord> matchedDocuments = const [];
     var movedCount = 0;
     String? navigationTarget;
+
+    if (_isDemoSeedCommand(command)) {
+      final result = await _toolRegistry.run(
+        QsClawToolNames.seedDebugDemoData,
+        userId: userId,
+      );
+      steps.add(QsClawAgentStep.fromToolResult(result));
+      return QsClawRunResult(
+        draft: draft,
+        library: null,
+        matchedDocuments: const [],
+        movedCount: 0,
+        status: QsClawRunStatus.completed,
+        executedSteps: steps,
+      );
+    }
 
     if (_isNavigationCommand(command)) {
       navigationTarget = _navigationTargetFor(command);
@@ -137,13 +156,25 @@ class QsClawAgentService {
   }
 
   static bool _isNavigationCommand(String command) {
-    return command.contains(_open) || command.toLowerCase().contains('open');
+    return command.contains(_open) ||
+        command.contains(_go) ||
+        command.contains(_enter) ||
+        command.toLowerCase().contains('open');
+  }
+
+  static bool _isDemoSeedCommand(String command) {
+    return command.contains(_demo) ||
+        command.contains(_seed) ||
+        command.contains(_inject);
   }
 
   static String _navigationTargetFor(String command) {
     final lower = command.toLowerCase();
     if (lower.contains('chat') || command.contains(_chat)) {
       return QsClawNavigationTarget.aiChat;
+    }
+    if (command.contains(_interview) || command.contains(_videoInterview)) {
+      return QsClawNavigationTarget.aiInterview;
     }
     if (command.contains(_knowledgeLibrary)) {
       return QsClawNavigationTarget.knowledge;
@@ -210,6 +241,11 @@ class QsClawAgentService {
   static const String _create = '\u521b\u5efa';
   static const String _file = '\u6587\u4ef6';
   static const String _folder = '\u6587\u4ef6\u5939';
+  static const String _demo = '\u6f14\u793a';
+  static const String _enter = '\u8fdb\u5165';
+  static const String _go = '\u53bb';
+  static const String _inject = '\u690d\u5165';
+  static const String _interview = '\u9762\u8bd5';
   static const String _image = '\u56fe\u7247';
   static const String _knowledgeLibrary = '\u77e5\u8bc6\u5e93';
   static const String _learningMaterial = '\u5b66\u4e60\u8d44\u6599';
@@ -223,9 +259,11 @@ class QsClawAgentService {
   static const String _organize = '\u6574\u7406';
   static const String _practice = '\u7ec3\u4e60';
   static const String _review = '\u590d\u4e60';
+  static const String _seed = '\u6ce8\u5165';
   static const String _settleFolder = '\u6c89\u6dc0\u6587\u4ef6\u5939';
   static const String _take = '\u628a';
   static const String _unit = '\u4e2a';
+  static const String _videoInterview = '\u89c6\u9891\u9762\u8bd5';
   static const String _wrongQuestion = '\u9519\u9898';
 }
 
@@ -279,13 +317,4 @@ class QsClawRunStatus {
 
   static const String completed = 'completed';
   static const String waitingForSources = 'waiting_for_sources';
-}
-
-class QsClawNavigationTarget {
-  const QsClawNavigationTarget._();
-
-  static const String home = 'home';
-  static const String aiChat = 'ai_chat';
-  static const String knowledge = 'knowledge';
-  static const String practice = 'practice';
 }

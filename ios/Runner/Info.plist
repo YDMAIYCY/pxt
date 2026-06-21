@@ -70,5 +70,7 @@
 	<string>用于选择头像和个人主页背景图。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>用于拍照导入学习资料。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于录制 AI 视频面试作答声音。</string>
 </dict>
 </plist>

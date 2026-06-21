@@ -202,7 +202,7 @@ void main() {
     expect(find.text('ai-${_ocrCompleteBatchPage.id}'), findsOneWidget);
   });
 
-  testWidgets('Home AI Chat quick entry opens the chat page', (tester) async {
+  testWidgets('Home QSClaw quick entry opens the agent page', (tester) async {
     await tester.pumpWidget(
       _wrap(
         HomeTabPage(
@@ -212,17 +212,22 @@ void main() {
           aiGenerationRepository: _FakeAiGenerationRepository(),
           documentBatchRepository: _FakeDocumentBatchRepository(),
           knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-          aiChatPageBuilder: () => const _MarkerPage('ai-chat'),
+          qsClawPageBuilder: () => const _MarkerPage('qsclaw-chat'),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('AI Chat'));
-    await tester.tap(find.text('AI Chat'));
+    await tester.scrollUntilVisible(
+      find.text('QSClaw'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('QSClaw'));
     await tester.pumpAndSettle();
 
-    expect(find.text('ai-chat'), findsOneWidget);
+    expect(find.text('qsclaw-chat'), findsOneWidget);
   });
 
   testWidgets('Profile entries switch bottom tabs when callback is available', (
