@@ -6,6 +6,10 @@ class AppAssets {
   static const String guideImage = 'assets/images/1.png';
   static const String homeBackdropImage = 'assets/images/2.png';
   static const String logoIcon = 'assets/icons/icon.png';
+  static const String knowledgeHeaderIllustration =
+      'assets/images/knowledge_header_illustration.png';
+  static const String tasksHeaderIllustration =
+      'assets/images/tasks_header_illustration.png';
 
   // 品牌
   static const String logoCameraBook = '$iconsDir/logo_拍学通_相机书本.svg';

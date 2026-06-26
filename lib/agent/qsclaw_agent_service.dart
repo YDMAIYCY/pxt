@@ -173,9 +173,6 @@ class QsClawAgentService {
     if (lower.contains('chat') || command.contains(_chat)) {
       return QsClawNavigationTarget.aiChat;
     }
-    if (command.contains(_interview) || command.contains(_videoInterview)) {
-      return QsClawNavigationTarget.aiInterview;
-    }
     if (command.contains(_knowledgeLibrary)) {
       return QsClawNavigationTarget.knowledge;
     }
@@ -245,7 +242,6 @@ class QsClawAgentService {
   static const String _enter = '\u8fdb\u5165';
   static const String _go = '\u53bb';
   static const String _inject = '\u690d\u5165';
-  static const String _interview = '\u9762\u8bd5';
   static const String _image = '\u56fe\u7247';
   static const String _knowledgeLibrary = '\u77e5\u8bc6\u5e93';
   static const String _learningMaterial = '\u5b66\u4e60\u8d44\u6599';
@@ -263,7 +259,6 @@ class QsClawAgentService {
   static const String _settleFolder = '\u6c89\u6dc0\u6587\u4ef6\u5939';
   static const String _take = '\u628a';
   static const String _unit = '\u4e2a';
-  static const String _videoInterview = '\u89c6\u9891\u9762\u8bd5';
   static const String _wrongQuestion = '\u9519\u9898';
 }
 

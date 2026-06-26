@@ -263,7 +263,6 @@ class QsClawNavigationTarget {
 
   static const String home = 'home';
   static const String aiChat = 'ai_chat';
-  static const String aiInterview = 'ai_interview';
   static const String knowledge = 'knowledge';
   static const String practice = 'practice';
 
@@ -271,12 +270,10 @@ class QsClawNavigationTarget {
     switch (target) {
       case aiChat:
         return 'AI 伴学问答';
-      case aiInterview:
-        return 'AI 面试官';
       case knowledge:
         return '知识库';
       case practice:
-        return '复习题';
+        return '练习题';
       default:
         return '首页';
     }

@@ -20,14 +20,11 @@ import '../../../debug/debug_demo_data_seeder.dart';
 import '../../../pipeline/document_ingest_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
-import '../ai_generation_page.dart';
-import '../ai_interview_page.dart';
 import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
 import '../image_crop_selection_page.dart';
 import '../qsclaw_agent_page.dart';
 import '../../../game/games_hub_page.dart';
-import '../practice_review_page.dart';
 
 class HomeTabPage extends StatefulWidget {
   const HomeTabPage({
@@ -40,13 +37,13 @@ class HomeTabPage extends StatefulWidget {
     this.detailPageBuilder,
     this.aiGenerationPageBuilder,
     this.aiChatPageBuilder,
-    this.aiInterviewPageBuilder,
     this.qsClawPageBuilder,
     this.debugDemoDataSeeder,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
     this.tabIndex,
+    this.onOpenTab,
     this.onDataChanged,
     super.key,
   });
@@ -60,13 +57,13 @@ class HomeTabPage extends StatefulWidget {
   final Widget Function(int documentId)? detailPageBuilder;
   final Widget Function(int documentId)? aiGenerationPageBuilder;
   final Widget Function()? aiChatPageBuilder;
-  final Widget Function()? aiInterviewPageBuilder;
   final Widget Function()? qsClawPageBuilder;
   final DebugDemoDataSeeder? debugDemoDataSeeder;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
   final int? tabIndex;
+  final ValueChanged<int>? onOpenTab;
   final VoidCallback? onDataChanged;
 
   @override
@@ -84,8 +81,6 @@ class _HomeTabPageState extends State<HomeTabPage> {
   late int _handledRefreshVersion;
   bool _reloadScheduled = false;
   bool _isImporting = false;
-  bool _isSeedingDemoData = false;
-  String? _demoSeedStatusMessage;
 
   @override
   void initState() {
@@ -387,53 +382,52 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _afterDataChanged();
   }
 
-  Future<void> _openAiGeneration() async {
-    final user = await _authRepository.getCurrentUserProfile();
-    if (!mounted) return;
-    if (user == null) {
-      _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
-      return;
-    }
-    final documents = await _sourceDocumentRepository
-        .fetchRecentSourceDocuments(
-          userId: user.id,
-          includeBatchPages: true,
-          limit: 100,
-        );
-    if (!mounted) return;
-    final target = documents.cast<SourceDocumentRecord?>().firstWhere(
-      (item) => item?.ocrDone == true,
-      orElse: () => null,
+  Future<void> _openImportSourceSheet() async {
+    final action = await showModalBottomSheet<_ImportAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded),
+                title: const Text('导入图片'),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_ImportAction.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.collections_rounded),
+                title: const Text('多图导入'),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_ImportAction.multiImage),
+              ),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf_rounded),
+                title: const Text('导入 PDF'),
+                onTap: () => Navigator.of(sheetContext).pop(_ImportAction.pdf),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
-    if (target == null) {
-      _showMessage(
-        '\u8bf7\u5148\u5b8c\u6210\u4efb\u610f\u8d44\u6599\u7684 OCR\uff0c\u518d\u751f\u6210 AI \u7ed3\u679c',
-      );
-      return;
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _ImportAction.gallery:
+        await _handleImageImport(ImageInputSource.gallery);
+      case _ImportAction.multiImage:
+        await _handleBatchImport(BatchDocumentInputSource.multiImage);
+      case _ImportAction.pdf:
+        await _handleBatchImport(BatchDocumentInputSource.pdf);
     }
-    final page =
-        widget.aiGenerationPageBuilder?.call(target.id) ??
-        AiGenerationPage(documentId: target.id);
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-    if (mounted) await _afterDataChanged();
-  }
-
-  Future<void> _openAiInterview() async {
-    final page =
-        widget.aiInterviewPageBuilder?.call() ?? const AiInterviewPage();
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
   Future<void> _openQsClaw() async {
     final page = widget.qsClawPageBuilder?.call() ?? const QsClawAgentPage();
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-    if (mounted) await _afterDataChanged();
-  }
-
-  Future<void> _openPractice() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const PracticeReviewPage()));
     if (mounted) await _afterDataChanged();
   }
 
@@ -444,55 +438,19 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _refresh();
   }
 
-  Future<void> _seedDebugDemoData() async {
-    if (!kDebugMode || _isSeedingDemoData) {
-      return;
-    }
-    final user = await _authRepository.getCurrentUserProfile();
-    if (user == null) {
-      const message =
-          '\u8bf7\u5148\u767b\u5f55\u540e\u518d\u690d\u5165\u6f14\u793a\u6570\u636e';
-      setState(() => _demoSeedStatusMessage = message);
-      _showMessage(message);
-      return;
-    }
-
-    const loadingMessage =
-        '\u6b63\u5728\u690d\u5165\u6f14\u793a\u6570\u636e...';
-    setState(() {
-      _isSeedingDemoData = true;
-      _demoSeedStatusMessage = loadingMessage;
-    });
-    _showMessage(loadingMessage);
-    try {
-      await (widget.debugDemoDataSeeder ?? DebugDemoDataSeeder()).seedForUser(
-        user.id,
-      );
-      if (!mounted) return;
-      await _afterDataChanged();
-      if (!mounted) return;
-      const successMessage =
-          '\u6f14\u793a\u6570\u636e\u5df2\u690d\u5165\u5f53\u524d\u8c03\u8bd5\u8d26\u53f7';
-      setState(() => _demoSeedStatusMessage = successMessage);
-      _showMessage(successMessage);
-    } catch (error) {
-      if (mounted) {
-        final errorMessage =
-            '\u690d\u5165\u6f14\u793a\u6570\u636e\u5931\u8d25\uff1a$error';
-        setState(() => _demoSeedStatusMessage = errorMessage);
-        _showMessage(errorMessage);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSeedingDemoData = false);
-      }
-    }
-  }
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _openTab(int index) {
+    final onOpenTab = widget.onOpenTab;
+    if (onOpenTab == null) {
+      _showMessage('当前页面暂不支持跳转');
+      return;
+    }
+    onOpenTab(index);
   }
 
   @override
@@ -518,50 +476,35 @@ class _HomeTabPageState extends State<HomeTabPage> {
           onRefresh: _refresh,
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(),
+            cacheExtent: 5000,
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                padding: const EdgeInsets.fromLTRB(14, 18, 14, 100),
                 sliver: SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _WelcomeCard(user: data.user, stats: data.stats),
-                      const SizedBox(height: 12),
-                      _AgentCommandStrip(
-                        onOpenQsClaw: _openQsClaw,
-                        onSeedDemoData: kDebugMode ? _seedDebugDemoData : null,
-                        isSeedingDemoData: _isSeedingDemoData,
-                        statusMessage: _demoSeedStatusMessage,
+                      _WelcomeCard(
+                        user: data.user,
+                        stats: data.stats,
+                        onOpenKnowledge: () => _openTab(1),
+                        onOpenTasks: () => _openTab(3),
                       ),
+                      const SizedBox(height: 12),
+                      _AgentCommandStrip(onOpenQsClaw: _openQsClaw),
                       const SizedBox(height: 12),
                       _QuickActions(
                         isImporting: _isImporting,
                         onCamera: () =>
                             _handleImageImport(ImageInputSource.camera),
-                        onGallery: () =>
-                            _handleImageImport(ImageInputSource.gallery),
-                        onMultiImage: () => _handleBatchImport(
-                          BatchDocumentInputSource.multiImage,
-                        ),
-                        onPdf: () =>
-                            _handleBatchImport(BatchDocumentInputSource.pdf),
-                        onAi: _openAiGeneration,
-                        onAiInterview: _openAiInterview,
-                        onQsClaw: _openQsClaw,
-                        onPractice: _openPractice,
+                        onImport: _openImportSourceSheet,
                         onGames: _openGames,
-                        isSeedingDemoData: _isSeedingDemoData,
-                        demoSeedStatusMessage: _demoSeedStatusMessage,
-                        onSeedDemoData: kDebugMode ? _seedDebugDemoData : null,
                       ),
                       const SizedBox(height: 14),
-                      _RecentBatchesSection(
+                      _RecentLearningGrid(
                         batches: data.recentBatches,
-                        onOpenBatch: _openBatch,
-                      ),
-                      const SizedBox(height: 14),
-                      _RecentDocumentsSection(
                         documents: data.recentDocuments,
+                        onOpenBatch: _openBatch,
                         onOpenDocument: _openDocument,
                       ),
                       const SizedBox(height: 14),
@@ -585,20 +528,35 @@ class _HomeTabPageState extends State<HomeTabPage> {
 
 // ========== Welcome Card ==========
 class _WelcomeCard extends StatelessWidget {
-  const _WelcomeCard({required this.user, required this.stats});
+  const _WelcomeCard({
+    required this.user,
+    required this.stats,
+    required this.onOpenKnowledge,
+    required this.onOpenTasks,
+  });
+
   final UserProfile user;
   final StudyOverviewStats stats;
+  final VoidCallback onOpenKnowledge;
+  final VoidCallback onOpenTasks;
 
   @override
   Widget build(BuildContext context) {
-    final pendingWork = stats.pendingPracticeCount + stats.wrongQuestionCount;
+    final pendingWork = stats.pendingPracticeCount;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
       decoration: BoxDecoration(
-        color: const Color(0xFFEFF6FF),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFBFDBFE)),
+        color: Colors.white.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE5F3F1)),
+        boxShadow: AppShadows.cardSoftList,
+        image: const DecorationImage(
+          image: AssetImage(AppAssets.homeBackdropImage),
+          fit: BoxFit.cover,
+          opacity: 0.14,
+          alignment: Alignment.centerRight,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -611,15 +569,17 @@ class _WelcomeCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '\u5b66\u4e60\u9a7e\u9a76\u8231',
-                      style: AppTextStyles.h1(context),
+                      '你好， ${user.primaryName}',
+                      style: AppTextStyles.h1(
+                        context,
+                      ).copyWith(fontSize: 23, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '\u4f60\u597d\uff0c${user.primaryName}\u3002\u4eca\u5929\u8fd8\u6709 $pendingWork \u4e2a\u5b66\u4e60\u52a8\u4f5c\u53ef\u4ee5\u63a8\u8fdb\u3002',
+                      '专注学习的每一天，收获更好的自己。',
                       style: AppTextStyles.bodySmall(context).copyWith(
                         color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -631,52 +591,67 @@ class _WelcomeCard extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.border),
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.primaryLight),
                 ),
-                child: Text(
-                  '\u4eca\u65e5\u6982\u89c8',
-                  style: AppTextStyles.caption(context).copyWith(
-                    color: AppColors.primaryDark,
-                    fontWeight: FontWeight.w800,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.calendar_month_rounded,
+                      size: 15,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '今日概览',
+                      style: AppTextStyles.caption(context).copyWith(
+                        color: AppColors.primaryDark,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 28),
           Row(
             children: [
               Expanded(
                 child: _PulseMetric(
-                  label: '\u8d44\u6599',
-                  value: stats.documentCount,
+                  label: '待办任务',
+                  value: pendingWork,
                   color: AppColors.primary,
+                  onTap: onOpenTasks,
                 ),
               ),
-              const SizedBox(width: 8),
+              const _MetricDivider(),
               Expanded(
                 child: _PulseMetric(
-                  label: '\u6210\u679c',
+                  label: '学习成果',
                   value: stats.generatedResultCount,
                   color: AppColors.secondaryBlue,
+                  onTap: onOpenKnowledge,
                 ),
               ),
-              const SizedBox(width: 8),
+              const _MetricDivider(),
               Expanded(
                 child: _PulseMetric(
-                  label: '\u5f85\u5237',
+                  label: '待刷练习',
                   value: stats.pendingPracticeCount,
                   color: AppColors.accentOrange,
+                  onTap: onOpenTasks,
                 ),
               ),
-              const SizedBox(width: 8),
+              const _MetricDivider(),
               Expanded(
                 child: _PulseMetric(
-                  label: '\u9519\u9898',
+                  label: '待处理错题',
                   value: stats.wrongQuestionCount,
                   color: AppColors.error,
+                  onTap: onOpenTasks,
                 ),
               ),
             ],
@@ -687,104 +662,122 @@ class _WelcomeCard extends StatelessWidget {
   }
 }
 
-class _AgentCommandStrip extends StatelessWidget {
-  const _AgentCommandStrip({
-    required this.onOpenQsClaw,
-    required this.isSeedingDemoData,
-    this.onSeedDemoData,
-    this.statusMessage,
-  });
-
-  final VoidCallback onOpenQsClaw;
-  final VoidCallback? onSeedDemoData;
-  final bool isSeedingDemoData;
-  final String? statusMessage;
+class _MetricDivider extends StatelessWidget {
+  const _MetricDivider();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.cardSoftList,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppColors.textPrimary,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.psychology_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      width: 1,
+      height: 50,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: AppColors.borderLight,
+    );
+  }
+}
+
+class _AgentCommandStrip extends StatelessWidget {
+  const _AgentCommandStrip({required this.onOpenQsClaw});
+
+  final VoidCallback onOpenQsClaw;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onOpenQsClaw,
+      child: Container(
+        width: double.infinity,
+        clipBehavior: Clip.antiAlias,
+        padding: const EdgeInsets.fromLTRB(20, 18, 14, 16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.borderLight),
+          boxShadow: AppShadows.cardSoftList,
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      'QSClaw \u6307\u6325\u53f0',
-                      style: AppTextStyles.h3(context),
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE9FBF8),
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.22),
+                            blurRadius: 18,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.asset(
+                        'assets/images/qsclaw_robot_icon.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(
+                              Icons.smart_toy_rounded,
+                              color: AppColors.primary,
+                              size: 38,
+                            ),
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '\u4e00\u53e5\u8bdd\u8ba9 App \u5efa\u5e93\u3001\u6574\u7406\u8d44\u6599\u3001\u6253\u5f00\u529f\u80fd\u6216\u690d\u5165\u8c03\u8bd5\u6570\u636e\u3002',
-                      style: AppTextStyles.caption(context),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.zero,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  'QSClaw',
+                                  style: AppTextStyles.h2(context).copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 20,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 7),
+                            Text(
+                              '你的专属拍学通智能助手。',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.bodySmall(context).copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: onOpenQsClaw,
-                  icon: const Icon(Icons.keyboard_command_key_rounded),
-                  label: const Text('\u6253\u5f00\u667a\u80fd\u4f53'),
-                ),
-              ),
-              if (onSeedDemoData != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: isSeedingDemoData ? null : onSeedDemoData,
-                    icon: const Icon(Icons.data_object_rounded),
-                    label: Text(
-                      isSeedingDemoData
-                          ? '\u690d\u5165\u4e2d'
-                          : '\u6f14\u793a\u6570\u636e',
-                    ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  height: 52,
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onOpenQsClaw,
+                    icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                    label: const Text('开始聊天'),
                   ),
                 ),
               ],
-            ],
-          ),
-          if (statusMessage?.isNotEmpty == true) ...[
-            const SizedBox(height: 8),
-            Text(
-              statusMessage!,
-              style: AppTextStyles.caption(context).copyWith(
-                color: AppColors.primaryDark,
-                fontWeight: FontWeight.w700,
-              ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -795,43 +788,50 @@ class _PulseMetric extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    required this.onTap,
   });
 
   final String label;
   final int value;
   final Color color;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 64),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '$value',
-            style: AppTextStyles.h2(
-              context,
-            ).copyWith(color: color, fontWeight: FontWeight.w900),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$value',
+                style: AppTextStyles.h2(context).copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 24,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption(context).copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.caption(context).copyWith(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -842,37 +842,19 @@ class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.isImporting,
     required this.onCamera,
-    required this.onGallery,
-    required this.onMultiImage,
-    required this.onPdf,
-    required this.onAi,
-    required this.onAiInterview,
-    required this.onQsClaw,
-    required this.onPractice,
+    required this.onImport,
     required this.onGames,
-    required this.isSeedingDemoData,
-    this.demoSeedStatusMessage,
-    this.onSeedDemoData,
   });
 
   final bool isImporting;
-  final bool isSeedingDemoData;
-  final String? demoSeedStatusMessage;
   final VoidCallback onCamera;
-  final VoidCallback onGallery;
-  final VoidCallback onMultiImage;
-  final VoidCallback onPdf;
-  final VoidCallback onAi;
-  final VoidCallback onAiInterview;
-  final VoidCallback onQsClaw;
-  final VoidCallback onPractice;
+  final VoidCallback onImport;
   final VoidCallback onGames;
-  final VoidCallback? onSeedDemoData;
 
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '\u5feb\u901f\u5165\u53e3',
+      title: '快速入口',
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = (constraints.maxWidth - 10) / 2;
@@ -884,102 +866,77 @@ class _QuickActions extends StatelessWidget {
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconCamera,
-                  title: '\u62cd\u7167\u8d44\u6599',
+                  title: '拍照识别',
                   onTap: isImporting ? null : onCamera,
-                  isPrimary: true,
                 ),
               ),
               SizedBox(
                 width: width,
                 child: _ActionTile(
                   iconAsset: AppAssets.iconAlbum,
-                  title: '\u5bfc\u5165\u56fe\u7247',
-                  onTap: isImporting ? null : onGallery,
+                  title: '导入资料',
+                  onTap: isImporting ? null : onImport,
                 ),
               ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  iconAsset: AppAssets.iconPdfMulti,
-                  title: '\u591a\u56fe\u5bfc\u5165',
-                  onTap: isImporting ? null : onMultiImage,
-                ),
-              ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  iconAsset: AppAssets.iconPdfMulti,
-                  title: '\u5bfc\u5165 PDF',
-                  onTap: isImporting ? null : onPdf,
-                ),
-              ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  iconAsset: AppAssets.iconAi,
-                  title: '\u751f\u6210 AI \u7ed3\u679c',
-                  onTap: onAi,
-                ),
-              ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  icon: Icons.video_camera_front_rounded,
-                  title: 'AI \u9762\u8bd5\u5b98',
-                  onTap: onAiInterview,
-                ),
-              ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  icon: Icons.psychology_rounded,
-                  title: 'QSClaw',
-                  onTap: onQsClaw,
-                  isPrimary: true,
-                ),
-              ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  iconAsset: AppAssets.practiceQuestion,
-                  title: '\u5237\u590d\u4e60\u9898',
-                  onTap: onPractice,
-                ),
-              ),
-              if (onSeedDemoData != null)
-                SizedBox(
-                  width: width,
-                  child: _ActionTile(
-                    icon: Icons.data_object_rounded,
-                    title: isSeedingDemoData
-                        ? '\u6b63\u5728\u690d\u5165'
-                        : '\u690d\u5165\u6f14\u793a\u6570\u636e',
-                    onTap: isSeedingDemoData ? null : onSeedDemoData,
-                  ),
-                ),
               SizedBox(
                 width: width,
                 child: _ActionTile(
                   icon: Icons.games_rounded,
-                  title: '\u76ca\u667a\u6e38\u620f',
+                  title: '益智游戏',
                   onTap: onGames,
                 ),
               ),
-              if (demoSeedStatusMessage?.isNotEmpty == true)
-                SizedBox(
-                  width: constraints.maxWidth,
-                  child: Text(
-                    demoSeedStatusMessage!,
-                    style: AppTextStyles.caption(context).copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+enum _ImportAction { gallery, multiImage, pdf }
+
+// ========== Recent Learning Grid ==========
+class _RecentLearningGrid extends StatelessWidget {
+  const _RecentLearningGrid({
+    required this.batches,
+    required this.documents,
+    required this.onOpenBatch,
+    required this.onOpenDocument,
+  });
+
+  final List<DocumentBatchRecord> batches;
+  final List<SourceDocumentRecord> documents;
+  final Future<void> Function(int batchId) onOpenBatch;
+  final Future<void> Function(int documentId) onOpenDocument;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 360;
+        final batchCard = _RecentBatchesSection(
+          batches: batches.take(1).toList(growable: false),
+          onOpenBatch: onOpenBatch,
+        );
+        final documentCard = _RecentDocumentsSection(
+          documents: documents.take(2).toList(growable: false),
+          onOpenDocument: onOpenDocument,
+        );
+        if (compact) {
+          return Column(
+            children: [batchCard, const SizedBox(height: 14), documentCard],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: batchCard),
+            const SizedBox(width: 14),
+            Expanded(child: documentCard),
+          ],
+        );
+      },
     );
   }
 }
@@ -996,12 +953,9 @@ class _RecentBatchesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '\u6700\u8fd1\u5b66\u4e60\u5305',
+      title: '最近学习包',
       child: batches.isEmpty
-          ? const _EmptyHint(
-              text:
-                  '\u591a\u56fe\u6216 PDF \u5bfc\u5165\u540e\uff0c\u4f1a\u5728\u8fd9\u91cc\u5f62\u6210\u5b66\u4e60\u5305\u3002',
-            )
+          ? const _EmptyHint(text: '导入 PDF 或多图后会出现在这里。')
           : Column(
               children: batches
                   .map(
@@ -1028,12 +982,9 @@ class _RecentDocumentsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '\u6700\u8fd1\u5904\u7406\u8d44\u6599',
+      title: '最近处理资料',
       child: documents.isEmpty
-          ? const _EmptyHint(
-              text:
-                  '\u8fd8\u6ca1\u6709\u8d44\u6599\uff0c\u5148\u62cd\u7167\u6216\u5bfc\u5165\u56fe\u7247\u3002',
-            )
+          ? const _EmptyHint(text: '先拍照或导入图片。')
           : Column(
               children: documents
                   .map(
@@ -1060,14 +1011,12 @@ class _RecentResultsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Section(
-      title: '\u6700\u8fd1\u751f\u6210\u6210\u679c',
+      title: '最近生成成果',
       child: contents.isEmpty
-          ? const _EmptyHint(
-              text:
-                  '\u751f\u6210\u77e5\u8bc6\u5361\u7247\u3001\u63d0\u7eb2\u3001\u5bfc\u56fe\u6216\u590d\u4e60\u9898\u540e\u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc\u3002',
-            )
+          ? const _EmptyHint(text: '生成知识卡片、提纲或练习题后会出现。')
           : Column(
               children: contents
+                  .take(4)
                   .map(
                     (item) => _ResultTile(
                       item: item,
@@ -1089,49 +1038,63 @@ class _StatsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       _StatItem(
-        '\u8d44\u6599\u603b\u6570',
+        '资料总数',
         stats.documentCount,
         const Color(0xFFF0FDFA),
+        Icons.folder_rounded,
+        AppColors.primary,
       ),
       _StatItem(
         'OCR \u8bc6\u522b',
         stats.ocrSuccessCount,
         const Color(0xFFEFF6FF),
+        Icons.document_scanner_rounded,
+        AppColors.secondaryBlue,
       ),
       _StatItem(
-        '\u5b66\u4e60\u6210\u679c',
+        '学习成果',
         stats.generatedResultCount,
         const Color(0xFFF5F3FF),
+        Icons.school_rounded,
+        AppColors.secondaryPurple,
       ),
       _StatItem(
-        '\u5f85\u5237\u9898',
+        '待刷练习',
         stats.pendingPracticeCount,
         const Color(0xFFFFF7ED),
+        Icons.edit_rounded,
+        AppColors.accentOrange,
       ),
       _StatItem(
-        '\u5f85\u5904\u7406\u9519\u9898',
+        '待处理错题',
         stats.wrongQuestionCount,
         const Color(0xFFFEF2F2),
+        Icons.warning_rounded,
+        AppColors.error,
       ),
       _StatItem(
-        '\u5df2\u638c\u63e1',
+        '已掌握',
         stats.masteredQuestionCount,
         const Color(0xFFF0FDF4),
+        Icons.check_circle_rounded,
+        AppColors.success,
       ),
     ];
 
     return _Section(
-      title: '\u5b66\u4e60\u7edf\u8ba1',
+      title: '学习统计',
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final width = (constraints.maxWidth - 10) / 2;
+          final width = (constraints.maxWidth - 50) / 6;
+          final fallbackWidth = (constraints.maxWidth - 20) / 3;
+          final itemWidth = width < 76 ? fallbackWidth : width;
           return Wrap(
             spacing: 10,
             runSpacing: 10,
             children: items
                 .map(
                   (item) => SizedBox(
-                    width: width,
+                    width: itemWidth,
                     child: _StatCard(item: item),
                   ),
                 )
@@ -1153,17 +1116,23 @@ class _Section extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.borderLight),
         boxShadow: AppShadows.cardSoftList,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: AppTextStyles.h3(context)),
-          const SizedBox(height: 12),
+          Text(
+            title,
+            style: AppTextStyles.h3(
+              context,
+            ).copyWith(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+          const SizedBox(height: 14),
           child,
         ],
       ),
@@ -1177,13 +1146,11 @@ class _ActionTile extends StatelessWidget {
     this.iconAsset,
     required this.title,
     required this.onTap,
-    this.isPrimary = false,
   });
   final IconData? icon;
   final String? iconAsset;
   final String title;
   final VoidCallback? onTap;
-  final bool isPrimary;
 
   @override
   Widget build(BuildContext context) {
@@ -1191,40 +1158,44 @@ class _ActionTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         child: Ink(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          height: 52,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           decoration: BoxDecoration(
-            color: isPrimary ? AppColors.primary : AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(8),
-            border: isPrimary ? null : Border.all(color: AppColors.border),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE4ECEB)),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF14B8A6).withValues(alpha: 0.025),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              ),
+            ],
           ),
           child: Row(
             children: [
               if (iconAsset != null)
                 SvgPicture.asset(
                   iconAsset!,
-                  width: 22,
-                  height: 22,
+                  width: 24,
+                  height: 24,
                   colorFilter: ColorFilter.mode(
-                    isPrimary ? Colors.white : AppColors.primary,
+                    AppColors.primary,
                     BlendMode.srcIn,
                   ),
                 )
               else if (icon != null)
-                Icon(
-                  icon,
-                  size: 22,
-                  color: isPrimary ? Colors.white : AppColors.primary,
-                ),
-              const SizedBox(width: 8),
+                Icon(icon, size: 25, color: AppColors.primary),
+              const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: isPrimary ? Colors.white : AppColors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textPrimary,
                   ),
                 ),
               ),
@@ -1248,8 +1219,8 @@ class _DocumentTile extends StatelessWidget {
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: SizedBox(
-          width: 52,
-          height: 52,
+          width: 48,
+          height: 48,
           child: Image.file(
             File(document.imagePath),
             fit: BoxFit.cover,
@@ -1262,7 +1233,7 @@ class _DocumentTile extends StatelessWidget {
       ),
       title: document.title,
       subtitle:
-          '${document.createdAtLabel} / OCR ${document.ocrStatusLabel} / AI ${document.aiDone ? '\u5df2\u751f\u6210' : '\u5f85\u751f\u6210'}',
+          '${document.createdAtLabel} | OCR ${document.ocrStatusLabel} | AI ${document.aiDone ? '已生成' : '待生成'}',
     );
   }
 }
@@ -1277,17 +1248,21 @@ class _BatchTile extends StatelessWidget {
     return _ListTileShell(
       onTap: onTap,
       leading: Container(
-        width: 52,
-        height: 52,
+        width: 62,
+        height: 62,
         decoration: BoxDecoration(
           color: AppColors.primarySoft,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
         ),
-        child: const Icon(Icons.folder_copy_rounded, color: AppColors.primary),
+        child: const Icon(
+          Icons.folder_copy_rounded,
+          color: AppColors.primary,
+          size: 34,
+        ),
       ),
       title: batch.title,
       subtitle:
-          '${batch.sourceTypeLabel} / ${batch.pageCount} \u9875 / ${batch.createdAtLabel}',
+          '${batch.sourceTypeLabel} / ${batch.pageCount} 页\n${batch.createdAtLabel}',
     );
   }
 }
@@ -1301,9 +1276,21 @@ class _ResultTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return _ListTileShell(
       onTap: onTap,
-      leading: const Icon(Icons.auto_stories_rounded, color: AppColors.primary),
+      leading: Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: const Icon(
+          Icons.description_rounded,
+          color: Colors.white,
+          size: 17,
+        ),
+      ),
       title: item.title,
-      subtitle: '${item.documentTitle} / ${item.contentLabel}',
+      subtitle: '${item.contentLabel} | ${item.documentTitle}',
       body: item.summary,
     );
   }
@@ -1326,20 +1313,20 @@ class _ListTileShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
           child: Ink(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.background,
+              color: const Color(0xFFF7FCFB),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 leading,
                 const SizedBox(width: 10),
@@ -1353,15 +1340,19 @@ class _ListTileShell extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
                         ),
                       ),
                       if (body?.trim().isNotEmpty == true) ...[
@@ -1383,6 +1374,7 @@ class _ListTileShell extends StatelessWidget {
                 const Icon(
                   Icons.chevron_right_rounded,
                   color: AppColors.textTertiary,
+                  size: 24,
                 ),
               ],
             ),
@@ -1400,28 +1392,34 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      constraints: const BoxConstraints(minHeight: 96),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       decoration: BoxDecoration(
         color: item.color,
-        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             '${item.value}',
-            style: AppTextStyles.h2(
-              context,
-            ).copyWith(color: AppColors.primaryDark),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            item.label,
-            style: AppTextStyles.caption(context).copyWith(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w600,
+            style: AppTextStyles.h2(context).copyWith(
+              color: item.foreground,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
             ),
           ),
+          Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.caption(context).copyWith(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Icon(item.icon, color: item.foreground, size: 22),
         ],
       ),
     );
@@ -1438,8 +1436,8 @@ class _EmptyHint extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.input),
+        color: const Color(0xFFF7FCFB),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Text(
         text,
@@ -1514,8 +1512,16 @@ class _HomeData {
 }
 
 class _StatItem {
-  const _StatItem(this.label, this.value, this.color);
+  const _StatItem(
+    this.label,
+    this.value,
+    this.color,
+    this.icon,
+    this.foreground,
+  );
   final String label;
   final int value;
   final Color color;
+  final IconData icon;
+  final Color foreground;
 }

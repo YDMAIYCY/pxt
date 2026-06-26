@@ -26,13 +26,24 @@ void main() {
 
     expect(find.text('What is a function?'), findsOneWidget);
 
+    await tester.tap(find.text('我准备好了'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'A mapping with a domain.');
-    await tester.tap(find.text('提交答案'));
+    await tester.drag(find.byType(ListView), const Offset(0, -360));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('提交回答'));
     await tester.pumpAndSettle();
 
     expect(find.text('得分 90/100'), findsOneWidget);
     expect(find.textContaining('mapping'), findsWidgets);
     expect(find.textContaining('domain'), findsWidgets);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('进入追问'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Why does the domain matter?'), findsOneWidget);
   });
 }
 

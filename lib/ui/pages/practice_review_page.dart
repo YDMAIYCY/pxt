@@ -163,7 +163,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('刷复习题'),
+        title: const Text('刷练习题'),
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
       ),
@@ -177,7 +177,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           if (snapshot.hasError) {
             return _StatePanel(
               icon: Icons.error_outline_rounded,
-              title: '复习题加载失败',
+              title: '练习题加载失败',
               description: '请稍后重试。',
               actionLabel: '重新加载',
               onPressed: _reload,
@@ -189,8 +189,8 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           if (questions.isEmpty) {
             return _StatePanel(
               icon: Icons.check_circle_rounded,
-              title: '暂无待刷复习题',
-              description: '生成复习题后，会自动出现在这里。',
+              title: '暂无待刷练习题',
+              description: '生成练习题后，会自动出现在这里。',
               actionLabel: '返回',
               onPressed: () async => Navigator.of(context).maybePop(),
             );

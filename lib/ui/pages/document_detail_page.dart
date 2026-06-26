@@ -373,7 +373,7 @@ class _AiResultSection extends StatelessWidget {
                   ),
                 if (data.questions.isNotEmpty)
                   _ResultBlock(
-                    title: '复习题',
+                    title: '练习题',
                     text: data.questions
                         .map(
                           (item) =>

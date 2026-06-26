@@ -42,7 +42,7 @@ class AiInterviewService {
     final client = _miniMaxClient ?? MiniMaxClient.fromConfig(config);
     final response = await client.generateStructuredJson(
       systemPrompt:
-          'You are a strict but supportive study interviewer. Score answers only against the supplied practice question and standard answer. Return JSON only.',
+          'You are a strict but supportive study interviewer. Score answers only against the supplied practice question and standard answer. Ask diverse follow-up questions that resemble a real oral interview. Return JSON only.',
       userPrompt: _buildPrompt(question: question, userAnswer: userAnswer),
       jsonSchema: _feedbackSchema,
     );
@@ -95,7 +95,7 @@ Return:
 - misconceptions: incorrect or risky statements
 - correction: concise coaching feedback
 - standard_answer: a polished correct answer
-- next_follow_up: one short follow-up interview question
+- next_follow_up: one short but varied follow-up interview question. Do not repeat the current question. Prefer one of these directions each time: counterexample, real-world application, boundary condition, why/how mechanism, comparison with a similar concept, error diagnosis, or asking the student to teach it in simpler words.
 ''';
   }
 

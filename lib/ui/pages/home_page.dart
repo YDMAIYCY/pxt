@@ -91,6 +91,7 @@ class _HomePageState extends State<HomePage> {
         tabIndex: 0,
         refreshListenable: _refreshNotifier,
         activeTabListenable: _activeTabNotifier,
+        onOpenTab: _selectTab,
         onDataChanged: _notifyDataChanged,
       ),
       KnowledgeTabPage(

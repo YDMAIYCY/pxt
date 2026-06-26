@@ -8,6 +8,7 @@
 
 #include <file_selector_linux/file_selector_plugin.h>
 #include <pdf_render_maintained/pdf_render_plugin.h>
+#include <record_linux/record_linux_plugin.h>
 
 void fl_register_plugins(FlPluginRegistry* registry) {
   g_autoptr(FlPluginRegistrar) file_selector_linux_registrar =
@@ -16,4 +17,7 @@ void fl_register_plugins(FlPluginRegistry* registry) {
   g_autoptr(FlPluginRegistrar) pdf_render_maintained_registrar =
       fl_plugin_registry_get_registrar_for_plugin(registry, "PdfRenderPlugin");
   pdf_render_plugin_register_with_registrar(pdf_render_maintained_registrar);
+  g_autoptr(FlPluginRegistrar) record_linux_registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry, "RecordLinuxPlugin");
+  record_linux_plugin_register_with_registrar(record_linux_registrar);
 }

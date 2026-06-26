@@ -28,25 +28,24 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('视频面试'));
+    await tester.tap(find.text('我准备好了'));
     await tester.pumpAndSettle();
 
-    expect(find.text('AI 视频面试官'), findsOneWidget);
+    expect(find.text('AI 面试官'), findsOneWidget);
     expect(find.text('模拟摄像头预览'), findsOneWidget);
 
-    await tester.tap(find.text('开始作答'));
+    await tester.tap(find.text('开始回答'));
     await tester.pumpAndSettle();
-    expect(find.text('结束作答'), findsOneWidget);
+    expect(find.text('结束回答'), findsOneWidget);
 
-    await tester.tap(find.text('结束作答'));
+    await tester.tap(find.text('结束回答'));
     await tester.pumpAndSettle();
-
-    expect(find.textContaining('answer.mp4'), findsOneWidget);
 
     await tester.drag(find.byType(ListView), const Offset(0, -360));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'A mapping with a domain.');
-    await tester.tap(find.text('提交视频答案'));
+    await tester.ensureVisible(find.text('提交回答'));
+    await tester.tap(find.text('提交回答'));
     await tester.pumpAndSettle();
 
     expect(find.text('得分 92/100'), findsOneWidget);
@@ -130,7 +129,9 @@ class _FakeAiInterviewService extends AiInterviewService {
 class _FakeVideoInterviewCaptureService
     implements VideoInterviewCaptureService {
   @override
-  Future<VideoInterviewCameraSession> createSession() async {
+  Future<VideoInterviewCameraSession> createSession({
+    bool enableAudio = true,
+  }) async {
     return _FakeVideoInterviewCameraSession();
   }
 }

@@ -11,7 +11,6 @@ import '../../database/models/knowledge_context_source.dart';
 import '../../database/models/user_profile.dart';
 import '../../generator/ai_chat_service.dart';
 import '../theme/app_theme.dart';
-import 'ai_interview_page.dart';
 import 'practice_review_page.dart';
 import 'tabs/knowledge_tab_page.dart';
 
@@ -251,11 +250,6 @@ class _AiChatPageState extends State<AiChatPage> {
     if (target == null || !mounted) return;
 
     switch (target) {
-      case QsClawNavigationTarget.aiInterview:
-        await Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const AiInterviewPage()));
-        break;
       case QsClawNavigationTarget.knowledge:
         await Navigator.of(context).push(
           MaterialPageRoute(

@@ -29,7 +29,9 @@ abstract class VideoInterviewCameraSession {
 }
 
 class VideoInterviewCaptureService {
-  Future<VideoInterviewCameraSession> createSession() async {
+  Future<VideoInterviewCameraSession> createSession({
+    bool enableAudio = true,
+  }) async {
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
       throw StateError('没有检测到可用摄像头');
@@ -39,14 +41,16 @@ class VideoInterviewCaptureService {
       (camera) => camera.lensDirection == CameraLensDirection.front,
       orElse: () => cameras.first,
     );
-    return _CameraPluginInterviewSession(frontCamera);
+    return _CameraPluginInterviewSession(frontCamera, enableAudio: enableAudio);
   }
 }
 
 class _CameraPluginInterviewSession implements VideoInterviewCameraSession {
-  _CameraPluginInterviewSession(this._camera);
+  _CameraPluginInterviewSession(this._camera, {required bool enableAudio})
+    : _enableAudio = enableAudio;
 
   final CameraDescription _camera;
+  final bool _enableAudio;
   CameraController? _controller;
 
   @override
@@ -69,7 +73,7 @@ class _CameraPluginInterviewSession implements VideoInterviewCameraSession {
     final controller = CameraController(
       _camera,
       ResolutionPreset.medium,
-      enableAudio: true,
+      enableAudio: _enableAudio,
     );
     _controller = controller;
     await controller.initialize();

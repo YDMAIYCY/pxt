@@ -7,6 +7,7 @@ import '../../../database/models/ai_generation_task_record.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
+import '../../../common/app_assets.dart';
 import '../../theme/app_theme.dart';
 import '../document_detail_page.dart';
 import '../practice_review_page.dart';
@@ -205,7 +206,7 @@ class _TasksTabPageState extends State<TasksTabPage> {
             physics: const BouncingScrollPhysics(),
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                padding: const EdgeInsets.fromLTRB(14, 18, 14, 100),
                 sliver: SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -386,7 +387,7 @@ class _TaskListPageState extends State<TaskListPage> {
     switch (widget.kind) {
       case TaskListKind.todayPractice:
         if (data.questions.isEmpty) {
-          return [const _EmptyHint(text: '暂无待刷复习题。生成复习题后会出现在这里。')];
+          return [const _EmptyHint(text: '暂无待刷练习题。生成练习题后会出现在这里。')];
         }
         return data.questions
             .map(
@@ -400,7 +401,7 @@ class _TaskListPageState extends State<TaskListPage> {
             )
             .toList(growable: false);
       case TaskListKind.overduePractice:
-        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无逾期复习题。')];
+        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无逾期练习题。')];
         return data.questions
             .map(
               (item) => _TaskTile(
@@ -482,45 +483,76 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
+      padding: const EdgeInsets.fromLTRB(18, 22, 16, 22),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFF0FDFA), Color(0xFFFFF7ED)],
+          colors: [
+            AppColors.primarySoft.withValues(alpha: 0.74),
+            Colors.white,
+            const Color(0xFFEFF9FF),
+          ],
         ),
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.primarySoft),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.primaryLight),
+        boxShadow: AppShadows.cardSoftList,
       ),
-      child: Row(
+      child: Stack(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.fact_check_rounded,
-              color: AppColors.primary,
+          Positioned(
+            right: 0,
+            top: 2,
+            bottom: 2,
+            width: 500,
+            child: Opacity(
+              opacity: 0.52,
+              child: Image.asset(
+                AppAssets.tasksHeaderIllustration,
+                fit: BoxFit.contain,
+                alignment: Alignment.centerRight,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              ),
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('任务中心', style: AppTextStyles.h1(context)),
-                const SizedBox(height: 4),
-                Text(
-                  '点击任务标签，进入对应列表处理。',
-                  style: AppTextStyles.bodySmall(
-                    context,
-                  ).copyWith(fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: AppShadows.cardSoftList,
                 ),
-              ],
-            ),
+                child: const Icon(
+                  Icons.fact_check_rounded,
+                  color: AppColors.primary,
+                  size: 25,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 154),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '任务中心',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.h1(
+                          context,
+                        ).copyWith(fontSize: 24, fontWeight: FontWeight.w900),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -539,17 +571,19 @@ class _TaskBoard extends StatelessWidget {
     final items = [
       _BoardItem(
         kind: TaskListKind.todayPractice,
-        title: '待刷复习题',
+        title: '待刷练习题',
         value: '${data.todayPractice.length}',
         icon: Icons.quiz_rounded,
         color: const Color(0xFFF0FDFA),
+        foreground: AppColors.primary,
       ),
       _BoardItem(
         kind: TaskListKind.overduePractice,
-        title: '逾期复习',
+        title: '逾期练习',
         value: '${data.overduePractice.length}',
         icon: Icons.schedule_rounded,
         color: const Color(0xFFFEF2F2),
+        foreground: AppColors.error,
       ),
       _BoardItem(
         kind: TaskListKind.wrongQuestions,
@@ -557,6 +591,7 @@ class _TaskBoard extends StatelessWidget {
         value: '${data.wrongQuestions.length}',
         icon: Icons.report_problem_rounded,
         color: const Color(0xFFFFF7ED),
+        foreground: AppColors.accentOrange,
       ),
       _BoardItem(
         kind: TaskListKind.activeFlow,
@@ -564,6 +599,7 @@ class _TaskBoard extends StatelessWidget {
         value: '${data.activeFlowCount}',
         icon: Icons.auto_mode_rounded,
         color: const Color(0xFFEFF6FF),
+        foreground: AppColors.secondaryBlue,
       ),
       _BoardItem(
         kind: TaskListKind.masteredQuestions,
@@ -571,15 +607,16 @@ class _TaskBoard extends StatelessWidget {
         value: '${data.masteredQuestions.length}',
         icon: Icons.check_circle_rounded,
         color: const Color(0xFFF0FDF4),
+        foreground: AppColors.primary,
       ),
     ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final itemWidth = (constraints.maxWidth - 12) / 2;
+        final itemWidth = (constraints.maxWidth - 14) / 2;
         return Wrap(
-          spacing: 12,
-          runSpacing: 12,
+          spacing: 14,
+          runSpacing: 14,
           children: items
               .map(
                 (item) => SizedBox(
@@ -608,41 +645,68 @@ class _BoardCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        borderRadius: BorderRadius.circular(24),
         child: Ink(
-          padding: const EdgeInsets.all(14),
+          height: 150,
+          padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
           decoration: BoxDecoration(
             color: item.color,
-            borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.borderLight),
+            boxShadow: AppShadows.cardSoftList,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              Icon(item.icon, color: AppColors.primary),
-              const SizedBox(height: 8),
-              Text(
-                item.value,
-                style: AppTextStyles.h2(
-                  context,
-                ).copyWith(color: AppColors.primaryDark),
+              Positioned(
+                right: -24,
+                bottom: -30,
+                child: Icon(
+                  item.icon,
+                  size: 46,
+                  color: item.foreground.withValues(alpha: 0.045),
+                ),
               ),
-              const SizedBox(height: 4),
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      item.title,
-                      style: AppTextStyles.caption(context).copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: item.foreground.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(item.icon, color: item.foreground, size: 22),
+                  ),
+                  const Spacer(),
+                  Text(
+                    item.value,
+                    style: AppTextStyles.h1(context).copyWith(
+                      color: item.foreground,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 28,
                     ),
                   ),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    size: 18,
-                    color: AppColors.textTertiary,
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.h3(context).copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 28,
+                        color: AppColors.textSecondary,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -797,7 +861,10 @@ class _StatePanel extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
-            FilledButton(onPressed: () => onPressed(), child: const Text('重试')),
+            FilledButton(
+              onPressed: () => onPressed(),
+              child: const Text('閲嶈瘯'),
+            ),
           ],
         ),
       ),
@@ -853,11 +920,13 @@ class _BoardItem {
     required this.value,
     required this.icon,
     required this.color,
+    required this.foreground,
   });
   final TaskListKind kind;
   final String title, value;
   final IconData icon;
   final Color color;
+  final Color foreground;
 }
 
 enum TaskListKind {
@@ -871,9 +940,9 @@ enum TaskListKind {
 String _titleOf(TaskListKind kind) {
   switch (kind) {
     case TaskListKind.todayPractice:
-      return '今日待刷复习题';
+      return '今日待刷练习题';
     case TaskListKind.overduePractice:
-      return '逾期复习';
+      return '逾期练习';
     case TaskListKind.wrongQuestions:
       return '待处理错题';
     case TaskListKind.activeFlow:

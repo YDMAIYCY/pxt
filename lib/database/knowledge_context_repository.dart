@@ -127,7 +127,7 @@ class KnowledgeContextRepository {
         ''',
         _queryArgs(userId: userId, libraryId: libraryId, limit: perTypeLimit),
         KnowledgeContextSourceType.practiceQuestion,
-        '复习题',
+        '练习题',
       ),
     );
 

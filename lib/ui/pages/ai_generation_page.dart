@@ -360,9 +360,9 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
               ),
               const SizedBox(height: 12),
               _ResultSection(
-                title: '复习题',
+                title: '练习题',
                 child: data.practiceQuestions.isEmpty
-                    ? const _EmptyResultHint(text: '暂无复习题结果')
+                    ? const _EmptyResultHint(text: '暂无练习题结果')
                     : Column(
                         children: data.practiceQuestions
                             .map(

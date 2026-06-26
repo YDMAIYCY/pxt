@@ -12,6 +12,7 @@ import '../../../database/models/knowledge_graph_records.dart';
 import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
+import '../../../common/app_assets.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../document_batch_detail_page.dart';
@@ -149,13 +150,6 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       libraryId: selectedLibrary.id,
       limit: 300,
     );
-    final wrongQuestions = await _aiGenerationRepository
-        .fetchPracticeQuestionsByUser(
-          userId: user.id,
-          libraryId: selectedLibrary.id,
-          reviewStatus: PracticeQuestionReviewStatus.wrong,
-          limit: 300,
-        );
     final weakConcepts = await _knowledgeGraphRepository.fetchWeakConcepts(
       userId: user.id,
       libraryId: selectedLibrary.id,
@@ -169,7 +163,6 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       batches: batches,
       documents: documents,
       contents: contents,
-      wrongQuestions: wrongQuestions,
       weakConcepts: weakConcepts,
     );
   }
@@ -260,7 +253,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       builder: (dialogContext) => AlertDialog(
         title: Text('删除"${data.selectedLibrary.name}"？'),
         content: Text(
-          '会同时删除这个知识库下的 ${data.documents.length} 份资料，以及相关 OCR 文本、AI 结果、复习题和错题记录。',
+          '会同时删除这个知识库下的 ${data.documents.length} 份资料，以及相关 OCR 文本、AI 结果、练习题和错题记录。',
         ),
         actions: [
           TextButton(
@@ -355,7 +348,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('删除这份资料？'),
-        content: const Text('会同时删除它的 OCR 文本、AI 结果、复习题和错题记录。'),
+        content: const Text('会同时删除它的 OCR 文本、AI 结果、练习题和错题记录。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -389,7 +382,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('删除这个学习包？'),
-        content: const Text('会同时删除学习包下全部页资料、OCR 文本、AI 结果、复习题和错题记录。'),
+        content: const Text('会同时删除学习包下全部页资料、OCR 文本、AI 结果、练习题和错题记录。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -450,7 +443,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             physics: const BouncingScrollPhysics(),
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                padding: const EdgeInsets.fromLTRB(14, 18, 14, 100),
                 sliver: SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -492,6 +485,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         count: data.batches.length,
         icon: Icons.folder_copy_rounded,
         color: const Color(0xFFF0FDFA),
+        foreground: AppColors.primary,
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.documents,
@@ -499,6 +493,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         count: data.documents.length,
         icon: Icons.menu_book_rounded,
         color: const Color(0xFFEFF6FF),
+        foreground: AppColors.secondaryBlue,
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.cards,
@@ -506,6 +501,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         count: data.countByType(_KnowledgeType.cards),
         icon: Icons.style_rounded,
         color: const Color(0xFFF0FDF4),
+        foreground: AppColors.success,
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.outlines,
@@ -513,6 +509,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         count: data.countByType(_KnowledgeType.outlines),
         icon: Icons.list_alt_rounded,
         color: const Color(0xFFFFF7ED),
+        foreground: AppColors.accentOrange,
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.mindmaps,
@@ -520,13 +517,15 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         count: data.countByType(_KnowledgeType.mindmaps),
         icon: Icons.account_tree_rounded,
         color: const Color(0xFFF5F3FF),
+        foreground: AppColors.secondaryPurple,
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.questions,
-        title: '复习题',
+        title: '练习题',
         count: data.countByType(_KnowledgeType.questions),
         icon: Icons.quiz_rounded,
         color: const Color(0xFFFDF2F8),
+        foreground: AppColors.error,
       ),
       _KnowledgeTypeItem(
         type: _KnowledgeType.graph,
@@ -534,13 +533,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         count: data.weakConcepts.length,
         icon: Icons.hub_rounded,
         color: const Color(0xFFEFF6FF),
-      ),
-      _KnowledgeTypeItem(
-        type: _KnowledgeType.wrongQuestions,
-        title: '错题讲解',
-        count: data.wrongQuestions.length,
-        icon: Icons.report_problem_rounded,
-        color: const Color(0xFFFEF2F2),
+        foreground: AppColors.info,
       ),
     ];
   }
@@ -578,29 +571,6 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
                 onTap: () => _openDocument(document.id),
                 onMove: () => _moveDocument(data, document.id),
                 onDelete: () => _deleteDocument(data, document.id),
-              ),
-            )
-            .toList(growable: false),
-      );
-    }
-    if (_selectedType == _KnowledgeType.wrongQuestions) {
-      if (data.wrongQuestions.isEmpty) {
-        return const _EmptyListHint(text: '这个知识库暂无待处理错题。');
-      }
-      return Column(
-        children: data.wrongQuestions
-            .map(
-              (item) => _ContentTile(
-                title: item.question.questionText,
-                subtitle:
-                    '${item.documentTitle} / 错 ${item.question.wrongCount} 次',
-                body:
-                    item.question.analysisText ??
-                    item.question.answerText ??
-                    '',
-                onTap: () => _openDocument(item.question.documentId),
-                onMove: () => _moveDocument(data, item.question.documentId),
-                onDelete: () => _deleteDocument(data, item.question.documentId),
               ),
             )
             .toList(growable: false),
@@ -652,50 +622,76 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
+      padding: const EdgeInsets.fromLTRB(18, 18, 16, 18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFCCFBF1), Color(0xFFF0FDFA)],
+          colors: [
+            AppColors.primarySoft.withValues(alpha: 0.72),
+            Colors.white,
+            const Color(0xFFEFF9FF),
+          ],
         ),
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.primarySoft),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.primaryLight),
+        boxShadow: AppShadows.cardSoftList,
       ),
-      child: Row(
+      child: Stack(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.collections_bookmark_rounded,
-              color: AppColors.primary,
+          Positioned(
+            right: 0,
+            top: 2,
+            bottom: 2,
+            width: 500,
+            child: Opacity(
+              opacity: 0.5,
+              child: Image.asset(
+                AppAssets.knowledgeHeaderIllustration,
+                fit: BoxFit.contain,
+                alignment: Alignment.centerRight,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              ),
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  data.selectedLibrary.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.h1(context),
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: AppShadows.cardSoftList,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '当前知识库共 ${data.totalCount} 条资料与生成结果',
-                  style: AppTextStyles.bodySmall(
-                    context,
-                  ).copyWith(fontWeight: FontWeight.w600),
+                child: const Icon(
+                  Icons.collections_bookmark_rounded,
+                  color: AppColors.primary,
+                  size: 25,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 154),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        data.selectedLibrary.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.h1(
+                          context,
+                        ).copyWith(fontWeight: FontWeight.w900, fontSize: 22),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -725,16 +721,23 @@ class _LibrarySelector extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: '新建知识库',
-            onPressed: onCreate,
-            icon: const Icon(Icons.add_rounded, color: AppColors.primary),
+          Tooltip(
+            message: '新建知识库',
+            child: TextButton.icon(
+              onPressed: onCreate,
+              icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+              label: const Text('添加'),
+            ),
           ),
-          IconButton(
-            tooltip: '删除当前知识库',
-            onPressed: onDeleteSelected,
-            color: AppColors.error,
-            icon: const Icon(Icons.delete_outline_rounded),
+          Container(width: 1, height: 18, color: AppColors.borderLight),
+          Tooltip(
+            message: '删除当前知识库',
+            child: TextButton.icon(
+              onPressed: onDeleteSelected,
+              style: TextButton.styleFrom(foregroundColor: AppColors.error),
+              icon: const Icon(Icons.delete_outline_rounded, size: 20),
+              label: const Text('删除'),
+            ),
           ),
         ],
       ),
@@ -742,16 +745,72 @@ class _LibrarySelector extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: libraries
-              .map(
-                (library) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text('${library.name} · ${library.documentCount}'),
-                    selected: library.id == selectedLibrary.id,
-                    onSelected: (_) => onSelected(library.id),
+              .map((library) {
+                final selected = library.id == selectedLibrary.id;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: InkWell(
+                    onTap: () => onSelected(library.id),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Ink(
+                      width: 132,
+                      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? AppColors.primarySoft
+                            : AppColors.surface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected
+                              ? AppColors.primary
+                              : AppColors.borderLight,
+                          width: selected ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          if (selected) ...[
+                            const Icon(
+                              Icons.check_rounded,
+                              color: AppColors.textSecondary,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  library.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.bodySmall(context)
+                                      .copyWith(
+                                        color: selected
+                                            ? AppColors.primaryDark
+                                            : AppColors.textSecondary,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  '${library.documentCount} 条',
+                                  style: AppTextStyles.bodySmall(context)
+                                      .copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              )
+                );
+              })
               .toList(growable: false),
         ),
       ),
@@ -812,37 +871,79 @@ class _TypeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         child: Ink(
-          padding: const EdgeInsets.all(12),
+          height: 118,
+          padding: const EdgeInsets.fromLTRB(14, 14, 12, 12),
           decoration: BoxDecoration(
             color: item.color,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: selected ? AppColors.primary : AppColors.border,
               width: selected ? 1.6 : 1,
             ),
+            boxShadow: AppShadows.cardSoftList,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              Icon(item.icon, color: AppColors.primary),
-              const SizedBox(height: 8),
-              Text(
-                item.title,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w700,
+              Positioned(
+                right: -8,
+                bottom: -12,
+                child: Icon(
+                  item.icon,
+                  color: item.foreground.withValues(alpha: 0.045),
+                  size: 34,
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                '${item.count} 条',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w600,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: item.foreground,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(item.icon, color: Colors.white, size: 18),
+                  ),
+                  const Spacer(),
+                  Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.h3(
+                      context,
+                    ).copyWith(fontWeight: FontWeight.w900, fontSize: 16),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '${item.count} 条',
+                    style: AppTextStyles.bodySmall(context).copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
               ),
+              if (selected)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -865,11 +966,11 @@ class _DocumentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _BaseTile(
-      icon: Icons.description_rounded,
+      icon: Icons.picture_as_pdf_rounded,
       title: document.title,
-      subtitle: '${document.sourceTypeLabel} / ${document.createdAtLabel}',
+      subtitle: '${document.sourceTypeLabel} | ${document.createdAtLabel}',
       body:
-          'OCR：${document.ocrStatusLabel} / AI：${document.aiDone ? '已生成' : '待生成'}',
+          'OCR ${document.ocrStatusLabel} | AI ${document.aiDone ? '已生成' : '待生成'}',
       onTap: onTap,
       onMove: onMove,
       onDelete: onDelete,
@@ -966,8 +1067,16 @@ class _BaseTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(icon, color: AppColors.primary),
-                const SizedBox(width: 10),
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF1F1),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: AppColors.error, size: 28),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -978,7 +1087,7 @@ class _BaseTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -986,7 +1095,7 @@ class _BaseTile extends StatelessWidget {
                         subtitle,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       if (body.trim().isNotEmpty) ...[
@@ -1006,7 +1115,7 @@ class _BaseTile extends StatelessWidget {
                   ),
                 ),
                 PopupMenuButton<String>(
-                  tooltip: '内容操作',
+                  tooltip: '鍐呭鎿嶄綔',
                   icon: const Icon(
                     Icons.more_vert_rounded,
                     color: AppColors.textTertiary,
@@ -1050,10 +1159,11 @@ class _Panel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.borderLight),
         boxShadow: AppShadows.cardSoftList,
       ),
       child: Column(
@@ -1061,11 +1171,18 @@ class _Panel extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: Text(title, style: AppTextStyles.h3(context))),
+              Expanded(
+                child: Text(
+                  title,
+                  style: AppTextStyles.h3(
+                    context,
+                  ).copyWith(fontSize: 19, fontWeight: FontWeight.w900),
+                ),
+              ),
               trailing ?? const SizedBox.shrink(),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           child,
         ],
       ),
@@ -1131,7 +1248,10 @@ class _StatePanel extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
-            FilledButton(onPressed: () => onPressed(), child: const Text('重试')),
+            FilledButton(
+              onPressed: () => onPressed(),
+              child: const Text('閲嶈瘯'),
+            ),
           ],
         ),
       ),
@@ -1148,7 +1268,6 @@ class _KnowledgeData {
     required this.batches,
     required this.documents,
     required this.contents,
-    required this.wrongQuestions,
     required this.weakConcepts,
   });
 
@@ -1158,15 +1277,10 @@ class _KnowledgeData {
   final List<DocumentBatchRecord> batches;
   final List<SourceDocumentRecord> documents;
   final List<GeneratedContentRecord> contents;
-  final List<PracticeQuestionWithDocument> wrongQuestions;
   final List<KnowledgeConceptWithDocument> weakConcepts;
 
   int get totalCount =>
-      batches.length +
-      documents.length +
-      contents.length +
-      wrongQuestions.length +
-      weakConcepts.length;
+      batches.length + documents.length + contents.length + weakConcepts.length;
   int countByType(String type) => contentsOf(type).length;
   List<GeneratedContentRecord> contentsOf(String type) => contents
       .where((item) => item.contentType == type)
@@ -1181,7 +1295,6 @@ class _KnowledgeType {
   static const String outlines = 'review_outline';
   static const String mindmaps = 'mindmap_text';
   static const String questions = 'practice_questions';
-  static const String wrongQuestions = 'wrong_questions';
   static const String graph = 'knowledge_graph';
 }
 
@@ -1192,9 +1305,11 @@ class _KnowledgeTypeItem {
     required this.count,
     required this.icon,
     required this.color,
+    required this.foreground,
   });
   final String type, title;
   final int count;
   final IconData icon;
   final Color color;
+  final Color foreground;
 }
