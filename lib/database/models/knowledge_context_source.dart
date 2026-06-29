@@ -5,6 +5,7 @@ class KnowledgeContextSourceType {
   static const String knowledgeCard = 'knowledge_card';
   static const String reviewOutline = 'review_outline';
   static const String practiceQuestion = 'practice_question';
+  static const String knowledgeGraph = 'knowledge_graph';
 }
 
 class KnowledgeContextSource {

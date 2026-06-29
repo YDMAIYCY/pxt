@@ -536,14 +536,14 @@ class _Header extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(right: 154),
+                  padding: const EdgeInsets.only(right: 72),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         '任务中心',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 2,
+                        softWrap: true,
                         style: AppTextStyles.h1(
                           context,
                         ).copyWith(fontSize: 24, fontWeight: FontWeight.w900),
@@ -647,7 +647,7 @@ class _BoardCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(24),
         child: Ink(
-          height: 150,
+          height: 164,
           padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
           decoration: BoxDecoration(
             color: item.color,
@@ -664,6 +664,15 @@ class _BoardCard extends StatelessWidget {
                   item.icon,
                   size: 46,
                   color: item.foreground.withValues(alpha: 0.045),
+                ),
+              ),
+              const Positioned(
+                right: 0,
+                top: 0,
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 26,
+                  color: AppColors.textSecondary,
                 ),
               ),
               Column(
@@ -688,25 +697,14 @@ class _BoardCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.h3(context).copyWith(
-                            color: AppColors.textSecondary,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        size: 28,
-                        color: AppColors.textSecondary,
-                      ),
-                    ],
+                  Text(
+                    item.title,
+                    maxLines: 3,
+                    softWrap: true,
+                    style: AppTextStyles.h3(context).copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ],
               ),

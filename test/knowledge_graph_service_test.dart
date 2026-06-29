@@ -25,6 +25,16 @@ void main() {
       expect(source, contains('_upgradeKnowledgeGraphToV12'));
     });
 
+    test('link queries do not reuse the concept table alias', () {
+      final source = File(
+        'lib/database/knowledge_graph_repository.dart',
+      ).readAsStringSync();
+
+      expect(source, contains("tableAlias: 'concepts'"));
+      expect(source, contains('final prefix = tableAlias == null'));
+      expect(source, isNot(contains('AND concepts.library_id = ?')));
+    });
+
     test('parses concepts and relationships from structured response', () {
       final draft = KnowledgeGraphExtractionService.parseGraphResponse({
         'concepts': [

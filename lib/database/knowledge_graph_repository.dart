@@ -1,4 +1,5 @@
 import 'app_database.dart';
+import 'models/ai_result_records.dart';
 import 'models/knowledge_graph_records.dart';
 
 class KnowledgeConceptDraft {
@@ -34,6 +35,22 @@ class KnowledgeGraphDraft {
 
   final List<KnowledgeConceptDraft> concepts;
   final List<KnowledgeConceptLinkDraft> links;
+}
+
+class KnowledgeNextBestAction {
+  const KnowledgeNextBestAction({
+    required this.concept,
+    required this.documentTitle,
+    required this.actionLabel,
+    required this.reason,
+    required this.priorityScore,
+  });
+
+  final KnowledgeConceptRecord concept;
+  final String documentTitle;
+  final String actionLabel;
+  final String reason;
+  final int priorityScore;
 }
 
 class KnowledgeGraphRepository {
@@ -157,7 +174,11 @@ class KnowledgeGraphRepository {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final args = <Object?>[userId];
-    final libraryClause = _appendLibraryClause(libraryId, args);
+    final libraryClause = _appendLibraryClause(
+      libraryId,
+      args,
+      tableAlias: 'concepts',
+    );
     args.add(limit);
 
     final rows = await db.rawQuery('''
@@ -208,13 +229,218 @@ class KnowledgeGraphRepository {
     return rows.map(KnowledgeConceptLinkRecord.fromMap).toList(growable: false);
   }
 
+  Future<List<KnowledgeNextBestAction>> fetchNextBestActions({
+    required int userId,
+    int? libraryId,
+    int limit = 3,
+  }) async {
+    final weakConcepts = await fetchWeakConcepts(
+      userId: userId,
+      libraryId: libraryId,
+      limit: limit * 3,
+    );
+    if (weakConcepts.isEmpty) {
+      return const <KnowledgeNextBestAction>[];
+    }
+
+    return weakConcepts
+        .take(limit)
+        .map((item) {
+          final concept = item.concept;
+          final priority = (100 - concept.masteryScore) + concept.weaknessScore;
+          final label = concept.weaknessScore >= 70
+              ? '开始 5 分钟专项训练'
+              : concept.masteryScore < 50
+              ? '先补前置知识'
+              : '做 3 道巩固题';
+          final reason = concept.weaknessScore >= 70
+              ? '薄弱风险较高，建议优先修复。'
+              : concept.masteryScore < 50
+              ? '掌握度偏低，先补概念再刷题。'
+              : '接近掌握，适合用少量题目巩固。';
+          return KnowledgeNextBestAction(
+            concept: concept,
+            documentTitle: item.documentTitle,
+            actionLabel: label,
+            reason: reason,
+            priorityScore: priority,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> updateMasteryFromPracticeQuestion({
+    required int questionId,
+    required bool isCorrect,
+  }) async {
+    await _database.ensureSchemaReady();
+    final db = await _database.database;
+    final questionRows = await db.rawQuery(
+      '''
+      SELECT questions.*,
+             documents.user_id AS user_id,
+             documents.library_id AS library_id
+      FROM ${AppDatabase.tablePracticeQuestions} questions
+      JOIN ${AppDatabase.tableSourceDocuments} documents
+        ON documents.id = questions.document_id
+      WHERE questions.id = ?
+      LIMIT 1
+      ''',
+      [questionId],
+    );
+    if (questionRows.isEmpty) {
+      return;
+    }
+
+    final row = questionRows.first;
+    final question = PracticeQuestionRecord.fromMap(row);
+    final userId = row['user_id'] as int;
+    final concepts = await _relatedConceptsForQuestion(
+      userId: userId,
+      documentId: question.documentId,
+      text: [
+        question.questionText,
+        question.answerText ?? '',
+        question.analysisText ?? '',
+      ].join('\n'),
+    );
+    if (concepts.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    final masteryDelta = isCorrect ? 15 : -18;
+    final weaknessDelta = isCorrect ? -12 : 22;
+
+    await db.transaction((txn) async {
+      for (final concept in concepts.take(4)) {
+        await txn.update(
+          AppDatabase.tableKnowledgeConcepts,
+          {
+            'mastery_score': _clampScore(concept.masteryScore + masteryDelta),
+            'weakness_score': _clampScore(
+              concept.weaknessScore + weaknessDelta,
+            ),
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [concept.id],
+        );
+      }
+
+      if (!isCorrect) {
+        final ids = concepts.take(4).map((item) => item.id).toList();
+        if (ids.isEmpty) return;
+        final placeholders = List.filled(ids.length, '?').join(',');
+        final prereqRows = await txn.rawQuery(
+          '''
+          SELECT DISTINCT prereq.*
+          FROM ${AppDatabase.tableKnowledgeConceptLinks} links
+          JOIN ${AppDatabase.tableKnowledgeConcepts} prereq
+            ON prereq.id = links.from_concept_id
+          WHERE links.to_concept_id IN ($placeholders)
+            AND links.user_id = ?
+            AND (
+              links.relation_label LIKE '%前置%' OR
+              links.relation_label LIKE '%依赖%' OR
+              links.relation_label LIKE '%prerequisite%'
+            )
+          LIMIT 6
+          ''',
+          [...ids, userId],
+        );
+        for (final prereq in prereqRows.map(KnowledgeConceptRecord.fromMap)) {
+          await txn.update(
+            AppDatabase.tableKnowledgeConcepts,
+            {
+              'weakness_score': _clampScore(prereq.weaknessScore + 10),
+              'updated_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [prereq.id],
+          );
+        }
+      }
+    });
+  }
+
+  Future<List<KnowledgeConceptRecord>> _relatedConceptsForQuestion({
+    required int userId,
+    required int documentId,
+    required String text,
+  }) async {
+    final db = await _database.database;
+    final rows = await db.query(
+      AppDatabase.tableKnowledgeConcepts,
+      where: 'user_id = ? AND document_id = ?',
+      whereArgs: [userId, documentId],
+      orderBy: 'weakness_score DESC, updated_at DESC',
+      limit: 80,
+    );
+    final concepts = rows.map(KnowledgeConceptRecord.fromMap).toList();
+    if (concepts.isEmpty) {
+      return const <KnowledgeConceptRecord>[];
+    }
+
+    final lowerText = text.toLowerCase();
+    final scored =
+        concepts
+            .map(
+              (concept) => (_conceptQuestionScore(concept, lowerText), concept),
+            )
+            .where((item) => item.$1 > 0)
+            .toList(growable: false)
+          ..sort((a, b) => b.$1.compareTo(a.$1));
+    if (scored.isNotEmpty) {
+      return scored.map((item) => item.$2).toList(growable: false);
+    }
+
+    return concepts.take(3).toList(growable: false);
+  }
+
+  int _conceptQuestionScore(KnowledgeConceptRecord concept, String lowerText) {
+    var score = 0;
+    final name = concept.name.toLowerCase();
+    if (name.isNotEmpty && lowerText.contains(name)) {
+      score += 8;
+    }
+    for (final token in _conceptTokens(concept)) {
+      if (lowerText.contains(token)) {
+        score += token.length >= 4 ? 3 : 1;
+      }
+    }
+    return score;
+  }
+
+  Iterable<String> _conceptTokens(KnowledgeConceptRecord concept) sync* {
+    final text = [
+      concept.name,
+      concept.summary ?? '',
+      concept.evidenceText ?? '',
+    ].join(' ').toLowerCase();
+    final terms = text
+        .replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ')
+        .split(RegExp(r'\s+'))
+        .map((item) => item.trim())
+        .where((item) => item.length >= 2)
+        .take(12);
+    for (final term in terms) {
+      yield term;
+    }
+  }
+
   int _clampScore(int value) => value.clamp(0, 100).toInt();
 
-  String _appendLibraryClause(int? libraryId, List<Object?> args) {
+  String _appendLibraryClause(
+    int? libraryId,
+    List<Object?> args, {
+    String? tableAlias,
+  }) {
     if (libraryId == null) {
       return '';
     }
     args.add(libraryId);
-    return 'AND concepts.library_id = ?';
+    final prefix = tableAlias == null ? '' : '$tableAlias.';
+    return 'AND ${prefix}library_id = ?';
   }
 }

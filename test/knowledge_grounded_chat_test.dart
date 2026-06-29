@@ -22,8 +22,33 @@ void main() {
         expect(source, contains('tableKnowledgeCards'));
         expect(source, contains('tableReviewOutlines'));
         expect(source, contains('tablePracticeQuestions'));
+        expect(source, contains('tableKnowledgeConcepts'));
+        expect(source, contains('tableKnowledgeConceptLinks'));
+        expect(source, contains('KnowledgeContextSourceType.knowledgeGraph'));
       },
     );
+
+    test('adaptive graph hooks update mastery from practice outcomes', () {
+      final graphSource = File(
+        'lib/database/knowledge_graph_repository.dart',
+      ).readAsStringSync();
+      final generationSource = File(
+        'lib/database/ai_generation_repository.dart',
+      ).readAsStringSync();
+      final homeSource = File(
+        'lib/ui/pages/tabs/home_tab_page.dart',
+      ).readAsStringSync();
+
+      expect(
+        graphSource,
+        contains('Future<void> updateMasteryFromPracticeQuestion'),
+      );
+      expect(graphSource, contains('Future<List<KnowledgeNextBestAction>>'));
+      expect(graphSource, contains('prerequisite'));
+      expect(generationSource, contains('isCorrect: false'));
+      expect(generationSource, contains('isCorrect: true'));
+      expect(homeSource, contains('_NextBestActionSection'));
+    });
 
     test(
       'chat service injects retrieved sources into the model prompt',

@@ -47,6 +47,45 @@ class KnowledgeContextRepository {
     candidates.addAll(
       await _querySources(
         '''
+        SELECT concepts.document_id AS document_id,
+               COALESCE(documents.original_title, '') AS document_title,
+               concepts.id AS source_id,
+               concepts.name AS title,
+               TRIM(
+                 COALESCE(concepts.summary, '') || char(10) ||
+                 COALESCE(concepts.evidence_text, '') || char(10) ||
+                 '掌握度 ' || concepts.mastery_score || ' / 薄弱 ' || concepts.weakness_score || char(10) ||
+                 COALESCE((
+                   SELECT GROUP_CONCAT(
+                     links.relation_label || ': ' || linked.name,
+                     char(10)
+                   )
+                   FROM ${AppDatabase.tableKnowledgeConceptLinks} links
+                   JOIN ${AppDatabase.tableKnowledgeConcepts} linked
+                     ON linked.id = links.to_concept_id
+                   WHERE links.from_concept_id = concepts.id
+                   LIMIT 6
+                 ), '')
+               ) AS snippet
+        FROM ${AppDatabase.tableKnowledgeConcepts} concepts
+        LEFT JOIN ${AppDatabase.tableSourceDocuments} documents
+          ON documents.id = concepts.document_id
+        WHERE concepts.user_id = ?
+          ${libraryId == null ? '' : 'AND concepts.library_id = ?'}
+        ORDER BY concepts.weakness_score DESC,
+                 concepts.updated_at DESC,
+                 concepts.id DESC
+        LIMIT ?
+        ''',
+        _queryArgs(userId: userId, libraryId: libraryId, limit: perTypeLimit),
+        KnowledgeContextSourceType.knowledgeGraph,
+        '知识图谱',
+      ),
+    );
+
+    candidates.addAll(
+      await _querySources(
+        '''
         SELECT documents.id AS document_id,
                COALESCE(documents.original_title, '') AS document_title,
                ocr.id AS source_id,

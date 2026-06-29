@@ -9,6 +9,7 @@ import '../../../common/app_assets.dart';
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
 import '../../../database/document_batch_repository.dart';
+import '../../../database/knowledge_graph_repository.dart';
 import '../../../database/knowledge_library_repository.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/document_batch_record.dart';
@@ -32,6 +33,7 @@ class HomeTabPage extends StatefulWidget {
     this.sourceDocumentRepository,
     this.aiGenerationRepository,
     this.documentBatchRepository,
+    this.knowledgeGraphRepository,
     this.knowledgeLibraryRepository,
     this.documentIngestService,
     this.detailPageBuilder,
@@ -52,6 +54,7 @@ class HomeTabPage extends StatefulWidget {
   final SourceDocumentRepository? sourceDocumentRepository;
   final AiGenerationRepository? aiGenerationRepository;
   final DocumentBatchRepository? documentBatchRepository;
+  final KnowledgeGraphRepository? knowledgeGraphRepository;
   final KnowledgeLibraryRepository? knowledgeLibraryRepository;
   final DocumentIngestService? documentIngestService;
   final Widget Function(int documentId)? detailPageBuilder;
@@ -75,12 +78,16 @@ class _HomeTabPageState extends State<HomeTabPage> {
   late final SourceDocumentRepository _sourceDocumentRepository;
   late final AiGenerationRepository _aiGenerationRepository;
   late final DocumentBatchRepository _documentBatchRepository;
+  late final KnowledgeGraphRepository _knowledgeGraphRepository;
   late final KnowledgeLibraryRepository _knowledgeLibraryRepository;
   late final DocumentIngestService _documentIngestService;
+  late final DebugDemoDataSeeder _debugDemoDataSeeder;
   late Future<_HomeData> _future;
   late int _handledRefreshVersion;
   bool _reloadScheduled = false;
   bool _isImporting = false;
+  bool _isSeedingDemoData = false;
+  String? _demoSeedStatusMessage;
 
   @override
   void initState() {
@@ -92,10 +99,13 @@ class _HomeTabPageState extends State<HomeTabPage> {
         widget.aiGenerationRepository ?? AiGenerationRepository();
     _documentBatchRepository =
         widget.documentBatchRepository ?? DocumentBatchRepository();
+    _knowledgeGraphRepository =
+        widget.knowledgeGraphRepository ?? KnowledgeGraphRepository();
     _knowledgeLibraryRepository =
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
     _documentIngestService =
         widget.documentIngestService ?? DocumentIngestService();
+    _debugDemoDataSeeder = widget.debugDemoDataSeeder ?? DebugDemoDataSeeder();
     _handledRefreshVersion = widget.refreshVersion;
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
@@ -169,6 +179,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
     final stats = await _aiGenerationRepository.fetchStudyOverviewStats(
       user.id,
     );
+    final nextActions = await _fetchNextActionsSafely(user.id);
 
     return _HomeData(
       user: user,
@@ -176,7 +187,21 @@ class _HomeTabPageState extends State<HomeTabPage> {
       recentDocuments: recentDocuments,
       recentContents: recentContents,
       stats: stats,
+      nextActions: nextActions,
     );
+  }
+
+  Future<List<KnowledgeNextBestAction>> _fetchNextActionsSafely(
+    int userId,
+  ) async {
+    try {
+      return await _knowledgeGraphRepository.fetchNextBestActions(
+        userId: userId,
+        limit: 3,
+      );
+    } catch (_) {
+      return const <KnowledgeNextBestAction>[];
+    }
   }
 
   Future<void> _refresh() async {
@@ -438,6 +463,38 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _refresh();
   }
 
+  Future<void> _seedDebugDemoData() async {
+    if (_isSeedingDemoData) return;
+    setState(() {
+      _isSeedingDemoData = true;
+      _demoSeedStatusMessage = null;
+    });
+    try {
+      final user = await _authRepository.getCurrentUserProfile();
+      if (user == null) {
+        _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
+        return;
+      }
+      await _debugDemoDataSeeder.seedForUser(user.id);
+      if (!mounted) return;
+      setState(() {
+        _demoSeedStatusMessage = '演示数据已植入当前调试账号';
+      });
+      _showMessage('演示数据已植入');
+      await _afterDataChanged();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _demoSeedStatusMessage = '演示数据植入失败：$error';
+      });
+      _showMessage('演示数据植入失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() => _isSeedingDemoData = false);
+      }
+    }
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -493,12 +550,21 @@ class _HomeTabPageState extends State<HomeTabPage> {
                       const SizedBox(height: 12),
                       _AgentCommandStrip(onOpenQsClaw: _openQsClaw),
                       const SizedBox(height: 12),
+                      _NextBestActionSection(
+                        actions: data.nextActions,
+                        onOpenTasks: () => _openTab(3),
+                        onOpenKnowledge: () => _openTab(1),
+                      ),
+                      const SizedBox(height: 12),
                       _QuickActions(
                         isImporting: _isImporting,
+                        isSeedingDemoData: _isSeedingDemoData,
                         onCamera: () =>
                             _handleImageImport(ImageInputSource.camera),
                         onImport: _openImportSourceSheet,
                         onGames: _openGames,
+                        onSeedDemoData: kDebugMode ? _seedDebugDemoData : null,
+                        demoSeedStatusMessage: _demoSeedStatusMessage,
                       ),
                       const SizedBox(height: 14),
                       _RecentLearningGrid(
@@ -837,19 +903,143 @@ class _PulseMetric extends StatelessWidget {
   }
 }
 
+class _NextBestActionSection extends StatelessWidget {
+  const _NextBestActionSection({
+    required this.actions,
+    required this.onOpenTasks,
+    required this.onOpenKnowledge,
+  });
+
+  final List<KnowledgeNextBestAction> actions;
+  final VoidCallback onOpenTasks;
+  final VoidCallback onOpenKnowledge;
+
+  @override
+  Widget build(BuildContext context) {
+    if (actions.isEmpty) {
+      return _Section(
+        title: '下一步推荐',
+        child: const _EmptyHint(text: '导入资料并生成知识图谱后，QSClaw 会根据薄弱知识点推荐下一步。'),
+      );
+    }
+
+    final primary = actions.first;
+    return _Section(
+      title: '下一步推荐',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBEB),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFDE68A)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        primary.actionLabel,
+                        style: AppTextStyles.h3(
+                          context,
+                        ).copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${primary.concept.name} / ${primary.reason}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall(context).copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...actions.map(
+            (action) => _NextActionTile(
+              action: action,
+              onTap: action.concept.weaknessScore >= 70
+                  ? onOpenTasks
+                  : onOpenKnowledge,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NextActionTile extends StatelessWidget {
+  const _NextActionTile({required this.action, required this.onTap});
+
+  final KnowledgeNextBestAction action;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final concept = action.concept;
+    return _ListTileShell(
+      onTap: onTap,
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: AppColors.primarySoft,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.hub_rounded, color: AppColors.primary),
+      ),
+      title: concept.name,
+      subtitle:
+          '${action.documentTitle} | 掌握 ${concept.masteryScore} | 薄弱 ${concept.weaknessScore}',
+      body: action.actionLabel,
+    );
+  }
+}
+
 // ========== Quick Actions ==========
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.isImporting,
+    required this.isSeedingDemoData,
     required this.onCamera,
     required this.onImport,
     required this.onGames,
+    this.onSeedDemoData,
+    this.demoSeedStatusMessage,
   });
 
   final bool isImporting;
+  final bool isSeedingDemoData;
   final VoidCallback onCamera;
   final VoidCallback onImport;
   final VoidCallback onGames;
+  final VoidCallback? onSeedDemoData;
+  final String? demoSeedStatusMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -886,6 +1076,26 @@ class _QuickActions extends StatelessWidget {
                   onTap: onGames,
                 ),
               ),
+              if (onSeedDemoData != null)
+                SizedBox(
+                  width: width,
+                  child: _ActionTile(
+                    icon: Icons.data_object_rounded,
+                    title: isSeedingDemoData ? '正在植入' : '植入演示数据',
+                    onTap: isSeedingDemoData ? null : onSeedDemoData,
+                  ),
+                ),
+              if (demoSeedStatusMessage?.isNotEmpty == true)
+                SizedBox(
+                  width: constraints.maxWidth,
+                  child: Text(
+                    demoSeedStatusMessage!,
+                    style: AppTextStyles.caption(context).copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -1503,12 +1713,14 @@ class _HomeData {
     required this.recentDocuments,
     required this.recentContents,
     required this.stats,
+    required this.nextActions,
   });
   final UserProfile user;
   final List<DocumentBatchRecord> recentBatches;
   final List<SourceDocumentRecord> recentDocuments;
   final List<GeneratedContentRecord> recentContents;
   final StudyOverviewStats stats;
+  final List<KnowledgeNextBestAction> nextActions;
 }
 
 class _StatItem {

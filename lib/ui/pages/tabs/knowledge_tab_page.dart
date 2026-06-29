@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -30,9 +32,18 @@ class KnowledgeTabPage extends StatefulWidget {
     this.refreshListenable,
     this.activeTabListenable,
     this.tabIndex,
+    this.initialType,
     this.onDataChanged,
     super.key,
   });
+
+  static const typeDocuments = _KnowledgeType.documents;
+  static const typeBatches = _KnowledgeType.batches;
+  static const typeCards = _KnowledgeType.cards;
+  static const typeOutlines = _KnowledgeType.outlines;
+  static const typeMindmaps = _KnowledgeType.mindmaps;
+  static const typeQuestions = _KnowledgeType.questions;
+  static const typeGraph = _KnowledgeType.graph;
 
   final AuthRepository? authRepository;
   final SourceDocumentRepository? sourceDocumentRepository;
@@ -44,6 +55,7 @@ class KnowledgeTabPage extends StatefulWidget {
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
   final int? tabIndex;
+  final String? initialType;
   final VoidCallback? onDataChanged;
 
   @override
@@ -60,7 +72,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   late Future<_KnowledgeData> _future;
   late int _handledRefreshVersion;
   bool _reloadScheduled = false;
-  String _selectedType = _KnowledgeType.documents;
+  late String _selectedType;
   int? _selectedLibraryId;
 
   @override
@@ -77,6 +89,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         widget.knowledgeGraphRepository ?? KnowledgeGraphRepository();
     _knowledgeLibraryRepository =
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
+    _selectedType = _normalizeType(widget.initialType);
     _handledRefreshVersion = widget.refreshVersion;
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
@@ -98,6 +111,10 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       _handledRefreshVersion = widget.refreshVersion;
       _scheduleReload();
     }
+    if (oldWidget.initialType != widget.initialType &&
+        widget.initialType != null) {
+      setState(() => _selectedType = _normalizeType(widget.initialType));
+    }
   }
 
   @override
@@ -116,6 +133,19 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
   void _handleExternalRefresh() {
     if (!_canHandleExternalRefresh) return;
     _scheduleReload();
+  }
+
+  String _normalizeType(String? type) {
+    const supportedTypes = {
+      _KnowledgeType.documents,
+      _KnowledgeType.batches,
+      _KnowledgeType.cards,
+      _KnowledgeType.outlines,
+      _KnowledgeType.mindmaps,
+      _KnowledgeType.questions,
+      _KnowledgeType.graph,
+    };
+    return supportedTypes.contains(type) ? type! : _KnowledgeType.documents;
   }
 
   void _scheduleReload() {
@@ -155,6 +185,11 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       libraryId: selectedLibrary.id,
       limit: 80,
     );
+    final graphLinks = await _knowledgeGraphRepository.fetchLinksByLibrary(
+      userId: user.id,
+      libraryId: selectedLibrary.id,
+      limit: 300,
+    );
 
     return _KnowledgeData(
       userId: user.id,
@@ -164,6 +199,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       documents: documents,
       contents: contents,
       weakConcepts: weakConcepts,
+      graphLinks: graphLinks,
     );
   }
 
@@ -206,6 +242,25 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
       _selectedLibraryId = libraryId;
       _future = _loadData();
     });
+  }
+
+  Future<void> _openTypePage(
+    _KnowledgeData data,
+    String type,
+    List<_KnowledgeTypeItem> typeItems,
+  ) async {
+    setState(() => _selectedType = type);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _KnowledgeTypeDetailPage(
+          libraryName: data.selectedLibrary.name,
+          typeTitle: _typeTitle(typeItems, type),
+          count: _typeCount(typeItems, type),
+          child: _buildTypeList(data, type),
+        ),
+      ),
+    );
+    if (mounted) await _afterDataChanged();
   }
 
   Future<void> _openDocument(int documentId) async {
@@ -462,10 +517,8 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
                         items: typeItems,
                         selectedType: _selectedType,
                         onSelected: (type) =>
-                            setState(() => _selectedType = type),
+                            _openTypePage(data, type, typeItems),
                       ),
-                      const SizedBox(height: 14),
-                      _buildSelectedList(data),
                     ],
                   ),
                 ),
@@ -538,8 +591,20 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
     ];
   }
 
-  Widget _buildSelectedList(_KnowledgeData data) {
-    if (_selectedType == _KnowledgeType.batches) {
+  String _typeTitle(List<_KnowledgeTypeItem> items, String type) {
+    return items
+        .firstWhere((item) => item.type == type, orElse: () => items.first)
+        .title;
+  }
+
+  int _typeCount(List<_KnowledgeTypeItem> items, String type) {
+    return items
+        .firstWhere((item) => item.type == type, orElse: () => items.first)
+        .count;
+  }
+
+  Widget _buildTypeList(_KnowledgeData data, String type) {
+    if (type == _KnowledgeType.batches) {
       if (data.batches.isEmpty) {
         return const _EmptyListHint(text: '这个知识库还没有多页学习包。');
       }
@@ -559,7 +624,7 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             .toList(growable: false),
       );
     }
-    if (_selectedType == _KnowledgeType.documents) {
+    if (type == _KnowledgeType.documents) {
       if (data.documents.isEmpty) {
         return const _EmptyListHint(text: '这个知识库还没有讲义资料。');
       }
@@ -576,25 +641,22 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
             .toList(growable: false),
       );
     }
-    if (_selectedType == _KnowledgeType.graph) {
+    if (type == _KnowledgeType.graph) {
       if (data.weakConcepts.isEmpty) {
         return const _EmptyListHint(text: '生成 AI 学习成果后，这里会展示知识点和薄弱程度。');
       }
-      return Column(
-        children: data.weakConcepts
-            .map(
-              (item) => _ConceptTile(
-                item: item,
-                onTap: item.concept.documentId == null
-                    ? () {}
-                    : () => _openDocument(item.concept.documentId!),
-              ),
-            )
-            .toList(growable: false),
+      return _KnowledgeGraphPanel(
+        concepts: data.weakConcepts,
+        links: data.graphLinks,
+        onOpenConcept: (item) {
+          final documentId = item.concept.documentId;
+          if (documentId == null) return;
+          _openDocument(documentId);
+        },
       );
     }
 
-    final contents = data.contentsOf(_selectedType);
+    final contents = data.contentsOf(type);
     if (contents.isEmpty) return const _EmptyListHint(text: '这个知识库的分类还没有真实结果。');
     return Column(
       children: contents
@@ -675,14 +737,14 @@ class _Header extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(right: 154),
+                  padding: const EdgeInsets.only(right: 72),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         data.selectedLibrary.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 3,
+                        softWrap: true,
                         style: AppTextStyles.h1(
                           context,
                         ).copyWith(fontWeight: FontWeight.w900, fontSize: 22),
@@ -753,7 +815,7 @@ class _LibrarySelector extends StatelessWidget {
                     onTap: () => onSelected(library.id),
                     borderRadius: BorderRadius.circular(14),
                     child: Ink(
-                      width: 132,
+                      width: 180,
                       padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
                       decoration: BoxDecoration(
                         color: selected
@@ -783,8 +845,8 @@ class _LibrarySelector extends StatelessWidget {
                               children: [
                                 Text(
                                   library.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                  softWrap: true,
                                   style: AppTextStyles.bodySmall(context)
                                       .copyWith(
                                         color: selected
@@ -818,7 +880,122 @@ class _LibrarySelector extends StatelessWidget {
   }
 }
 
+class CurrentTypeHeader extends StatelessWidget {
+  const CurrentTypeHeader({required this.title, super.key});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 18,
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '当前：$title',
+            maxLines: 2,
+            softWrap: true,
+            style: AppTextStyles.h3(
+              context,
+            ).copyWith(fontWeight: FontWeight.w900),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ========== Type Selector ==========
+class _KnowledgeTypeDetailPage extends StatelessWidget {
+  const _KnowledgeTypeDetailPage({
+    required this.libraryName,
+    required this.typeTitle,
+    required this.count,
+    required this.child,
+  });
+
+  final String libraryName;
+  final String typeTitle;
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: Text(typeTitle)),
+      body: SafeArea(
+        child: CustomScrollView(
+          physics: const BouncingScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: AppColors.borderLight),
+                        boxShadow: AppShadows.cardSoftList,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            libraryName,
+                            maxLines: 2,
+                            softWrap: true,
+                            style: AppTextStyles.bodySmall(context).copyWith(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            typeTitle,
+                            maxLines: 2,
+                            softWrap: true,
+                            style: AppTextStyles.h1(
+                              context,
+                            ).copyWith(fontSize: 24),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '共 $count 条，按导入/生成时间排序',
+                            style: AppTextStyles.bodySmall(context).copyWith(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    child,
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TypeSelector extends StatelessWidget {
   const _TypeSelector({
     required this.items,
@@ -873,7 +1050,7 @@ class _TypeCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Ink(
-          height: 118,
+          height: 124,
           padding: const EdgeInsets.fromLTRB(14, 14, 12, 12),
           decoration: BoxDecoration(
             color: item.color,
@@ -910,8 +1087,8 @@ class _TypeCard extends StatelessWidget {
                   const Spacer(),
                   Text(
                     item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                    softWrap: true,
                     style: AppTextStyles.h3(
                       context,
                     ).copyWith(fontWeight: FontWeight.w900, fontSize: 16),
@@ -1029,6 +1206,351 @@ class _ConceptTile extends StatelessWidget {
       onTap: onTap,
       onMove: null,
       onDelete: () {},
+    );
+  }
+}
+
+// ========== Knowledge Graph View ==========
+class _KnowledgeGraphPanel extends StatelessWidget {
+  const _KnowledgeGraphPanel({
+    required this.concepts,
+    required this.links,
+    required this.onOpenConcept,
+  });
+
+  final List<KnowledgeConceptWithDocument> concepts;
+  final List<KnowledgeConceptLinkRecord> links;
+  final ValueChanged<KnowledgeConceptWithDocument> onOpenConcept;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleConcepts = concepts.take(28).toList(growable: false);
+    final visibleConceptIds = visibleConcepts
+        .map((item) => item.concept.id)
+        .toSet();
+    final visibleLinks = links
+        .where(
+          (link) =>
+              visibleConceptIds.contains(link.fromConceptId) &&
+              visibleConceptIds.contains(link.toConceptId),
+        )
+        .take(80)
+        .toList(growable: false);
+    final rootConcept = visibleConcepts.first.concept;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: AppColors.borderLight),
+            boxShadow: AppShadows.cardSoftList,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.hub_rounded,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '知识图谱',
+                          style: AppTextStyles.h3(
+                            context,
+                          ).copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '主干：${rootConcept.name} · ${visibleConcepts.length} 个知识点 · ${visibleLinks.length} 条关系',
+                          maxLines: 2,
+                          softWrap: true,
+                          style: AppTextStyles.bodySmall(context).copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 360,
+                width: double.infinity,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(color: Color(0xFFF8FAFC)),
+                    child: InteractiveViewer(
+                      minScale: 0.75,
+                      maxScale: 2.2,
+                      boundaryMargin: const EdgeInsets.all(120),
+                      child: CustomPaint(
+                        painter: _KnowledgeGraphPainter(
+                          concepts: visibleConcepts,
+                          links: visibleLinks,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: const [
+                  _GraphLegend(label: '薄弱高', color: AppColors.error),
+                  _GraphLegend(label: '待巩固', color: AppColors.info),
+                  _GraphLegend(label: '已掌握', color: AppColors.success),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          '主干知识点',
+          style: AppTextStyles.h3(
+            context,
+          ).copyWith(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 10),
+        ...visibleConcepts
+            .take(12)
+            .map(
+              (item) =>
+                  _ConceptTile(item: item, onTap: () => onOpenConcept(item)),
+            ),
+      ],
+    );
+  }
+}
+
+class _KnowledgeGraphPainter extends CustomPainter {
+  const _KnowledgeGraphPainter({required this.concepts, required this.links});
+
+  final List<KnowledgeConceptWithDocument> concepts;
+  final List<KnowledgeConceptLinkRecord> links;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (concepts.isEmpty) return;
+    final nodes = _layoutNodes(size);
+    final nodeById = {for (final node in nodes) node.item.concept.id: node};
+    final edgePaint = Paint()
+      ..color = const Color(0xFF94A3B8).withValues(alpha: 0.72)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    for (final link in links) {
+      final from = nodeById[link.fromConceptId];
+      final to = nodeById[link.toConceptId];
+      if (from == null || to == null) continue;
+      canvas.drawLine(from.center, to.center, edgePaint);
+      final middle = Offset(
+        (from.center.dx + to.center.dx) / 2,
+        (from.center.dy + to.center.dy) / 2,
+      );
+      _drawLabel(canvas, middle, link.relationLabel);
+    }
+
+    for (final node in nodes) {
+      final concept = node.item.concept;
+      final color = _nodeColor(concept);
+      final shadowPaint = Paint()
+        ..color = color.withValues(alpha: 0.16)
+        ..style = PaintingStyle.fill;
+      final fillPaint = Paint()
+        ..color = color.withValues(alpha: 0.94)
+        ..style = PaintingStyle.fill;
+      final borderPaint = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 3
+        ..style = PaintingStyle.stroke;
+      canvas.drawCircle(node.center, node.radius + 6, shadowPaint);
+      canvas.drawCircle(node.center, node.radius, fillPaint);
+      canvas.drawCircle(node.center, node.radius, borderPaint);
+      _drawNodeText(canvas, node);
+    }
+  }
+
+  List<_GraphNode> _layoutNodes(Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final nodes = <_GraphNode>[];
+    nodes.add(
+      _GraphNode(
+        item: concepts.first,
+        center: center,
+        radius: _nodeRadius(concepts.first.concept, isRoot: true),
+      ),
+    );
+    if (concepts.length == 1) return nodes;
+
+    final firstRing = math.min(10, concepts.length - 1);
+    final secondRing = concepts.length - 1 - firstRing;
+    final safeRadius = math.min(size.width, size.height) / 2;
+    final firstRingRadius = safeRadius * 0.5;
+    final secondRingRadius = safeRadius * 0.78;
+
+    for (var i = 1; i < concepts.length; i++) {
+      final inSecondRing = i > firstRing;
+      final ringIndex = inSecondRing ? i - firstRing - 1 : i - 1;
+      final ringCount = inSecondRing ? secondRing : firstRing;
+      final angle =
+          (-math.pi / 2) + (2 * math.pi * ringIndex / math.max(1, ringCount));
+      final radius = inSecondRing ? secondRingRadius : firstRingRadius;
+      final point = Offset(
+        center.dx + math.cos(angle) * radius,
+        center.dy + math.sin(angle) * radius,
+      );
+      nodes.add(
+        _GraphNode(
+          item: concepts[i],
+          center: point,
+          radius: _nodeRadius(concepts[i].concept),
+        ),
+      );
+    }
+    return nodes;
+  }
+
+  double _nodeRadius(KnowledgeConceptRecord concept, {bool isRoot = false}) {
+    if (isRoot) return 38;
+    return 24 + math.min(10, concept.weaknessScore / 10);
+  }
+
+  Color _nodeColor(KnowledgeConceptRecord concept) {
+    if (concept.weaknessScore >= 70) return AppColors.error;
+    if (concept.masteryScore >= 70) return AppColors.success;
+    return AppColors.info;
+  }
+
+  void _drawNodeText(Canvas canvas, _GraphNode node) {
+    final name = node.item.concept.name;
+    final label = name.length > 8 ? '${name.substring(0, 8)}…' : name;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          height: 1.05,
+        ),
+      ),
+      maxLines: 2,
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: node.radius * 1.65);
+    textPainter.paint(
+      canvas,
+      node.center - Offset(textPainter.width / 2, textPainter.height / 2),
+    );
+  }
+
+  void _drawLabel(Canvas canvas, Offset center, String label) {
+    final text = label.trim().isEmpty ? '关联' : label.trim();
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text.length > 7 ? '${text.substring(0, 7)}…' : text,
+        style: const TextStyle(
+          color: Color(0xFF475569),
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 72);
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: center,
+        width: textPainter.width + 12,
+        height: textPainter.height + 6,
+      ),
+      const Radius.circular(8),
+    );
+    canvas.drawRRect(
+      rect,
+      Paint()..color = Colors.white.withValues(alpha: 0.86),
+    );
+    textPainter.paint(
+      canvas,
+      center - Offset(textPainter.width / 2, textPainter.height / 2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _KnowledgeGraphPainter oldDelegate) {
+    return oldDelegate.concepts != concepts || oldDelegate.links != links;
+  }
+}
+
+class _GraphNode {
+  const _GraphNode({
+    required this.item,
+    required this.center,
+    required this.radius,
+  });
+
+  final KnowledgeConceptWithDocument item;
+  final Offset center;
+  final double radius;
+}
+
+class _GraphLegend extends StatelessWidget {
+  const _GraphLegend({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: AppTextStyles.bodySmall(context).copyWith(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1269,6 +1791,7 @@ class _KnowledgeData {
     required this.documents,
     required this.contents,
     required this.weakConcepts,
+    required this.graphLinks,
   });
 
   final int userId;
@@ -1278,6 +1801,7 @@ class _KnowledgeData {
   final List<SourceDocumentRecord> documents;
   final List<GeneratedContentRecord> contents;
   final List<KnowledgeConceptWithDocument> weakConcepts;
+  final List<KnowledgeConceptLinkRecord> graphLinks;
 
   int get totalCount =>
       batches.length + documents.length + contents.length + weakConcepts.length;

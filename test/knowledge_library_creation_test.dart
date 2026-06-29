@@ -157,4 +157,13 @@ class _EmptyKnowledgeGraphRepository extends KnowledgeGraphRepository {
   }) async {
     return const <KnowledgeConceptWithDocument>[];
   }
+
+  @override
+  Future<List<KnowledgeConceptLinkRecord>> fetchLinksByLibrary({
+    required int userId,
+    int? libraryId,
+    int limit = 100,
+  }) async {
+    return const <KnowledgeConceptLinkRecord>[];
+  }
 }

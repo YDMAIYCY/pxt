@@ -3,13 +3,20 @@ import 'dart:convert';
 import 'app_database.dart';
 import 'models/ai_generation_task_record.dart';
 import 'models/ai_result_records.dart';
+import 'knowledge_graph_repository.dart';
 import '../review/review_schedule_policy.dart';
 
 class AiGenerationRepository {
-  AiGenerationRepository({AppDatabase? database})
-    : _database = database ?? AppDatabase.instance;
+  AiGenerationRepository({
+    AppDatabase? database,
+    KnowledgeGraphRepository? knowledgeGraphRepository,
+  }) : _database = database ?? AppDatabase.instance,
+       _knowledgeGraphRepository =
+           knowledgeGraphRepository ??
+           KnowledgeGraphRepository(database: database ?? AppDatabase.instance);
 
   final AppDatabase _database;
+  final KnowledgeGraphRepository _knowledgeGraphRepository;
 
   Future<AiGenerationTaskRecord> markTaskRunning({
     required int documentId,
@@ -727,6 +734,10 @@ class AiGenerationRepository {
         'created_at': now.toIso8601String(),
       });
     });
+    await _knowledgeGraphRepository.updateMasteryFromPracticeQuestion(
+      questionId: questionId,
+      isCorrect: false,
+    );
   }
 
   Future<void> markPracticeQuestionCorrect({
@@ -799,6 +810,10 @@ class AiGenerationRepository {
         whereArgs: [parentId],
       );
     });
+    await _knowledgeGraphRepository.updateMasteryFromPracticeQuestion(
+      questionId: questionId,
+      isCorrect: true,
+    );
   }
 
   Future<StudyOverviewStats> fetchStudyOverviewStats(int userId) async {

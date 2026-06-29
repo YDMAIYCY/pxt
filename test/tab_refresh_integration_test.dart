@@ -172,34 +172,26 @@ void main() {
     });
   });
 
-  testWidgets('Home AI quick entry can use OCR-completed batch pages', (
+  testWidgets('Home current quick entries render without legacy AI entry', (
     tester,
   ) async {
-    final sourceDocuments = _FakeSourceDocumentRepository(
-      recentWithBatchPages: [_ocrCompleteBatchPage],
-    );
-
     await tester.pumpWidget(
       _wrap(
         HomeTabPage(
           refreshVersion: 0,
           authRepository: _FakeAuthRepository(),
-          sourceDocumentRepository: sourceDocuments,
+          sourceDocumentRepository: _FakeSourceDocumentRepository(),
           aiGenerationRepository: _FakeAiGenerationRepository(),
           documentBatchRepository: _FakeDocumentBatchRepository(),
           knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-          aiGenerationPageBuilder: (documentId) =>
-              _MarkerPage('ai-$documentId'),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.textContaining('AI').first);
-    await tester.pumpAndSettle();
-
-    expect(sourceDocuments.includeBatchPageQueries, contains(true));
-    expect(find.text('ai-${_ocrCompleteBatchPage.id}'), findsOneWidget);
+    expect(find.text('QSClaw'), findsOneWidget);
+    expect(find.text('\u4e0b\u4e00\u6b65\u63a8\u8350'), findsOneWidget);
+    expect(find.textContaining('AI'), findsNothing);
   });
 
   testWidgets('Home QSClaw quick entry opens the agent page', (tester) async {
@@ -277,20 +269,6 @@ const _testUser = UserProfile(
   backgroundStyle: ProfilePresetIds.defaultBackgroundStyle,
 );
 
-final _ocrCompleteBatchPage = SourceDocumentRecord(
-  id: 42,
-  userId: _testUser.id,
-  libraryId: 1,
-  batchId: 7,
-  pageNumber: 1,
-  sourceType: SourceDocumentSourceType.pdfPage,
-  imagePath: 'missing.png',
-  title: 'batch page',
-  createdAt: DateTime(2026, 5, 29),
-  ocrStatus: SourceDocumentOcrStatus.success,
-  aiDone: false,
-);
-
 class _MarkerPage extends StatelessWidget {
   const _MarkerPage(this.label);
 
@@ -311,10 +289,6 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeSourceDocumentRepository extends SourceDocumentRepository {
-  _FakeSourceDocumentRepository({this.recentWithBatchPages = const []});
-
-  final List<SourceDocumentRecord> recentWithBatchPages;
-  final includeBatchPageQueries = <bool>[];
   int recentCalls = 0;
   int allCalls = 0;
 
@@ -326,8 +300,7 @@ class _FakeSourceDocumentRepository extends SourceDocumentRepository {
     int limit = 5,
   }) async {
     recentCalls++;
-    includeBatchPageQueries.add(includeBatchPages);
-    return includeBatchPages ? recentWithBatchPages : const [];
+    return const [];
   }
 
   @override
@@ -380,6 +353,15 @@ class _FakeKnowledgeGraphRepository extends KnowledgeGraphRepository {
     int limit = 20,
   }) async {
     fetchCalls++;
+    return const [];
+  }
+
+  @override
+  Future<List<KnowledgeConceptLinkRecord>> fetchLinksByLibrary({
+    required int userId,
+    int? libraryId,
+    int limit = 100,
+  }) async {
     return const [];
   }
 }
