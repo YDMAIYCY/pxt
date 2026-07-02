@@ -43,9 +43,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('AI \u9762\u8bd5\u5b98'), findsOneWidget);
-    expect(find.text('\u6587\u5b57\u9762\u8bd5'), findsOneWidget);
-    expect(find.text('\u89c6\u9891\u9762\u8bd5'), findsOneWidget);
-    expect(find.text('\u63d0\u4ea4\u7b54\u6848'), findsOneWidget);
+    expect(find.text('\u6211\u51c6\u5907\u597d\u4e86'), findsOneWidget);
+    expect(find.text('\u56de\u7b54\u8f6c\u5199'), findsOneWidget);
   });
 }
 

@@ -40,6 +40,7 @@ void main() {
       expect(find.text('原始识别文本 rawText'), findsOneWidget);
       expect(find.text('清洗后文本 cleanText'), findsOneWidget);
       expect(find.text('确认文本 finalText'), findsOneWidget);
+      expect(find.text('确认 finalText 并用于后续 AI 生成'), findsNothing);
 
       final visibleTexts = tester.widgetList<Text>(find.byType(Text));
       for (final textWidget in visibleTexts) {

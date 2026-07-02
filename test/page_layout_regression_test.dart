@@ -66,6 +66,10 @@ void main() {
     expect(find.text('服务商名称'), findsOneWidget);
     expect(find.text('API Key'), findsOneWidget);
     expect(find.text('Base URL'), findsOneWidget);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+
     expect(find.text('保存 AI 配置'), findsOneWidget);
   });
 

@@ -100,11 +100,6 @@ class _Game2048PageState extends State<Game2048Page> {
   @override
   Widget build(BuildContext context) {
     final gap = 6.0;
-    final mediaQuery = MediaQuery.of(context);
-    final availableWidth = max(0.0, mediaQuery.size.width -
-        mediaQuery.padding.horizontal - 32);
-    final size = max(0.0, (availableWidth - gap * (_n + 2)) / _n);
-
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8EF),
       appBar: AppBar(
@@ -135,7 +130,7 @@ class _Game2048PageState extends State<Game2048Page> {
               padding: const EdgeInsets.all(16),
               child: Column(children: [
                 Row(children: [
-                  const Expanded(child: Text('滑动合并数字', overflow: TextOverflow.ellipsis,
+                  const Expanded(child: Text('滑动合并数字', maxLines: 2, softWrap: true,
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF776E65)))),
                   const SizedBox(width: 12),
                   FilledButton.tonal(
@@ -145,29 +140,35 @@ class _Game2048PageState extends State<Game2048Page> {
                       child: const Text('新游戏')),
                 ]),
                 const SizedBox(height: 16),
-                Center(
-                  child: Container(
-                    padding: EdgeInsets.all(gap),
-                    decoration: BoxDecoration(color: const Color(0xFFBBADA0), borderRadius: BorderRadius.circular(12)),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      for (var r = 0; r < _n; r++)
-                        Row(mainAxisSize: MainAxisSize.min, children: [
-                          for (var c = 0; c < _n; c++)
-                            Container(
-                              width: size, height: size,
-                              margin: EdgeInsets.all(gap / 2),
-                              decoration: BoxDecoration(
-                                color: _cbg(_grid[r][c]),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              alignment: Alignment.center,
-                              child: _grid[r][c] > 0
-                                  ? FittedBox(child: Text('${_grid[r][c]}', style: TextStyle(fontSize: _fs(_grid[r][c]), fontWeight: FontWeight.w800, color: _cfg(_grid[r][c]))))
-                                  : null,
-                            ),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final boardWidth = min(420.0, constraints.maxWidth);
+                    final size = max(0.0, (boardWidth - gap * (_n + 2)) / _n);
+                    return Center(
+                      child: Container(
+                        padding: EdgeInsets.all(gap),
+                        decoration: BoxDecoration(color: const Color(0xFFBBADA0), borderRadius: BorderRadius.circular(12)),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          for (var r = 0; r < _n; r++)
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                              for (var c = 0; c < _n; c++)
+                                Container(
+                                  width: size, height: size,
+                                  margin: EdgeInsets.all(gap / 2),
+                                  decoration: BoxDecoration(
+                                    color: _cbg(_grid[r][c]),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: _grid[r][c] > 0
+                                      ? FittedBox(child: Text('${_grid[r][c]}', style: TextStyle(fontSize: _fs(_grid[r][c]), fontWeight: FontWeight.w800, color: _cfg(_grid[r][c]))))
+                                      : null,
+                                ),
+                            ]),
                         ]),
-                    ]),
-                  ),
+                      ),
+                    );
+                  },
                 ),
                 if (_over) ...[
                   const SizedBox(height: 16),

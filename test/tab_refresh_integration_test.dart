@@ -192,6 +192,7 @@ void main() {
     expect(find.text('QSClaw'), findsOneWidget);
     expect(find.text('\u4e0b\u4e00\u6b65\u63a8\u8350'), findsOneWidget);
     expect(find.textContaining('AI'), findsNothing);
+    expect(find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'), findsNothing);
   });
 
   testWidgets('Home QSClaw quick entry opens the agent page', (tester) async {
@@ -222,7 +223,7 @@ void main() {
     expect(find.text('qsclaw-chat'), findsOneWidget);
   });
 
-  testWidgets('Profile entries switch bottom tabs when callback is available', (
+  testWidgets('Profile keeps favorites entry without wrong-question shortcut', (
     tester,
   ) async {
     final openedTabs = <int>[];
@@ -241,17 +242,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.report_problem_rounded));
-    await tester.pumpAndSettle();
+    expect(find.text('我的错题收藏'), findsNothing);
     await tester.scrollUntilVisible(
-      find.text('我的知识库收藏'),
+      find.text('收藏'),
       120,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('我的知识库收藏'));
+    await tester.tap(find.text('收藏'));
     await tester.pumpAndSettle();
 
-    expect(openedTabs, [3, 1]);
+    expect(openedTabs, isEmpty);
+    expect(find.text('我的收藏'), findsOneWidget);
   });
 }
 

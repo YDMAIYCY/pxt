@@ -377,8 +377,8 @@ class _AiChatPageState extends State<AiChatPage> {
                             session.lastMessagePreview.isEmpty
                                 ? '空白对话'
                                 : session.lastMessagePreview,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            maxLines: 3,
+                            softWrap: true,
                           ),
                           trailing: session.id == _currentSession?.id
                               ? const Icon(

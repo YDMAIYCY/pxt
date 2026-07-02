@@ -254,38 +254,6 @@ class _OcrResultPageState extends State<OcrResultPage> {
     }
   }
 
-  Future<void> _confirmFinalText() async {
-    final document = _document;
-    if (document == null) {
-      _showMessage('当前资料未加载完成，请稍后再试');
-      return;
-    }
-
-    final finalText = _resolveFinalTextCandidate();
-    if (finalText.isEmpty) {
-      _showMessage('finalText 不能为空，请先识别或手动输入文本');
-      return;
-    }
-
-    setState(() => _isSaving = true);
-    try {
-      await _ocrTextRepository.saveFinalText(
-        documentId: document.id,
-        finalText: finalText,
-      );
-      if (!mounted) return;
-      _finalTextController.text = finalText;
-      _showMessage('finalText 已确认，后续 AI 生成将优先使用');
-      await _reloadPageData();
-    } catch (error) {
-      if (mounted) {
-        _showMessage('确认 finalText 失败：$error');
-      }
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
   Future<void> _repairWithAi() async {
     if (_isRepairing) {
       return;
@@ -345,14 +313,6 @@ class _OcrResultPageState extends State<OcrResultPage> {
     } finally {
       if (mounted) setState(() => _isRepairing = false);
     }
-  }
-
-  String _resolveFinalTextCandidate() {
-    final finalText = _finalTextController.text.trim();
-    if (finalText.isNotEmpty) return finalText;
-    final cleanText = _cleanTextController.text.trim();
-    if (cleanText.isNotEmpty) return cleanText;
-    return _rawTextController.text.trim();
   }
 
   void _showMessage(String message) {
@@ -462,7 +422,6 @@ class _OcrResultPageState extends State<OcrResultPage> {
                       onCropAndRunOcr: _cropAndRunOcr,
                       onRepairWithAi: _repairWithAi,
                       onSaveEditedText: _saveEditedText,
-                      onConfirmFinalText: _confirmFinalText,
                     ),
                   ],
                 ),
@@ -524,7 +483,6 @@ class _OcrActionButtons extends StatelessWidget {
     required this.onCropAndRunOcr,
     required this.onRepairWithAi,
     required this.onSaveEditedText,
-    required this.onConfirmFinalText,
   });
 
   final bool isBusy;
@@ -536,7 +494,6 @@ class _OcrActionButtons extends StatelessWidget {
   final VoidCallback onCropAndRunOcr;
   final VoidCallback onRepairWithAi;
   final VoidCallback onSaveEditedText;
-  final VoidCallback onConfirmFinalText;
 
   @override
   Widget build(BuildContext context) {
@@ -594,15 +551,6 @@ class _OcrActionButtons extends StatelessWidget {
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.tonalIcon(
-            onPressed: isBusy ? null : onConfirmFinalText,
-            icon: const Icon(Icons.verified_rounded),
-            label: const Text('确认 finalText 并用于后续 AI 生成'),
-          ),
         ),
       ],
     );

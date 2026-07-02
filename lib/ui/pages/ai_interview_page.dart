@@ -871,7 +871,8 @@ class _InterviewRoomPanel extends StatelessWidget {
                 Expanded(
                   child: Text(
                     speechStatusText.isEmpty ? _statusText : speechStatusText,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: 3,
+                    softWrap: true,
                     style: AppTextStyles.caption(context).copyWith(
                       color: AppColors.textSecondary,
                       fontWeight: FontWeight.w700,

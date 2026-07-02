@@ -6,6 +6,7 @@ class SourceDocumentSourceType {
 
   static const String cameraCapture = 'camera_capture';
   static const String galleryImport = 'gallery_import';
+  static const String pdfDocument = 'pdf_document';
   static const String pdfPage = 'pdf_page';
 }
 
@@ -94,6 +95,7 @@ class SourceDocumentRecord {
         return '\u62cd\u7167';
       case SourceDocumentSourceType.galleryImport:
         return '\u76f8\u518c';
+      case SourceDocumentSourceType.pdfDocument:
       case SourceDocumentSourceType.pdfPage:
         return 'PDF';
       default:

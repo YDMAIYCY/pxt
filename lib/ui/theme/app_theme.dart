@@ -4,32 +4,36 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  static const Color primary = Color(0xFF14B8A6);
-  static const Color primaryDark = Color(0xFF0EA5A4);
-  static const Color primarySoft = Color(0xFFE8F8F5);
-  static const Color primaryLight = Color(0xFFCCFBF1);
+  static const Color primary = Color(0xFF2563EB);
+  static const Color primaryDark = Color(0xFF1E40AF);
+  static const Color primarySoft = Color(0xFFEFF6FF);
+  static const Color primaryLight = Color(0xFFBFDBFE);
 
-  static const Color secondaryBlue = Color(0xFF4FA3FF);
-  static const Color secondaryPurple = Color(0xFF9B7BFF);
-  static const Color accentOrange = Color(0xFFFF8A3D);
+  static const Color secondaryBlue = Color(0xFF0EA5E9);
+  static const Color secondaryPurple = Color(0xFF7C3AED);
+  static const Color accentOrange = Color(0xFFF97316);
 
-  static const Color background = Color(0xFFF7FCFB);
+  static const Color background = Color(0xFFF5F7FB);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceAlt = Color(0xFFF0FDFA);
+  static const Color surfaceAlt = Color(0xFFF1F5F9);
+  static const Color surfaceMuted = Color(0xFFE2E8F0);
+  static const Color ink = Color(0xFF0F172A);
+  static const Color inkSoft = Color(0xFF1E293B);
+  static const Color chrome = Color(0xFF111827);
 
-  static const Color border = Color(0xFFE5E7EB);
-  static const Color borderLight = Color(0xFFF0F1F3);
-  static const Color divider = Color(0xFFE7E1DA);
+  static const Color border = Color(0xFFDDE4EE);
+  static const Color borderLight = Color(0xFFEAF0F7);
+  static const Color divider = Color(0xFFD8E1EC);
 
-  static const Color textPrimary = Color(0xFF111827);
-  static const Color textSecondary = Color(0xFF6B7280);
-  static const Color textTertiary = Color(0xFF9CA3AF);
+  static const Color textPrimary = Color(0xFF0F172A);
+  static const Color textSecondary = Color(0xFF64748B);
+  static const Color textTertiary = Color(0xFF94A3B8);
   static const Color textOnPrimary = Color(0xFFFFFFFF);
 
-  static const Color success = Color(0xFF2FBF71);
-  static const Color warning = Color(0xFFF4A261);
-  static const Color error = Color(0xFFEF4444);
-  static const Color info = Color(0xFF4D96FF);
+  static const Color success = Color(0xFF059669);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color error = Color(0xFFE11D48);
+  static const Color info = Color(0xFF0284C7);
 }
 
 // ========== 文字样式 ==========
@@ -38,65 +42,65 @@ class AppTextStyles {
 
   static TextStyle display(BuildContext context) =>
       Theme.of(context).textTheme.headlineLarge?.copyWith(
-            fontSize: 30,
-            fontWeight: FontWeight.w800,
-            color: AppColors.textPrimary,
-            height: 1.2,
-          ) ??
+        fontSize: 30,
+        fontWeight: FontWeight.w800,
+        color: AppColors.textPrimary,
+        height: 1.2,
+      ) ??
       const TextStyle();
 
   static TextStyle h1(BuildContext context) =>
       Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-            height: 1.25,
-          ) ??
+        fontSize: 24,
+        fontWeight: FontWeight.w700,
+        color: AppColors.textPrimary,
+        height: 1.25,
+      ) ??
       const TextStyle();
 
   static TextStyle h2(BuildContext context) =>
       Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-            height: 1.3,
-          ) ??
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        color: AppColors.textPrimary,
+        height: 1.3,
+      ) ??
       const TextStyle();
 
   static TextStyle h3(BuildContext context) =>
       Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-            height: 1.35,
-          ) ??
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
+        color: AppColors.textPrimary,
+        height: 1.35,
+      ) ??
       const TextStyle();
 
   static TextStyle body(BuildContext context) =>
       Theme.of(context).textTheme.bodyLarge?.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w400,
-            color: AppColors.textPrimary,
-            height: 1.5,
-          ) ??
+        fontSize: 16,
+        fontWeight: FontWeight.w400,
+        color: AppColors.textPrimary,
+        height: 1.5,
+      ) ??
       const TextStyle();
 
   static TextStyle bodySmall(BuildContext context) =>
       Theme.of(context).textTheme.bodyMedium?.copyWith(
-            fontSize: 14,
-            fontWeight: FontWeight.w400,
-            color: AppColors.textSecondary,
-            height: 1.45,
-          ) ??
+        fontSize: 14,
+        fontWeight: FontWeight.w400,
+        color: AppColors.textSecondary,
+        height: 1.45,
+      ) ??
       const TextStyle();
 
   static TextStyle caption(BuildContext context) =>
       Theme.of(context).textTheme.bodySmall?.copyWith(
-            fontSize: 12,
-            fontWeight: FontWeight.w400,
-            color: AppColors.textTertiary,
-            height: 1.4,
-          ) ??
+        fontSize: 12,
+        fontWeight: FontWeight.w400,
+        color: AppColors.textTertiary,
+        height: 1.4,
+      ) ??
       const TextStyle();
 }
 
@@ -122,13 +126,13 @@ class AppSpacing {
 class AppRadii {
   AppRadii._();
 
-  static const double card = 24;
-  static const double cardSmall = 20;
-  static const double button = 18;
-  static const double input = 16;
-  static const double sheet = 32;
+  static const double card = 22;
+  static const double cardSmall = 18;
+  static const double button = 16;
+  static const double input = 14;
+  static const double sheet = 28;
   static const double chip = 999;
-  static const double iconBox = 14;
+  static const double iconBox = 13;
 }
 
 // ========== 阴影系统 ==========
@@ -136,32 +140,33 @@ class AppShadows {
   AppShadows._();
 
   static BoxShadow get cardSoft => BoxShadow(
-        color: const Color(0xFF111827).withValues(alpha: 0.06),
-        blurRadius: 24,
-        offset: const Offset(0, 8),
-      );
+    color: const Color(0xFF0F172A).withValues(alpha: 0.07),
+    blurRadius: 30,
+    offset: const Offset(0, 14),
+  );
 
   static BoxShadow get cardMedium => BoxShadow(
-        color: const Color(0xFF111827).withValues(alpha: 0.08),
-        blurRadius: 32,
-        offset: const Offset(0, 12),
-      );
+    color: const Color(0xFF0F172A).withValues(alpha: 0.11),
+    blurRadius: 42,
+    offset: const Offset(0, 22),
+  );
 
   static BoxShadow get float => BoxShadow(
-        color: AppColors.primary.withValues(alpha: 0.18),
-        blurRadius: 48,
-        offset: const Offset(0, 18),
-      );
+    color: AppColors.primary.withValues(alpha: 0.20),
+    blurRadius: 54,
+    offset: const Offset(0, 24),
+  );
 
   static BoxShadow get nav => BoxShadow(
-        color: const Color(0xFF111827).withValues(alpha: 0.08),
-        blurRadius: 28,
-        offset: const Offset(0, 10),
-      );
+    color: const Color(0xFF0F172A).withValues(alpha: 0.12),
+    blurRadius: 32,
+    offset: const Offset(0, 18),
+  );
 
   static List<BoxShadow> get cardSoftList => [cardSoft];
   static List<BoxShadow> get cardMediumList => [cardMedium];
   static List<BoxShadow> get floatList => [float];
+  static List<BoxShadow> get navList => [nav];
 }
 
 // ========== 统一主题 ==========
@@ -185,8 +190,7 @@ class AppTheme {
       useMaterial3: true,
       scaffoldBackgroundColor: AppColors.background,
       fontFamily: null,
-      textTheme: Typography.material2021(platform: TargetPlatform.android)
-          .black
+      textTheme: Typography.material2021(platform: TargetPlatform.android).black
           .apply(
             bodyColor: AppColors.textPrimary,
             displayColor: AppColors.textPrimary,
@@ -244,10 +248,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.button),
           ),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-          ),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -258,10 +259,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.button),
           ),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-          ),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
       chipTheme: ChipThemeData(
@@ -285,7 +283,9 @@ class AppTheme {
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.sheet)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadii.sheet),
+          ),
         ),
       ),
       dialogTheme: DialogThemeData(

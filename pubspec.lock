@@ -568,14 +568,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
-  pdf_render_maintained:
-    dependency: "direct main"
-    description:
-      name: pdf_render_maintained
-      sha256: "3a53ac89c7ff395ecd6d35dbea0ba72b2951f548316c7a7ac78abd193e912648"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.6.1"
   petitparser:
     dependency: transitive
     description:

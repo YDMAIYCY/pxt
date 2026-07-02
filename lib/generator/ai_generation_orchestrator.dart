@@ -61,6 +61,24 @@ class AiGenerationOrchestrator {
     );
   }
 
+  Future<AiSingleTaskResult> regenerateWithFeedback({
+    required int documentId,
+    required String ocrText,
+    required String taskType,
+    required String currentResultText,
+    required String feedback,
+    LlmProviderConfig? llmConfig,
+  }) {
+    return _runTask(
+      documentId: documentId,
+      ocrText: ocrText,
+      taskType: taskType,
+      llmConfig: llmConfig,
+      currentResultText: currentResultText,
+      feedback: feedback,
+    );
+  }
+
   Future<AiBatchResult> generateAll({
     required int documentId,
     required String ocrText,
@@ -86,6 +104,8 @@ class AiGenerationOrchestrator {
     required String ocrText,
     required String taskType,
     LlmProviderConfig? llmConfig,
+    String? currentResultText,
+    String? feedback,
   }) async {
     final trimmedText = ocrText.trim();
     if (trimmedText.isEmpty) {
@@ -113,7 +133,12 @@ class AiGenerationOrchestrator {
           : MiniMaxClient.fromConfig(llmConfig);
       final response = await client.generateStructuredJson(
         systemPrompt: _systemPrompt,
-        userPrompt: _buildUserPrompt(taskType: taskType, ocrText: trimmedText),
+        userPrompt: _buildUserPrompt(
+          taskType: taskType,
+          ocrText: trimmedText,
+          currentResultText: currentResultText,
+          feedback: feedback,
+        ),
         jsonSchema: _jsonSchemaOf(taskType),
       );
 
@@ -404,7 +429,7 @@ class AiGenerationOrchestrator {
         'question',
       ]);
       if (singleQuestion.isNotEmpty) {
-        return [
+        final parsed = [
           {
             'question_text': singleQuestion,
             'answer_text': _pickFirstString(data, const [
@@ -428,6 +453,8 @@ class AiGenerationOrchestrator {
             ),
           },
         ];
+        _validatePracticeQuestions(parsed);
+        return parsed;
       }
 
       throw const FormatException('questions 字段缺失或格式错误');
@@ -465,7 +492,37 @@ class AiGenerationOrchestrator {
       throw const FormatException('复习题为空');
     }
 
+    _validatePracticeQuestions(parsed);
     return parsed;
+  }
+
+  void _validatePracticeQuestions(List<Map<String, String>> questions) {
+    for (final question in questions) {
+      final kind = question['question_kind'] ?? '';
+      if (kind != PracticeQuestionKind.multipleChoice) {
+        continue;
+      }
+
+      final options = _decodeStringList(question['options_json']);
+      if (options.length < 2) {
+        throw const FormatException('选择题必须包含 options 选项');
+      }
+    }
+  }
+
+  List<String> _decodeStringList(String? jsonText) {
+    final raw = (jsonText ?? '').trim();
+    if (raw.isEmpty) return const <String>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const <String>[];
+      return decoded
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const <String>[];
+    }
   }
 
   String _friendlyError(Object error) {
@@ -485,8 +542,17 @@ class AiGenerationOrchestrator {
     return 'AI 生成失败：$message';
   }
 
-  String _buildUserPrompt({required String taskType, required String ocrText}) {
+  String _buildUserPrompt({
+    required String taskType,
+    required String ocrText,
+    String? currentResultText,
+    String? feedback,
+  }) {
     final taskSchema = _schemaOf(taskType);
+    final refinementBlock = _buildRefinementBlock(
+      currentResultText: currentResultText,
+      feedback: feedback,
+    );
 
     return '''
 请基于以下 OCR 文本进行处理。
@@ -494,19 +560,40 @@ class AiGenerationOrchestrator {
 输出要求：
 1. 必须只返回 JSON 对象，不要输出额外解释。
 2. JSON 必须严格符合下面 schema。
-3. 内容使用中文，准确、简洁、便于学习复习。
+3. 内容使用中文，准确、清晰、便于学习复习。
+4. 如果 question_kind 是 multiple_choice，必须提供 4 个 options，且每个选项必须带 A./B./C./D. 前缀，answer_text 必须能对应其中一个选项。
 
 Schema:
 $taskSchema
 
 OCR 文本:
 $ocrText
+$refinementBlock
+''';
+  }
+
+  String _buildRefinementBlock({String? currentResultText, String? feedback}) {
+    final currentResult = (currentResultText ?? '').trim();
+    final userFeedback = (feedback ?? '').trim();
+    if (currentResult.isEmpty && userFeedback.isEmpty) {
+      return '';
+    }
+
+    return '''
+
+当前已有 AI 结果:
+$currentResult
+
+用户修改意见:
+$userFeedback
+
+请基于 OCR 原文、当前结果和用户修改意见，重新生成同一种类型的结果。保留正确内容，重点修正用户不满意的地方。
 ''';
   }
 
   String _schemaOf(String taskType) {
     if (taskType == AiTaskType.practiceQuestions) {
-      return '{"questions":[{"question_kind":"multiple_choice|fill_blank|true_false|short_answer|calculation|application|error_analysis|oral","question_text":"question","options":["A","B","C","D"],"answer_text":"answer","analysis_text":"analysis","difficulty":"easy|medium|hard","expected_keywords":["keyword"],"rubric":{"point":40}}]}';
+      return '{"questions":[{"question_kind":"multiple_choice|fill_blank|true_false|short_answer|calculation|application|error_analysis|oral","question_text":"question","options":["A. 选项内容","B. 选项内容","C. 选项内容","D. 选项内容"],"answer_text":"answer","analysis_text":"analysis","difficulty":"easy|medium|hard","expected_keywords":["keyword"],"rubric":{"point":40}}]}';
     }
 
     switch (taskType) {
@@ -553,6 +640,7 @@ $ocrText
                 'required': [
                   'question_kind',
                   'question_text',
+                  'options',
                   'answer_text',
                   'analysis_text',
                   'difficulty',

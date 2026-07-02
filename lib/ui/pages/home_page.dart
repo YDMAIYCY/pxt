@@ -4,6 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../common/app_assets.dart';
 import '../../database/auth_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
 import 'tabs/home_tab_page.dart';
 import 'tabs/knowledge_tab_page.dart';
@@ -17,7 +18,7 @@ const List<_BottomDockItem> _bottomDockItems = [
     label: '\u77e5\u8bc6\u5e93',
     iconAsset: AppAssets.navKnowledge,
   ),
-  _BottomDockItem(label: '\u4e13\u6ce8', icon: Icons.timer_rounded),
+  _BottomDockItem(label: '\u4e13\u6ce8', icon: Icons.psychology_alt_rounded),
   _BottomDockItem(label: '\u4efb\u52a1', iconAsset: AppAssets.navTask),
   _BottomDockItem(label: '\u6211\u7684', iconAsset: AppAssets.navProfile),
 ];
@@ -127,11 +128,13 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       extendBody: true,
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        bottom: false,
-        child: _isCheckingSession
-            ? const Center(child: CircularProgressIndicator())
-            : IndexedStack(index: _currentIndex, children: _tabs),
+      body: PremiumPageBackground(
+        child: SafeArea(
+          bottom: false,
+          child: _isCheckingSession
+              ? const Center(child: CircularProgressIndicator())
+              : IndexedStack(index: _currentIndex, children: _tabs),
+        ),
       ),
       bottomNavigationBar: _isCheckingSession
           ? null
@@ -161,13 +164,13 @@ class _FloatingBottomDock extends StatelessWidget {
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
-        height: 70,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 7),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(AppRadii.card),
-          border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
-          boxShadow: AppShadows.cardSoftList,
+          color: AppColors.surface.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: AppColors.borderLight),
+          boxShadow: AppShadows.navList,
         ),
         child: Row(
           children: List.generate(items.length, (index) {
@@ -210,7 +213,12 @@ class _DockButton extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.primarySoft : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(19),
+            border: Border.all(
+              color: isSelected
+                  ? AppColors.primaryLight.withValues(alpha: 0.72)
+                  : Colors.transparent,
+            ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -242,7 +250,7 @@ class _DockButton extends StatelessWidget {
                   fontSize: 11,
                   fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                   color: isSelected
-                      ? AppColors.primary
+                      ? AppColors.primaryDark
                       : AppColors.textTertiary,
                 ),
               ),

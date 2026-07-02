@@ -17,9 +17,9 @@ import '../../../database/models/knowledge_library_record.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/models/user_profile.dart';
 import '../../../database/source_document_repository.dart';
-import '../../../debug/debug_demo_data_seeder.dart';
 import '../../../pipeline/document_ingest_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/premium_app_chrome.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
@@ -40,7 +40,6 @@ class HomeTabPage extends StatefulWidget {
     this.aiGenerationPageBuilder,
     this.aiChatPageBuilder,
     this.qsClawPageBuilder,
-    this.debugDemoDataSeeder,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
@@ -61,7 +60,6 @@ class HomeTabPage extends StatefulWidget {
   final Widget Function(int documentId)? aiGenerationPageBuilder;
   final Widget Function()? aiChatPageBuilder;
   final Widget Function()? qsClawPageBuilder;
-  final DebugDemoDataSeeder? debugDemoDataSeeder;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
@@ -81,13 +79,10 @@ class _HomeTabPageState extends State<HomeTabPage> {
   late final KnowledgeGraphRepository _knowledgeGraphRepository;
   late final KnowledgeLibraryRepository _knowledgeLibraryRepository;
   late final DocumentIngestService _documentIngestService;
-  late final DebugDemoDataSeeder _debugDemoDataSeeder;
   late Future<_HomeData> _future;
   late int _handledRefreshVersion;
   bool _reloadScheduled = false;
   bool _isImporting = false;
-  bool _isSeedingDemoData = false;
-  String? _demoSeedStatusMessage;
 
   @override
   void initState() {
@@ -105,7 +100,6 @@ class _HomeTabPageState extends State<HomeTabPage> {
         widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository();
     _documentIngestService =
         widget.documentIngestService ?? DocumentIngestService();
-    _debugDemoDataSeeder = widget.debugDemoDataSeeder ?? DebugDemoDataSeeder();
     _handledRefreshVersion = widget.refreshVersion;
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
@@ -463,38 +457,6 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _refresh();
   }
 
-  Future<void> _seedDebugDemoData() async {
-    if (_isSeedingDemoData) return;
-    setState(() {
-      _isSeedingDemoData = true;
-      _demoSeedStatusMessage = null;
-    });
-    try {
-      final user = await _authRepository.getCurrentUserProfile();
-      if (user == null) {
-        _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
-        return;
-      }
-      await _debugDemoDataSeeder.seedForUser(user.id);
-      if (!mounted) return;
-      setState(() {
-        _demoSeedStatusMessage = '演示数据已植入当前调试账号';
-      });
-      _showMessage('演示数据已植入');
-      await _afterDataChanged();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _demoSeedStatusMessage = '演示数据植入失败：$error';
-      });
-      _showMessage('演示数据植入失败：$error');
-    } finally {
-      if (mounted) {
-        setState(() => _isSeedingDemoData = false);
-      }
-    }
-  }
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -536,7 +498,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
             cacheExtent: 5000,
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(14, 18, 14, 100),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 104),
                 sliver: SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -558,13 +520,10 @@ class _HomeTabPageState extends State<HomeTabPage> {
                       const SizedBox(height: 12),
                       _QuickActions(
                         isImporting: _isImporting,
-                        isSeedingDemoData: _isSeedingDemoData,
                         onCamera: () =>
                             _handleImageImport(ImageInputSource.camera),
                         onImport: _openImportSourceSheet,
                         onGames: _openGames,
-                        onSeedDemoData: kDebugMode ? _seedDebugDemoData : null,
-                        demoSeedStatusMessage: _demoSeedStatusMessage,
                       ),
                       const SizedBox(height: 14),
                       _RecentLearningGrid(
@@ -609,21 +568,9 @@ class _WelcomeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pendingWork = stats.pendingPracticeCount;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE5F3F1)),
-        boxShadow: AppShadows.cardSoftList,
-        image: const DecorationImage(
-          image: AssetImage(AppAssets.homeBackdropImage),
-          fit: BoxFit.cover,
-          opacity: 0.14,
-          alignment: Alignment.centerRight,
-        ),
-      ),
+    return PremiumHeroPanel(
+      asset: AppAssets.homeBackdropImage,
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -636,16 +583,11 @@ class _WelcomeCard extends StatelessWidget {
                   children: [
                     Text(
                       '你好， ${user.primaryName}',
-                      style: AppTextStyles.h1(
-                        context,
-                      ).copyWith(fontSize: 23, fontWeight: FontWeight.w900),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '专注学习的每一天，收获更好的自己。',
-                      style: AppTextStyles.bodySmall(context).copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
+                      style: AppTextStyles.h1(context).copyWith(
+                        color: AppColors.textPrimary,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.4,
                       ),
                     ),
                   ],
@@ -659,7 +601,9 @@ class _WelcomeCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: AppColors.primaryLight),
+                  border: Border.all(
+                    color: AppColors.primaryLight.withValues(alpha: 0.62),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -817,8 +761,8 @@ class _AgentCommandStrip extends StatelessWidget {
                             const SizedBox(height: 7),
                             Text(
                               '你的专属拍学通智能助手。',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              maxLines: 4,
+                              softWrap: true,
                               style: AppTextStyles.bodySmall(context).copyWith(
                                 fontWeight: FontWeight.w700,
                                 color: AppColors.textSecondary,
@@ -888,10 +832,11 @@ class _PulseMetric extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+                softWrap: true,
+                textAlign: TextAlign.center,
                 style: AppTextStyles.caption(context).copyWith(
-                  color: AppColors.textPrimary,
+                  color: AppColors.textSecondary,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -965,8 +910,8 @@ class _NextBestActionSection extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         '${primary.concept.name} / ${primary.reason}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 4,
+                        softWrap: true,
                         style: AppTextStyles.bodySmall(context).copyWith(
                           color: AppColors.textSecondary,
                           fontWeight: FontWeight.w700,
@@ -1025,21 +970,15 @@ class _NextActionTile extends StatelessWidget {
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.isImporting,
-    required this.isSeedingDemoData,
     required this.onCamera,
     required this.onImport,
     required this.onGames,
-    this.onSeedDemoData,
-    this.demoSeedStatusMessage,
   });
 
   final bool isImporting;
-  final bool isSeedingDemoData;
   final VoidCallback onCamera;
   final VoidCallback onImport;
   final VoidCallback onGames;
-  final VoidCallback? onSeedDemoData;
-  final String? demoSeedStatusMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -1076,26 +1015,6 @@ class _QuickActions extends StatelessWidget {
                   onTap: onGames,
                 ),
               ),
-              if (onSeedDemoData != null)
-                SizedBox(
-                  width: width,
-                  child: _ActionTile(
-                    icon: Icons.data_object_rounded,
-                    title: isSeedingDemoData ? '正在植入' : '植入演示数据',
-                    onTap: isSeedingDemoData ? null : onSeedDemoData,
-                  ),
-                ),
-              if (demoSeedStatusMessage?.isNotEmpty == true)
-                SizedBox(
-                  width: constraints.maxWidth,
-                  child: Text(
-                    demoSeedStatusMessage!,
-                    style: AppTextStyles.caption(context).copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
             ],
           );
         },
@@ -1328,20 +1247,15 @@ class _Section extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
+        color: AppColors.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: AppColors.borderLight),
         boxShadow: AppShadows.cardSoftList,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: AppTextStyles.h3(
-              context,
-            ).copyWith(fontWeight: FontWeight.w900, fontSize: 18),
-          ),
+          PremiumSectionHeader(title: title),
           const SizedBox(height: 14),
           child,
         ],
@@ -1546,8 +1460,8 @@ class _ListTileShell extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 4,
+                        softWrap: true,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: AppColors.textPrimary,
                           fontWeight: FontWeight.w900,
@@ -1557,8 +1471,8 @@ class _ListTileShell extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 4,
+                        softWrap: true,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary,
                           fontWeight: FontWeight.w700,
@@ -1569,8 +1483,8 @@ class _ListTileShell extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           body!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                          maxLines: 5,
+                          softWrap: true,
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: AppColors.textSecondary,
@@ -1622,8 +1536,8 @@ class _StatCard extends StatelessWidget {
           ),
           Text(
             item.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+            softWrap: true,
             style: AppTextStyles.caption(context).copyWith(
               color: AppColors.textSecondary,
               fontWeight: FontWeight.w800,

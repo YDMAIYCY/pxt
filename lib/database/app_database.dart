@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 13;
+  static const int databaseVersion = 14;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -34,6 +34,7 @@ class AppDatabase {
   static const String tableCheckinRecords = 'checkin_records';
   static const String tableKnowledgeConcepts = 'knowledge_concepts';
   static const String tableKnowledgeConceptLinks = 'knowledge_concept_links';
+  static const String tableFavorites = 'favorites';
 
   Database? _database;
 
@@ -305,6 +306,7 @@ class AppDatabase {
     ''');
 
     await _createKnowledgeGraphTables(db);
+    await _createFavoriteTables(db);
 
     await db.execute(
       'CREATE INDEX idx_users_username ON $tableUsers(username);',
@@ -373,6 +375,7 @@ class AppDatabase {
       'CREATE INDEX idx_ai_chat_messages_created_at ON $tableAiChatMessages(created_at);',
     );
     await _createKnowledgeGraphIndexes(db);
+    await _createFavoriteIndexes(db);
   }
 
   Future<void> _upgradeTables(
@@ -416,6 +419,9 @@ class AppDatabase {
     }
     if (oldVersion < 13) {
       await _upgradeRichPracticeQuestionsToV13(db);
+    }
+    if (oldVersion < 14) {
+      await _upgradeFavoritesToV14(db);
     }
   }
 
@@ -859,6 +865,11 @@ class AppDatabase {
     );
   }
 
+  Future<void> _upgradeFavoritesToV14(Database db) async {
+    await _createFavoriteTables(db);
+    await _createFavoriteIndexes(db);
+  }
+
   Future<void> _createKnowledgeGraphTables(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS $tableKnowledgeConcepts (
@@ -919,8 +930,36 @@ class AppDatabase {
     );
   }
 
+  Future<void> _createFavoriteTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableFavorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id INTEGER NOT NULL,
+        note TEXT,
+        highlight_text TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, target_type, target_id),
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+  }
+
+  Future<void> _createFavoriteIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_favorites_user_type ON $tableFavorites(user_id, target_type);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_favorites_target ON $tableFavorites(target_type, target_id);',
+    );
+  }
+
   // 兼容历史版本中“版本号已升级但列缺失”的异常状态，启动时自动补齐。
   Future<void> _ensureSchemaConsistency(Database db) async {
+    await _createFavoriteTables(db);
+    await _createFavoriteIndexes(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS $tableKnowledgeLibraries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -907,8 +907,8 @@ class _PieChartView extends StatelessWidget {
                       child: Text(
                         item.taskTitle,
                         style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 3,
+                        softWrap: true,
                       ),
                     ),
                     Text(

@@ -10,6 +10,14 @@ class AppRuntimeConfig {
     'OCR_SERVICE_PATH',
     defaultValue: '/ocr',
   );
+  static const bool useOnDeviceOcr = bool.fromEnvironment(
+    'OCR_USE_ON_DEVICE',
+    defaultValue: false,
+  );
+  static const bool allowOnDeviceOcrFallback = bool.fromEnvironment(
+    'OCR_ALLOW_ON_DEVICE_FALLBACK',
+    defaultValue: true,
+  );
 
   // MiniMax 配置：必须通过 --dart-define 注入 API Key。
   static const String minimaxApiKey = String.fromEnvironment('MINIMAX_API_KEY');

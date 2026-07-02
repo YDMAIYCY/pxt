@@ -236,6 +236,87 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     }
   }
 
+  Future<void> _refineResult({
+    required String taskType,
+    required String currentResultText,
+  }) async {
+    if (_isGeneratingAll || _generatingTaskTypes.contains(taskType)) {
+      return;
+    }
+
+    final feedback = await _askRefinementFeedback(taskType);
+    if (feedback == null || feedback.trim().isEmpty || !mounted) {
+      return;
+    }
+
+    final llmConfig = await _loadLatestLlmConfig();
+    if (!mounted) {
+      return;
+    }
+
+    final document = _document;
+    final ocrRecord = _ocrRecord;
+    if (!_canGenerate(document, ocrRecord, llmConfig)) {
+      return;
+    }
+
+    setState(() {
+      _generatingTaskTypes.add(taskType);
+    });
+
+    try {
+      final result = await _aiGenerationOrchestrator.regenerateWithFeedback(
+        documentId: document!.id,
+        ocrText: ocrRecord!.effectiveText,
+        taskType: taskType,
+        currentResultText: currentResultText,
+        feedback: feedback,
+        llmConfig: llmConfig,
+      );
+
+      if (!mounted) return;
+      _showMessage(result.message);
+      await _reloadPageData();
+    } catch (error) {
+      if (mounted) {
+        _showMessage('AI 修改失败：$error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _generatingTaskTypes.remove(taskType);
+        });
+      }
+    }
+  }
+
+  Future<String?> _askRefinementFeedback(String taskType) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('修改${AiTaskType.labelOf(taskType)}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 6,
+          decoration: const InputDecoration(hintText: '例如：太简洁了，请展开每个分支并补充易错点'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('重新生成'),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool _canGenerate(
     SourceDocumentRecord? document,
     OcrTextRecord? ocrRecord,
@@ -264,6 +345,19 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _knowledgeCardsText(List<KnowledgeCardRecord> cards) {
+    return cards.map((card) => '${card.title}\n${card.content}').join('\n\n');
+  }
+
+  String _practiceQuestionsText(List<PracticeQuestionRecord> questions) {
+    return questions
+        .map(
+          (question) =>
+              '题目：${question.questionText}\n答案：${question.answerText ?? ''}\n解析：${question.analysisText ?? ''}',
+        )
+        .join('\n\n');
   }
 
   @override
@@ -327,15 +421,26 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
                 title: '知识卡片',
                 child: data.knowledgeCards.isEmpty
                     ? const _EmptyResultHint(text: '暂无知识卡片结果')
-                    : Column(
-                        children: data.knowledgeCards
-                            .map(
-                              (item) => _SimpleResultCard(
-                                title: item.title,
-                                content: item.content,
-                              ),
-                            )
-                            .toList(growable: false),
+                    : _RefinableResultGroup(
+                        isRunning: _generatingTaskTypes.contains(
+                          AiTaskType.knowledgeCards,
+                        ),
+                        onRefine: () => _refineResult(
+                          taskType: AiTaskType.knowledgeCards,
+                          currentResultText: _knowledgeCardsText(
+                            data.knowledgeCards,
+                          ),
+                        ),
+                        child: Column(
+                          children: data.knowledgeCards
+                              .map(
+                                (item) => _SimpleResultCard(
+                                  title: item.title,
+                                  content: item.content,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
                       ),
               ),
               const SizedBox(height: 12),
@@ -343,9 +448,19 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
                 title: '复习提纲',
                 child: data.reviewOutline == null
                     ? const _EmptyResultHint(text: '暂无复习提纲结果')
-                    : _SimpleResultCard(
-                        title: data.reviewOutline!.title,
-                        content: data.reviewOutline!.outlineText,
+                    : _RefinableResultGroup(
+                        isRunning: _generatingTaskTypes.contains(
+                          AiTaskType.reviewOutline,
+                        ),
+                        onRefine: () => _refineResult(
+                          taskType: AiTaskType.reviewOutline,
+                          currentResultText:
+                              '${data.reviewOutline!.title}\n${data.reviewOutline!.outlineText}',
+                        ),
+                        child: _SimpleResultCard(
+                          title: data.reviewOutline!.title,
+                          content: data.reviewOutline!.outlineText,
+                        ),
                       ),
               ),
               const SizedBox(height: 12),
@@ -353,9 +468,18 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
                 title: '思维导图文字版',
                 child: data.mindmapText == null
                     ? const _EmptyResultHint(text: '暂无思维导图文字结果')
-                    : _SimpleResultCard(
-                        title: 'Mindmap',
-                        content: data.mindmapText!.mindmapText,
+                    : _RefinableResultGroup(
+                        isRunning: _generatingTaskTypes.contains(
+                          AiTaskType.mindmapText,
+                        ),
+                        onRefine: () => _refineResult(
+                          taskType: AiTaskType.mindmapText,
+                          currentResultText: data.mindmapText!.mindmapText,
+                        ),
+                        child: _SimpleResultCard(
+                          title: 'Mindmap',
+                          content: data.mindmapText!.mindmapText,
+                        ),
                       ),
               ),
               const SizedBox(height: 12),
@@ -363,17 +487,30 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
                 title: '练习题',
                 child: data.practiceQuestions.isEmpty
                     ? const _EmptyResultHint(text: '暂无练习题结果')
-                    : Column(
-                        children: data.practiceQuestions
-                            .map(
-                              (item) => _QuestionResultCard(
-                                questionText: item.questionText,
-                                answerText: item.answerText,
-                                analysisText: item.analysisText,
-                                difficulty: item.difficulty,
-                              ),
-                            )
-                            .toList(growable: false),
+                    : _RefinableResultGroup(
+                        isRunning: _generatingTaskTypes.contains(
+                          AiTaskType.practiceQuestions,
+                        ),
+                        onRefine: () => _refineResult(
+                          taskType: AiTaskType.practiceQuestions,
+                          currentResultText: _practiceQuestionsText(
+                            data.practiceQuestions,
+                          ),
+                        ),
+                        child: Column(
+                          children: data.practiceQuestions
+                              .map(
+                                (item) => _QuestionResultCard(
+                                  questionText: item.questionText,
+                                  answerText: item.answerText,
+                                  analysisText: item.analysisText,
+                                  difficulty: item.difficulty,
+                                  questionKind: item.questionKind,
+                                  options: item.options,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
                       ),
               ),
             ],
@@ -621,6 +758,43 @@ class _ResultSection extends StatelessWidget {
   }
 }
 
+class _RefinableResultGroup extends StatelessWidget {
+  const _RefinableResultGroup({
+    required this.child,
+    required this.isRunning,
+    required this.onRefine,
+  });
+
+  final Widget child;
+  final bool isRunning;
+  final VoidCallback onRefine;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        child,
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerRight,
+          child: OutlinedButton.icon(
+            onPressed: isRunning ? null : onRefine,
+            icon: isRunning
+                ? const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.edit_note_rounded),
+            label: Text(isRunning ? '正在修改' : '修改'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _SimpleResultCard extends StatelessWidget {
   const _SimpleResultCard({required this.title, required this.content});
 
@@ -667,15 +841,22 @@ class _QuestionResultCard extends StatelessWidget {
     this.answerText,
     this.analysisText,
     this.difficulty,
+    this.questionKind,
+    this.options = const <String>[],
   });
 
   final String questionText;
   final String? answerText;
   final String? analysisText;
   final String? difficulty;
+  final String? questionKind;
+  final List<String> options;
 
   @override
   Widget build(BuildContext context) {
+    final isMultipleChoice =
+        questionKind == PracticeQuestionKind.multipleChoice;
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
@@ -704,6 +885,19 @@ class _QuestionResultCard extends StatelessWidget {
               ),
             ),
           ],
+          if (options.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _QuestionOptionList(options: options),
+          ] else if (isMultipleChoice) ...[
+            const SizedBox(height: 8),
+            Text(
+              '选项缺失，请重新生成练习题',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFB45309),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
           if (answerText?.trim().isNotEmpty == true) ...[
             const SizedBox(height: 8),
             SelectableText(
@@ -726,6 +920,34 @@ class _QuestionResultCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _QuestionOptionList extends StatelessWidget {
+  const _QuestionOptionList({required this.options});
+
+  final List<String> options;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: options
+          .map(
+            (option) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: SelectableText(
+                option,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.textPrimary,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          )
+          .toList(growable: false),
     );
   }
 }

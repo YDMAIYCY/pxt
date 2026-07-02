@@ -54,6 +54,22 @@ class DocumentBatchRepository {
             'updated_at': now,
           });
 
+      if (sourceType == DocumentBatchSourceType.pdf) {
+        await txn.insert(AppDatabase.tableSourceDocuments, {
+          'user_id': userId,
+          'library_id': resolvedLibraryId,
+          'batch_id': createdBatchId,
+          'page_number': null,
+          'source_type': SourceDocumentSourceType.pdfDocument,
+          'image_path': originalFilePath ?? '',
+          'original_title': title.trim().isEmpty ? 'PDF 资料' : title.trim(),
+          'ocr_status': SourceDocumentOcrStatus.pending,
+          'ocr_error_message': null,
+          'ocr_updated_at': now,
+          'created_at': now,
+        });
+      }
+
       for (final page in pages) {
         await txn.insert(AppDatabase.tableSourceDocuments, {
           'user_id': userId,
@@ -106,7 +122,7 @@ class DocumentBatchRepository {
         batches.source_type,
         batches.title,
         batches.original_file_path,
-        COUNT(documents.id) AS page_count,
+        COUNT(CASE WHEN documents.page_number IS NOT NULL THEN 1 END) AS page_count,
         batches.created_at,
         batches.updated_at
       FROM ${AppDatabase.tableDocumentBatches} batches
@@ -148,7 +164,7 @@ class DocumentBatchRepository {
         batches.source_type,
         batches.title,
         batches.original_file_path,
-        COUNT(documents.id) AS page_count,
+        COUNT(CASE WHEN documents.page_number IS NOT NULL THEN 1 END) AS page_count,
         batches.created_at,
         batches.updated_at
       FROM ${AppDatabase.tableDocumentBatches} batches
@@ -193,6 +209,7 @@ class DocumentBatchRepository {
       FROM ${AppDatabase.tableSourceDocuments} documents
       WHERE documents.user_id = ?
         AND documents.batch_id = ?
+        AND documents.page_number IS NOT NULL
       ORDER BY documents.page_number ASC, documents.id ASC
       ''',
       [userId, batchId],
@@ -227,9 +244,7 @@ class DocumentBatchRepository {
         where: 'batch_id = ? AND user_id = ?',
         whereArgs: [batchId, userId],
       );
-      cleanupPaths.addAll(
-        pageRows.map((row) => row['image_path'] as String?),
-      );
+      cleanupPaths.addAll(pageRows.map((row) => row['image_path'] as String?));
 
       await txn.delete(
         AppDatabase.tableSourceDocuments,

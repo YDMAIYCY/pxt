@@ -156,8 +156,11 @@ class QsClawToolRegistry {
     final wantsPdf = fileTypes.contains('pdf');
     final wantsImage = fileTypes.contains('image');
     return wantsPdf &&
-            document.sourceType == SourceDocumentSourceType.pdfPage ||
-        wantsImage && document.sourceType != SourceDocumentSourceType.pdfPage;
+            (document.sourceType == SourceDocumentSourceType.pdfDocument ||
+                document.sourceType == SourceDocumentSourceType.pdfPage) ||
+        wantsImage &&
+            document.sourceType != SourceDocumentSourceType.pdfDocument &&
+            document.sourceType != SourceDocumentSourceType.pdfPage;
   }
 
   static bool _matchesTopic(SourceDocumentRecord document, String topic) {

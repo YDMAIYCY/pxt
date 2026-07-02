@@ -101,6 +101,10 @@ class SourceDocumentRepository {
       WHERE documents.user_id = ?
         $libraryClause
         $batchClause
+        AND NOT (
+          documents.source_type = '${SourceDocumentSourceType.pdfPage}'
+          AND documents.batch_id IS NOT NULL
+        )
       ORDER BY documents.created_at DESC
       LIMIT ?
       ''', args);
@@ -145,6 +149,10 @@ class SourceDocumentRepository {
       FROM ${AppDatabase.tableSourceDocuments} documents
       WHERE documents.user_id = ?
         $libraryClause
+        AND NOT (
+          documents.source_type = '${SourceDocumentSourceType.pdfPage}'
+          AND documents.batch_id IS NOT NULL
+        )
       ORDER BY documents.created_at DESC
       LIMIT ?
       ''', args);
@@ -197,6 +205,49 @@ class SourceDocumentRepository {
     return SourceDocumentRecord.fromMap(rows.first);
   }
 
+  Future<List<SourceDocumentRecord>> fetchPdfPageSources({
+    required int userId,
+    required int batchId,
+  }) async {
+    await _database.ensureSchemaReady();
+    final db = await _database.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        documents.id,
+        documents.user_id,
+        documents.library_id,
+        documents.batch_id,
+        documents.page_number,
+        documents.source_type,
+        documents.image_path,
+        documents.original_title,
+        documents.ocr_status,
+        documents.ocr_error_message,
+        documents.ocr_updated_at,
+        documents.created_at,
+        CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM ${AppDatabase.tableAiGenerationTasks} tasks
+            WHERE tasks.document_id = documents.id
+              AND tasks.status = 'completed'
+          ) THEN 1
+          ELSE 0
+        END AS ai_done
+      FROM ${AppDatabase.tableSourceDocuments} documents
+      WHERE documents.user_id = ?
+        AND documents.batch_id = ?
+        AND documents.source_type = ?
+        AND documents.page_number IS NOT NULL
+      ORDER BY documents.page_number ASC, documents.id ASC
+      ''',
+      [userId, batchId, SourceDocumentSourceType.pdfPage],
+    );
+
+    return rows.map(SourceDocumentRecord.fromMap).toList(growable: false);
+  }
+
   Future<void> moveDocumentToLibrary({
     required int userId,
     required int documentId,
@@ -212,14 +263,41 @@ class SourceDocumentRepository {
         userId: userId,
         libraryId: libraryId,
       );
+      final documentRows = await txn.query(
+        AppDatabase.tableSourceDocuments,
+        columns: ['source_type', 'batch_id'],
+        where: 'id = ? AND user_id = ?',
+        whereArgs: [documentId, userId],
+        limit: 1,
+      );
+      if (documentRows.isEmpty) {
+        throw StateError('资料不存在或无权移动');
+      }
+      final batchId = documentRows.first['batch_id'] as int?;
+      final isPdfDocument =
+          documentRows.first['source_type'] ==
+              SourceDocumentSourceType.pdfDocument &&
+          batchId != null;
+
       final updated = await txn.update(
         AppDatabase.tableSourceDocuments,
         {'library_id': resolvedLibraryId},
-        where: 'id = ? AND user_id = ?',
-        whereArgs: [documentId, userId],
+        where: isPdfDocument
+            ? 'batch_id = ? AND user_id = ?'
+            : 'id = ? AND user_id = ?',
+        whereArgs: [isPdfDocument ? batchId : documentId, userId],
       );
       if (updated == 0) {
         throw StateError('资料不存在或无权移动');
+      }
+
+      if (isPdfDocument) {
+        await txn.update(
+          AppDatabase.tableDocumentBatches,
+          {'library_id': resolvedLibraryId, 'updated_at': now},
+          where: 'id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
       }
 
       await txn.update(
@@ -264,7 +342,7 @@ class SourceDocumentRepository {
     final db = await _database.database;
     final rows = await db.query(
       AppDatabase.tableSourceDocuments,
-      columns: ['image_path'],
+      columns: ['image_path', 'source_type', 'batch_id'],
       where: 'id = ? AND user_id = ?',
       whereArgs: [documentId, userId],
       limit: 1,
@@ -273,15 +351,55 @@ class SourceDocumentRepository {
       throw StateError('资料不存在或无权删除');
     }
 
-    final deleted = await db.delete(
-      AppDatabase.tableSourceDocuments,
-      where: 'id = ? AND user_id = ?',
-      whereArgs: [documentId, userId],
-    );
+    final cleanupPaths = <String?>[rows.first['image_path'] as String?];
+    final batchId = rows.first['batch_id'] as int?;
+    final isPdfDocument =
+        rows.first['source_type'] == SourceDocumentSourceType.pdfDocument &&
+        batchId != null;
+
+    final deleted = await db.transaction((txn) async {
+      if (isPdfDocument) {
+        final batchRows = await txn.query(
+          AppDatabase.tableDocumentBatches,
+          columns: ['original_file_path'],
+          where: 'id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+          limit: 1,
+        );
+        if (batchRows.isNotEmpty) {
+          cleanupPaths.add(batchRows.first['original_file_path'] as String?);
+        }
+        final pageRows = await txn.query(
+          AppDatabase.tableSourceDocuments,
+          columns: ['image_path'],
+          where: 'batch_id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
+        cleanupPaths.addAll(
+          pageRows.map((row) => row['image_path'] as String?),
+        );
+        await txn.delete(
+          AppDatabase.tableSourceDocuments,
+          where: 'batch_id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
+        return txn.delete(
+          AppDatabase.tableDocumentBatches,
+          where: 'id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
+      }
+
+      return txn.delete(
+        AppDatabase.tableSourceDocuments,
+        where: 'id = ? AND user_id = ?',
+        whereArgs: [documentId, userId],
+      );
+    });
     if (deleted == 0) {
       throw StateError('资料不存在或无权删除');
     }
-    await _fileStore.deleteAllIfManaged([rows.first['image_path'] as String?]);
+    await _fileStore.deleteAllIfManaged(cleanupPaths);
   }
 
   Future<int?> _resolveLibraryId(

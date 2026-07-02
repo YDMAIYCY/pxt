@@ -124,7 +124,7 @@ class WrongQuestionTrainingService {
 
   static String _buildPrompt(PracticeQuestionRecord question) {
     return '''
-请分析下面这道错题，输出错因标签和 2-3 道相似题。
+请分析下面这道错题，输出错因标签和 2-3 道相似强化训练题。
 
 题目：
 ${question.questionText}
@@ -137,10 +137,17 @@ ${question.analysisText ?? ''}
 
 用户上次作答：
 ${question.lastUserAnswer ?? ''}
+
+要求：
+1. 必须返回 JSON，不要返回 markdown。
+2. similar_questions 至少 2 道，最多 3 道。
+3. 每道题都要有 question_text、answer_text、analysis_text、difficulty。
+4. 题目应围绕原错因进行变式训练，不要照抄原题。
 ''';
   }
 
-  static const String _systemPrompt = '你是学习诊断助手，只返回可解析 JSON，不要包含 markdown 代码块。';
+  static const String _systemPrompt =
+      '你是学习诊断助手。你必须只返回可解析 JSON，不要包含 markdown 代码块。';
 
   static const Map<String, dynamic> _jsonSchema = {
     'name': 'wrong_question_training_response',

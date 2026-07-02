@@ -159,8 +159,8 @@ class _BatchHeader extends StatelessWidget {
               children: [
                 Text(
                   batch.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 4,
+                  softWrap: true,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: AppColors.textPrimary,
                     fontWeight: FontWeight.w900,
@@ -273,8 +273,8 @@ class _PageTile extends StatelessWidget {
                     children: [
                       Text(
                         page.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 3,
+                        softWrap: true,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: AppColors.textPrimary,
                           fontWeight: FontWeight.w800,

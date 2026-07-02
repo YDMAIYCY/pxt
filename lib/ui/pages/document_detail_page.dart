@@ -181,6 +181,8 @@ class _ImageSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPdfDocument =
+        document.sourceType == SourceDocumentSourceType.pdfDocument;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -193,15 +195,28 @@ class _ImageSection extends StatelessWidget {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             child: AspectRatio(
               aspectRatio: 4 / 3,
-              child: Image.file(
-                File(document.imagePath),
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
-                  color: const Color(0xFFE2E8F0),
-                  alignment: Alignment.center,
-                  child: const Icon(Icons.broken_image_outlined, size: 42),
-                ),
-              ),
+              child: isPdfDocument
+                  ? Container(
+                      color: const Color(0xFFEFF6FF),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.picture_as_pdf_rounded,
+                        size: 64,
+                        color: AppColors.error,
+                      ),
+                    )
+                  : Image.file(
+                      File(document.imagePath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        color: const Color(0xFFE2E8F0),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.broken_image_outlined,
+                          size: 42,
+                        ),
+                      ),
+                    ),
             ),
           ),
           Padding(

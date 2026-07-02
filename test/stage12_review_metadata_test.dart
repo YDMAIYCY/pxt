@@ -6,7 +6,7 @@ import 'package:pxt1/database/models/ai_result_records.dart';
 void main() {
   group('Stage 12 review metadata', () {
     test('database version and training table are registered', () {
-      expect(AppDatabase.databaseVersion, 13);
+      expect(AppDatabase.databaseVersion, 14);
       expect(
         AppDatabase.tableWrongQuestionTrainings,
         'wrong_question_trainings',

@@ -367,6 +367,7 @@ class WrongQuestionTrainingStatus {
 class GeneratedContentRecord {
   const GeneratedContentRecord({
     required this.contentType,
+    required this.sourceId,
     required this.contentLabel,
     required this.documentId,
     required this.documentTitle,
@@ -376,6 +377,7 @@ class GeneratedContentRecord {
   });
 
   final String contentType;
+  final int sourceId;
   final String contentLabel;
   final int documentId;
   final String documentTitle;

@@ -69,5 +69,22 @@ void main() {
       expect(questions.single['options_json'], contains('定义域'));
       expect(questions.single['expected_keywords_json'], contains('对应关系'));
     });
+
+    test('orchestrator rejects multiple choice questions without options', () {
+      expect(
+        () => AiGenerationOrchestrator.parsePracticeQuestionsForTest({
+          'questions': [
+            {
+              'kind': 'multiple_choice',
+              'question_text': '下列方程中，是一元一次方程的是？',
+              'answer_text': 'C',
+              'analysis_text': '选择题必须给出选项才能作答。',
+              'difficulty': 'easy',
+            },
+          ],
+        }),
+        throwsFormatException,
+      );
+    });
   });
 }

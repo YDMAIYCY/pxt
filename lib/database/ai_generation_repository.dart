@@ -358,6 +358,7 @@ class AiGenerationRepository {
 
     final rows = await db.rawQuery('''
       SELECT 'knowledge_cards' AS content_type,
+             cards.id AS source_id,
              '' AS content_label,
              cards.document_id AS document_id,
              COALESCE(documents.original_title, '') AS document_title,
@@ -369,7 +370,7 @@ class AiGenerationRepository {
       WHERE documents.user_id = ?
         $libraryClause
       UNION ALL
-      SELECT 'review_outline', '', outlines.document_id,
+      SELECT 'review_outline', outlines.id, '', outlines.document_id,
              COALESCE(documents.original_title, ''),
              outlines.title, outlines.outline_text, outlines.created_at
       FROM ${AppDatabase.tableReviewOutlines} outlines
@@ -377,7 +378,7 @@ class AiGenerationRepository {
       WHERE documents.user_id = ?
         $libraryClause
       UNION ALL
-      SELECT 'mindmap_text', '', mindmaps.document_id,
+      SELECT 'mindmap_text', mindmaps.id, '', mindmaps.document_id,
              COALESCE(documents.original_title, ''),
              '', mindmaps.mindmap_text, mindmaps.created_at
       FROM ${AppDatabase.tableMindmapTexts} mindmaps
@@ -385,7 +386,7 @@ class AiGenerationRepository {
       WHERE documents.user_id = ?
         $libraryClause
       UNION ALL
-      SELECT 'practice_questions', '', questions.document_id,
+      SELECT 'practice_questions', questions.id, '', questions.document_id,
              COALESCE(documents.original_title, ''),
              questions.question_text, COALESCE(questions.analysis_text, questions.answer_text, ''),
              questions.created_at
@@ -1017,6 +1018,7 @@ class AiGenerationRepository {
     final contentType = (map['content_type'] as String?)?.trim() ?? '';
     return GeneratedContentRecord(
       contentType: contentType,
+      sourceId: _readInt(map['source_id']),
       contentLabel: _contentLabelFromMap(contentType, map),
       documentId: map['document_id'] as int,
       documentTitle: _documentTitleFromMap(map),
