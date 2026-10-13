@@ -103,6 +103,7 @@ class PracticeQuestionRecord {
     this.optionsJson,
     this.rubricJson,
     this.expectedKeywordsJson,
+    this.sourceVersionId,
   });
 
   final int id;
@@ -124,6 +125,7 @@ class PracticeQuestionRecord {
   final String? optionsJson;
   final String? rubricJson;
   final String? expectedKeywordsJson;
+  final int? sourceVersionId;
   final DateTime createdAt;
 
   bool get isPending => reviewStatus == PracticeQuestionReviewStatus.pending;
@@ -173,6 +175,7 @@ class PracticeQuestionRecord {
       optionsJson: (map['options_json'] as String?)?.trim(),
       rubricJson: (map['rubric_json'] as String?)?.trim(),
       expectedKeywordsJson: (map['expected_keywords_json'] as String?)?.trim(),
+      sourceVersionId: map['source_version_id'] as int?,
       createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
     );
   }

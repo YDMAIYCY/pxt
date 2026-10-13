@@ -4,6 +4,8 @@ import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'app_database.dart';
+import 'import_record_repository.dart';
+import 'package:fsrs/fsrs.dart' as fsrs;
 import 'models/learning_resource_record.dart';
 import 'models/knowledge_graph_records.dart';
 
@@ -13,6 +15,11 @@ class LearningRepository {
   final AppDatabase _database;
   static String fingerprint(String text) =>
       sha256.convert(utf8.encode(text.trim())).toString();
+
+  Future<int> sourceVersion(int userId, int documentId) async =>
+      (await ImportRecordRepository(
+        database: _database,
+      ).sourceSnapshot(userId, documentId)).id;
 
   Future<void> _requireDocument(
     DatabaseExecutor db,
@@ -37,7 +44,9 @@ class LearningRepository {
     await _requireDocument(db, userId, documentId);
     final rows = await db.query(
       'learning_resources',
-      where: 'document_id = ?${type == null ? '' : ' AND type = ?'}',
+      where: '''document_id IN (SELECT id FROM source_documents WHERE
+        import_record_id = (SELECT import_record_id FROM source_documents WHERE id = ?))
+        ${type == null ? '' : ' AND type = ?'}''',
       whereArgs: [documentId, ?type],
       orderBy: 'version DESC, id DESC',
     );
@@ -52,7 +61,11 @@ class LearningRepository {
     required String content,
     required String inputText,
     required String model,
+    int? sourceVersionId,
   }) async {
+    final snapshot = await ImportRecordRepository(
+      database: _database,
+    ).sourceSnapshot(userId, documentId);
     final db = await _database.database;
     return db.transaction((txn) async {
       await _requireDocument(txn, userId, documentId);
@@ -62,6 +75,7 @@ class LearningRepository {
       );
       final id = await txn.insert('learning_resources', {
         'document_id': documentId,
+        'source_version_id': sourceVersionId ?? snapshot.id,
         'type': type,
         'title': title,
         'content': content,
@@ -96,6 +110,15 @@ class LearningRepository {
     List<int> libraryIds,
   ) async {
     if (libraryIds.isEmpty) throw ArgumentError('至少选择一个知识库');
+    final record = await ImportRecordRepository(
+      database: _database,
+    ).forDocument(userId, documentId);
+    if (record != null) {
+      await ImportRecordRepository(
+        database: _database,
+      ).setLibraries(userId, record.id, libraryIds);
+      return;
+    }
     final db = await _database.database;
     await db.transaction((txn) async {
       await _requireDocument(txn, userId, documentId);
@@ -176,7 +199,9 @@ class LearningRepository {
     return (await db.rawQuery(
       '''SELECT c.* FROM knowledge_concepts c
       JOIN concept_documents cd ON cd.concept_id = c.id
-      WHERE cd.document_id = ? AND c.user_id = ? ORDER BY c.id''',
+      WHERE cd.document_id IN (SELECT id FROM source_documents WHERE
+        import_record_id = (SELECT import_record_id FROM source_documents WHERE id = ?))
+        AND c.user_id = ? GROUP BY c.id ORDER BY c.id''',
       [documentId, userId],
     )).map(KnowledgeConceptRecord.fromMap).toList();
   }
@@ -502,22 +527,32 @@ class LearningRepository {
       where: 'resource_id = ? AND card_index = ?',
       whereArgs: [resourceId, index],
     );
-    final oldDays = prior.isEmpty ? 0 : prior.single['interval_days'] as int;
-    final days = rating == 1
-        ? 1
-        : rating == 2
-        ? (oldDays + 1).clamp(1, 30)
-        : ((oldDays == 0 ? 1 : oldDays) * (rating == 3 ? 2 : 3)).clamp(1, 365);
-    await db.insert('flashcard_reviews', {
-      'resource_id': resourceId,
-      'card_index': index,
-      'rating': rating,
-      'interval_days': days,
-      'next_review_at': DateTime.now()
-          .add(Duration(days: days))
-          .toUtc()
-          .toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final now = DateTime.now().toUtc();
+    final state = prior.firstOrNull?['fsrs_state_json'] as String?;
+    final card = state == null
+        ? fsrs.Card(cardId: index)
+        : fsrs.Card.fromMap(
+            Map<String, dynamic>.from(jsonDecode(state) as Map),
+          );
+    final reviewed = fsrs.Scheduler(
+      enableFuzzing: false,
+    ).reviewCard(card, fsrs.Rating.fromValue(rating), reviewDateTime: now);
+    await db.transaction((txn) async {
+      await txn.insert('flashcard_reviews', {
+        'resource_id': resourceId,
+        'card_index': index,
+        'rating': rating,
+        'interval_days': reviewed.card.due.difference(now).inDays,
+        'next_review_at': reviewed.card.due.toIso8601String(),
+        'fsrs_state_json': jsonEncode(reviewed.card.toMap()),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('flashcard_review_history', {
+        'resource_id': resourceId,
+        'card_index': index,
+        'review_log': jsonEncode(reviewed.reviewLog.toMap()),
+        'created_at': now.toIso8601String(),
+      });
+    });
   }
 
   Future<Map<int, DateTime>> cardSchedule(int resourceId) async {
@@ -554,8 +589,12 @@ class LearningRepository {
     final db = await _database.database;
     await _requireDocument(db, userId, documentId);
     return (await db.rawQuery(
-      'SELECT COUNT(*) AS attempts, COALESCE(AVG(score), 0) AS average_score FROM learning_attempts WHERE user_id = ? AND document_id = ?',
-      [userId, documentId],
+      '''SELECT COUNT(*) AS attempts, COALESCE(AVG(score), 0) AS average_score
+      FROM learning_attempts WHERE user_id = ? AND document_id IN (
+        SELECT id FROM source_documents WHERE user_id = ? AND
+        (id = ? OR import_record_id =
+          (SELECT import_record_id FROM source_documents WHERE id = ? AND user_id = ?)))''',
+      [userId, userId, documentId, documentId, userId],
     )).single;
   }
 }

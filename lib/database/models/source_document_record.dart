@@ -53,6 +53,9 @@ class SourceDocumentRecord {
     this.ocrErrorMessage,
     this.ocrUpdatedAt,
     this.lastConceptName,
+    this.importRecordId,
+    this.originalFilePath,
+    this.filePageNumber,
   });
 
   final int id;
@@ -69,6 +72,9 @@ class SourceDocumentRecord {
   final String? ocrErrorMessage;
   final DateTime? ocrUpdatedAt;
   final String? lastConceptName;
+  final int? importRecordId;
+  final String? originalFilePath;
+  final int? filePageNumber;
 
   bool get ocrDone => ocrStatus == SourceDocumentOcrStatus.success;
 
@@ -134,6 +140,9 @@ class SourceDocumentRecord {
       libraryId: map['library_id'] as int?,
       batchId: map['batch_id'] as int?,
       pageNumber: map['page_number'] as int?,
+      importRecordId: map['import_record_id'] as int?,
+      originalFilePath: map['original_file_path'] as String?,
+      filePageNumber: map['file_page_number'] as int?,
       sourceType: (map['source_type'] as String?)?.trim() ?? '',
       imagePath: (map['image_path'] as String?)?.trim() ?? '',
       title: ((map['original_title'] as String?)?.trim().isNotEmpty ?? false)

@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'app_database.dart';
+import 'import_record_repository.dart';
 import 'models/ai_generation_task_record.dart';
 import 'models/ai_result_records.dart';
 import 'knowledge_graph_repository.dart';
+import 'practice_session_repository.dart';
 import 'learning_repository.dart';
 import '../review/review_schedule_policy.dart';
 
@@ -18,6 +20,25 @@ class AiGenerationRepository {
 
   final AppDatabase _database;
   final KnowledgeGraphRepository _knowledgeGraphRepository;
+
+  Future<List<PracticeQuestionWithDocument>> fetchScopedPracticeQuestions({
+    required int userId, int? libraryId, int? documentId, int? conceptId,
+    bool wrongOnly = false, List<int>? questionIds, int limit = 500,
+  }) async {
+    final record = documentId == null ? null :
+      await ImportRecordRepository(database: _database).forDocument(userId, documentId);
+    if (documentId != null && record == null) throw StateError('资料不存在或无权访问');
+    return PracticeSessionRepository(database: _database).questions(
+      PracticeScope(userId: userId, libraryId: libraryId, recordId: record?.id,
+        conceptId: conceptId, wrongOnly: wrongOnly), questionIds: questionIds, limit: limit);
+  }
+
+  Future<PracticeSubmission> submitPracticeAnswer({
+    required int userId, required int questionId, required String requestId,
+    required String answer, required bool correct, int? libraryId,
+  }) => PracticeSessionRepository(database: _database).submit(
+    scope: PracticeScope(userId: userId, libraryId: libraryId),
+    questionId: questionId, requestId: requestId, answer: answer, correct: correct);
 
   Future<AiGenerationTaskRecord> markTaskRunning({
     required int documentId,
@@ -301,18 +322,34 @@ class AiGenerationRepository {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
+    final source = (await db.query(
+      'source_documents',
+      columns: ['user_id'],
+      where: 'id = ?',
+      whereArgs: [documentId],
+    )).single;
+    final snapshot = await ImportRecordRepository(
+      database: _database,
+    ).sourceSnapshot(source['user_id'] as int, documentId);
 
     await db.transaction((txn) async {
       for (final question in questions) {
         final existing = await txn.query(
           AppDatabase.tablePracticeQuestions,
           columns: ['id'],
-          where: 'document_id = ? AND question_text = ?',
-          whereArgs: [documentId, (question['question_text'] ?? '').trim()],
+          where:
+              'document_id = ? AND question_text = ? AND source_version_id = ?',
+          whereArgs: [
+            documentId,
+            (question['question_text'] ?? '').trim(),
+            int.tryParse(question['source_version_id'] ?? '') ?? snapshot.id,
+          ],
         );
         if (existing.isNotEmpty) continue;
         await txn.insert(AppDatabase.tablePracticeQuestions, {
           'document_id': documentId,
+          'source_version_id':
+              int.tryParse(question['source_version_id'] ?? '') ?? snapshot.id,
           'question_text': (question['question_text'] ?? '').trim(),
           'answer_text': (question['answer_text'] ?? '').trim(),
           'analysis_text': (question['analysis_text'] ?? '').trim(),
@@ -622,16 +659,28 @@ class AiGenerationRepository {
           .toList(growable: false),
     );
 
+    final generated = jsonEncode({
+      'cause_tags': causeTags,
+      'questions': similarQuestions,
+    });
     await db.transaction((txn) async {
+      final fingerprint = LearningRepository.fingerprint(generated);
+      final prior = await txn.query(
+        'wrong_question_training_versions',
+        where: 'question_id = ? AND fingerprint = ?',
+        whereArgs: [wrongQuestion.id, fingerprint],
+      );
+      if (prior.isNotEmpty) return;
+      await txn.insert('wrong_question_training_versions', {
+        'question_id': wrongQuestion.id,
+        'fingerprint': fingerprint,
+        'content': generated,
+        'created_at': now,
+      });
       await txn.delete(
         AppDatabase.tableWrongQuestionTrainings,
         where: 'wrong_question_id = ?',
         whereArgs: [wrongQuestion.id],
-      );
-      await txn.delete(
-        AppDatabase.tablePracticeQuestions,
-        where: 'parent_question_id = ? AND question_kind = ?',
-        whereArgs: [wrongQuestion.id, PracticeQuestionKind.similar],
       );
 
       await txn.insert(AppDatabase.tableWrongQuestionTrainings, {
@@ -643,8 +692,21 @@ class AiGenerationRepository {
       });
 
       for (final question in similarQuestions.take(3)) {
-        await txn.insert(AppDatabase.tablePracticeQuestions, {
+        final existing = await txn.query(
+          'practice_questions',
+          columns: ['id'],
+          where:
+              'parent_question_id = ? AND question_text = ? AND source_version_id IS ?',
+          whereArgs: [
+            wrongQuestion.id,
+            question['question_text'],
+            wrongQuestion.sourceVersionId,
+          ],
+        );
+        if (existing.isNotEmpty) continue;
+        final id = await txn.insert(AppDatabase.tablePracticeQuestions, {
           'document_id': wrongQuestion.documentId,
+          'source_version_id': wrongQuestion.sourceVersionId,
           'question_text': (question['question_text'] ?? '').trim(),
           'answer_text': (question['answer_text'] ?? '').trim(),
           'analysis_text': (question['analysis_text'] ?? '').trim(),
@@ -658,7 +720,9 @@ class AiGenerationRepository {
           'review_interval_days': 0,
           'correct_streak': 0,
           'parent_question_id': wrongQuestion.id,
-          'question_kind': PracticeQuestionKind.similar,
+          'question_kind': (question['question_kind'] ?? '').isEmpty
+              ? PracticeQuestionKind.similar
+              : PracticeQuestionKind.normalize(question['question_kind']),
           'options_json': _normalizedJsonList(question['options_json']),
           'rubric_json': _normalizedJsonMap(question['rubric_json']),
           'expected_keywords_json': _normalizedJsonList(
@@ -666,6 +730,11 @@ class AiGenerationRepository {
           ),
           'created_at': now,
         });
+        await txn.execute(
+          'INSERT OR IGNORE INTO question_concepts '
+          'SELECT ?, concept_id FROM question_concepts WHERE question_id = ?',
+          [id, wrongQuestion.id],
+        );
       }
     });
   }
@@ -674,8 +743,15 @@ class AiGenerationRepository {
     if (await hasUnmasteredSimilarQuestions(questionId)) {
       return false;
     }
-    await _forceMarkQuestionMastered(questionId);
-    return true;
+    final question = await _findPracticeQuestionById(questionId);
+    if (question == null) return false;
+    final scope = await _knowledgeGraphRepository.findDocumentScope(
+      question.documentId,
+    );
+    if (scope == null) return false;
+    return (await PracticeSessionRepository(
+      database: _database,
+    ).evidence(scope.userId, questionId)).mastered;
   }
 
   Future<void> resetPracticeQuestionForReview(
@@ -709,135 +785,31 @@ class AiGenerationRepository {
   Future<void> markPracticeQuestionWrong({
     required int questionId,
     required String userAnswer,
-  }) async {
-    await _database.ensureSchemaReady();
-    final db = await _database.database;
-    final now = DateTime.now().toUtc();
-    final question = await _findPracticeQuestionById(questionId);
-    if (question == null) {
-      return;
-    }
-
-    final update = ReviewSchedulePolicy.forWrongAnswer(
-      question: question,
-      now: now,
-    );
-    await db.transaction((txn) async {
-      await txn.update(
-        AppDatabase.tablePracticeQuestions,
-        {
-          ..._scheduleUpdateMap(update),
-          'last_user_answer': userAnswer.trim(),
-          'last_reviewed_at': now.toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [questionId],
-      );
-
-      await txn.insert(AppDatabase.tableWrongQuestionExplanations, {
-        'practice_question_id': questionId,
-        'user_answer': userAnswer.trim(),
-        'correct_answer': question.answerText ?? '',
-        'explanation_text': question.analysisText ?? '',
-        'created_at': now.toIso8601String(),
-      });
-    });
-    await _knowledgeGraphRepository.updateMasteryFromPracticeQuestion(
-      questionId: questionId,
-      isCorrect: false,
-    );
-    final scope = await _knowledgeGraphRepository.findDocumentScope(
-      question.documentId,
-    );
-    if (scope != null) {
-      await LearningRepository(
-        database: _database,
-      ).recordQuestionAttempt(scope.userId, questionId, false, userAnswer);
-    }
-  }
+  }) => _recordLegacyPractice(questionId, userAnswer, false);
 
   Future<void> markPracticeQuestionCorrect({
     required int questionId,
     required String userAnswer,
-  }) async {
-    await _database.ensureSchemaReady();
-    final db = await _database.database;
+  }) => _recordLegacyPractice(questionId, userAnswer, true);
+
+  Future<void> _recordLegacyPractice(
+    int questionId,
+    String answer,
+    bool correct,
+  ) async {
     final question = await _findPracticeQuestionById(questionId);
-    if (question == null) {
-      return;
-    }
-
-    final now = DateTime.now().toUtc();
-    final update = ReviewSchedulePolicy.forCorrectAnswer(
-      question: question,
-      now: now,
-    );
-    await db.transaction((txn) async {
-      await txn.update(
-        AppDatabase.tablePracticeQuestions,
-        {
-          ..._scheduleUpdateMap(update),
-          'last_user_answer': userAnswer.trim(),
-          'last_reviewed_at': now.toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [questionId],
-      );
-
-      final parentId = question.parentQuestionId;
-      if (parentId == null ||
-          update.reviewStatus != PracticeQuestionReviewStatus.mastered) {
-        return;
-      }
-
-      final pendingSiblings = await txn.rawQuery(
-        '''
-        SELECT COUNT(*) AS count
-        FROM ${AppDatabase.tablePracticeQuestions}
-        WHERE parent_question_id = ?
-          AND review_status != ?
-        ''',
-        [parentId, PracticeQuestionReviewStatus.mastered],
-      );
-      if (_readInt(pendingSiblings.first['count']) > 0) {
-        return;
-      }
-
-      await txn.update(
-        AppDatabase.tablePracticeQuestions,
-        {
-          'review_status': PracticeQuestionReviewStatus.mastered,
-          'mastery_score': 100,
-          'correct_streak': 5,
-          'review_interval_days': 30,
-          'next_review_at': now.add(const Duration(days: 30)).toIso8601String(),
-          'last_reviewed_at': now.toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [parentId],
-      );
-      await txn.update(
-        AppDatabase.tableWrongQuestionTrainings,
-        {
-          'status': WrongQuestionTrainingStatus.completed,
-          'completed_at': now.toIso8601String(),
-        },
-        where: 'wrong_question_id = ?',
-        whereArgs: [parentId],
-      );
-    });
-    await _knowledgeGraphRepository.updateMasteryFromPracticeQuestion(
-      questionId: questionId,
-      isCorrect: true,
-    );
+    if (question == null) throw StateError('题目不存在');
     final scope = await _knowledgeGraphRepository.findDocumentScope(
       question.documentId,
     );
-    if (scope != null) {
-      await LearningRepository(
-        database: _database,
-      ).recordQuestionAttempt(scope.userId, questionId, true, userAnswer);
-    }
+    if (scope == null) throw StateError('题目来源不存在');
+    await PracticeSessionRepository(database: _database).submit(
+      scope: PracticeScope(userId: scope.userId),
+      questionId: questionId,
+      requestId: 'legacy-${DateTime.now().microsecondsSinceEpoch}-$questionId',
+      answer: answer,
+      correct: correct,
+    );
   }
 
   Future<StudyOverviewStats> fetchStudyOverviewStats(int userId) async {
@@ -1004,25 +976,6 @@ class AiGenerationRepository {
 
   String buildResultSnapshot(Object data) {
     return const JsonEncoder.withIndent('  ').convert(data);
-  }
-
-  Future<void> _forceMarkQuestionMastered(int questionId) async {
-    await _database.ensureSchemaReady();
-    final db = await _database.database;
-    final now = DateTime.now().toUtc();
-    await db.update(
-      AppDatabase.tablePracticeQuestions,
-      {
-        'review_status': PracticeQuestionReviewStatus.mastered,
-        'mastery_score': 100,
-        'review_interval_days': 30,
-        'correct_streak': 5,
-        'next_review_at': now.add(const Duration(days: 30)).toIso8601String(),
-        'last_reviewed_at': now.toIso8601String(),
-      },
-      where: 'id = ?',
-      whereArgs: [questionId],
-    );
   }
 
   Map<String, Object?> _scheduleUpdateMap(ReviewScheduleUpdate update) {

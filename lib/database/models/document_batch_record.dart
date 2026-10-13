@@ -103,9 +103,13 @@ class DocumentBatchPageDraft {
     required this.savedPath,
     required this.title,
     required this.pageNumber,
+    this.originalFilePath,
+    this.filePageNumber,
   });
 
   final String savedPath;
   final String title;
   final int pageNumber;
+  final String? originalFilePath;
+  final int? filePageNumber;
 }

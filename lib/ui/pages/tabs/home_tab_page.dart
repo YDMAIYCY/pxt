@@ -10,6 +10,8 @@ import '../../../database/knowledge_library_repository.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/document_batch_record.dart';
 import '../../../database/models/source_document_record.dart';
+import '../../../database/models/knowledge_library_record.dart';
+import '../../../database/import_record_repository.dart';
 import '../../../database/source_document_repository.dart';
 import '../../../pipeline/document_ingest_service.dart';
 import '../../theme/app_theme.dart';
@@ -19,7 +21,8 @@ import '../image_crop_selection_page.dart';
 import '../ai_interview_page.dart';
 import '../learning_hub_pages.dart';
 import '../learning_workspace_page.dart';
-import '../practice_review_page.dart';
+import '../library_practice_page.dart';
+import '../import_record_detail_page.dart';
 
 class HomeTabPage extends StatefulWidget {
   const HomeTabPage({
@@ -213,9 +216,8 @@ class _HomeTabPageState extends State<HomeTabPage> {
         _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
         return;
       }
-      final library = await _knowledgeLibraryRepository.ensureDefaultLibrary(
-        user.id,
-      );
+      final library = await _chooseImportLibrary(user.id);
+      if (library == null) return;
       if (!mounted) return;
       final document = await _documentIngestService.importFromInput(
         userId: user.id,
@@ -261,9 +263,8 @@ class _HomeTabPageState extends State<HomeTabPage> {
         _showMessage('\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548');
         return;
       }
-      final library = await _knowledgeLibraryRepository.ensureDefaultLibrary(
-        user.id,
-      );
+      final library = await _chooseImportLibrary(user.id);
+      if (library == null) return;
       if (!mounted) return;
       final batch = await _documentIngestService.importBatchFromInput(
         userId: user.id,
@@ -282,20 +283,66 @@ class _HomeTabPageState extends State<HomeTabPage> {
   }
 
   Future<void> _openDocument(int documentId) async {
-    final page =
-        widget.detailPageBuilder?.call(documentId) ??
-        DocumentDetailPage(documentId: documentId);
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    Widget? page = widget.detailPageBuilder?.call(documentId);
+    if (page == null) {
+      final user = await _authRepository.getCurrentUserProfile();
+      final record = user == null
+          ? null
+          : await ImportRecordRepository().forDocument(user.id, documentId);
+      page = record == null
+          ? DocumentDetailPage(documentId: documentId)
+          : ImportRecordDetailPage(recordId: record.id, userId: record.userId);
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page!));
     if (mounted) await _afterDataChanged();
   }
 
   Future<void> _openBatch(int batchId) async {
+    final user = await _authRepository.getCurrentUserProfile();
+    final record = user == null
+        ? null
+        : (await ImportRecordRepository().list(user.id))
+              .where((r) => r.sources.any((s) => s.batchId == batchId))
+              .firstOrNull;
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => DocumentBatchDetailPage(batchId: batchId),
+        builder: (_) => record == null
+            ? DocumentBatchDetailPage(batchId: batchId)
+            : ImportRecordDetailPage(
+                recordId: record.id,
+                userId: record.userId,
+              ),
       ),
     );
     if (mounted) await _afterDataChanged();
+  }
+
+  Future<KnowledgeLibraryRecord?> _chooseImportLibrary(int userId) async {
+    final defaultLibrary = await _knowledgeLibraryRepository
+        .ensureDefaultLibrary(userId);
+    final libraries = await _knowledgeLibraryRepository.fetchLibraries(userId);
+    if (libraries.length <= 1) return defaultLibrary;
+    if (!mounted) return null;
+    return showModalBottomSheet<KnowledgeLibraryRecord>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(title: Text('这次导入放入哪本知识库？')),
+            ...libraries.map(
+              (l) => ListTile(
+                title: Text(l.name),
+                onTap: () => Navigator.pop(context, l),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _openImportSourceSheet() async {
@@ -321,6 +368,17 @@ class _HomeTabPageState extends State<HomeTabPage> {
                     Navigator.of(sheetContext).pop(_ImportAction.multiImage),
               ),
               ListTile(
+                leading: const Icon(Icons.folder_open),
+                title: const Text('多个文件（PDF / 图片）'),
+                onTap: () => Navigator.pop(sheetContext, _ImportAction.files),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_outlined),
+                title: const Text('连续拍照（返回相机后结束）'),
+                onTap: () =>
+                    Navigator.pop(sheetContext, _ImportAction.sequence),
+              ),
+              ListTile(
                 leading: const Icon(Icons.picture_as_pdf_rounded),
                 title: const Text('导入 PDF'),
                 onTap: () => Navigator.of(sheetContext).pop(_ImportAction.pdf),
@@ -338,6 +396,10 @@ class _HomeTabPageState extends State<HomeTabPage> {
         await _handleBatchImport(BatchDocumentInputSource.multiImage);
       case _ImportAction.pdf:
         await _handleBatchImport(BatchDocumentInputSource.pdf);
+      case _ImportAction.files:
+        await _handleBatchImport(BatchDocumentInputSource.files);
+      case _ImportAction.sequence:
+        await _handleBatchImport(BatchDocumentInputSource.cameraSequence);
     }
   }
 
@@ -474,7 +536,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
                 ),
                 onTap: () => openLearningPage(
                   context,
-                  const PracticeReviewPage(),
+                  const LibraryPracticePage(),
                   onChanged: widget.onDataChanged,
                 ),
               ),
@@ -561,7 +623,7 @@ class _HomeTabPageState extends State<HomeTabPage> {
   );
 }
 
-enum _ImportAction { gallery, multiImage, pdf }
+enum _ImportAction { gallery, multiImage, pdf, files, sequence }
 
 class _HomeData {
   const _HomeData({

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  static const Color primary = Color(0xFF2563EB);
+  static const Color primary = Color(0xFF4F6CF7);
   static const Color primaryDark = Color(0xFF1E40AF);
   static const Color primarySoft = Color(0xFFEFF6FF);
   static const Color primaryLight = Color(0xFFBFDBFE);
@@ -13,7 +13,7 @@ class AppColors {
   static const Color secondaryPurple = Color(0xFF7C3AED);
   static const Color accentOrange = Color(0xFFF97316);
 
-  static const Color background = Color(0xFFF5F7FB);
+  static const Color background = Color(0xFFF7F8FA);
   static const Color surface = Color(0xFFFFFFFF);
   static const Color surfaceAlt = Color(0xFFF1F5F9);
   static const Color surfaceMuted = Color(0xFFE2E8F0);
@@ -25,8 +25,8 @@ class AppColors {
   static const Color borderLight = Color(0xFFEAF0F7);
   static const Color divider = Color(0xFFD8E1EC);
 
-  static const Color textPrimary = Color(0xFF0F172A);
-  static const Color textSecondary = Color(0xFF64748B);
+  static const Color textPrimary = Color(0xFF172033);
+  static const Color textSecondary = Color(0xFF667085);
   static const Color textTertiary = Color(0xFF94A3B8);
   static const Color textOnPrimary = Color(0xFFFFFFFF);
 
@@ -126,11 +126,11 @@ class AppSpacing {
 class AppRadii {
   AppRadii._();
 
-  static const double card = 22;
-  static const double cardSmall = 18;
+  static const double card = 16;
+  static const double cardSmall = 16;
   static const double button = 16;
   static const double input = 14;
-  static const double sheet = 28;
+  static const double sheet = 20;
   static const double chip = 999;
   static const double iconBox = 13;
 }

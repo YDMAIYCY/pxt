@@ -271,7 +271,7 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
               if (hasPendingSimilar) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '完成全部相似题后，原错题会自动进入已掌握。',
+                  '完成不同变式题并通过间隔复习后，再判断是否掌握。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: const Color(0xFFB45309),
                     fontWeight: FontWeight.w700,

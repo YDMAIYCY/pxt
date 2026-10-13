@@ -2,6 +2,7 @@ import '../database/ai_generation_repository.dart';
 import '../database/models/ai_result_records.dart';
 import '../database/models/llm_provider_config.dart';
 import '../llm/minimax_client.dart';
+import 'dart:convert';
 
 class WrongQuestionTrainingDraft {
   const WrongQuestionTrainingDraft({
@@ -37,6 +38,17 @@ class WrongQuestionTrainingService {
       jsonSchema: _jsonSchema,
     );
     final draft = parseTrainingResponse(response);
+    final texts = draft.similarQuestions
+        .map((q) => q['question_text']!.trim())
+        .toList();
+    if (texts.length < 2 ||
+        texts.toSet().length != texts.length ||
+        texts.contains(question.questionText.trim()) ||
+        draft.similarQuestions.any(
+          (q) => (q['answer_text'] ?? '').trim().isEmpty,
+        )) {
+      throw const FormatException('变式训练需要至少两道不同的新题及有效参考答案');
+    }
     await _aiGenerationRepository.replaceWrongQuestionTraining(
       wrongQuestion: question,
       causeTags: draft.causeTags,
@@ -83,6 +95,13 @@ class WrongQuestionTrainingService {
               'explanation',
             ]),
             'difficulty': _pickFirstString(item, const ['difficulty']),
+            'question_kind': _pickFirstString(item, const ['question_kind']),
+            if (item['options'] is List)
+              'options_json': jsonEncode(item['options']),
+            if (item['rubric'] is Map)
+              'rubric_json': jsonEncode(item['rubric']),
+            if (item['expected_keywords'] is List)
+              'expected_keywords_json': jsonEncode(item['expected_keywords']),
           },
         )
         .where((item) => (item['question_text'] ?? '').isNotEmpty)

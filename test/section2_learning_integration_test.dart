@@ -81,7 +81,7 @@ void main() {
   test(
     'fresh database creates the full schema without foreign key errors',
     () async {
-      expect(await db.getVersion(), 15);
+      expect(await db.getVersion(), AppDatabase.databaseVersion);
       expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
       expect(await learning.libraryIds(1, document.id), [library]);
     },
@@ -145,7 +145,7 @@ void main() {
   });
 
   test(
-    'opening a genuine version 14 database migrates data to version 15',
+    'opening a genuine version 14 database migrates data to the current version',
     () async {
       await db.insert('ai_generation_tasks', {
         'document_id': document.id,
@@ -191,7 +191,7 @@ void main() {
         path: path,
       );
       final migratedDb = await migrated.database;
-      expect(await migratedDb.getVersion(), 15);
+      expect(await migratedDb.getVersion(), AppDatabase.databaseVersion);
       expect(
         await LearningRepository(database: migrated).libraryIds(1, document.id),
         [library],
@@ -322,7 +322,7 @@ void main() {
   );
 
   test(
-    'interview follow-up errors become the same targeted retry and close after practice',
+    'interview follow-up errors stay tracked after a single correct practice',
     () async {
       await graph.replaceGraphForDocument(
         userId: 1,
@@ -369,7 +369,7 @@ void main() {
         questionId: retry,
         userAnswer: '使用 Softmax',
       );
-      expect(await learning.errors(1), isEmpty);
+      expect(await learning.errors(1), isNotEmpty);
       expect((await learning.report(1, document.id))['attempts'], 2);
     },
   );

@@ -124,6 +124,8 @@ class AiGenerationOrchestrator {
 
     final promptTemplate = _promptTemplateOf(taskType);
     final scope = await _knowledgeGraphRepository.findDocumentScope(documentId);
+    final sourceVersionId = scope == null ? null :
+      await _learningRepository.sourceVersion(scope.userId, documentId);
     if (scope != null && feedback == null) {
       final cached = await _learningRepository.resources(
         scope.userId,
@@ -173,6 +175,7 @@ class AiGenerationOrchestrator {
         documentId: documentId,
         taskType: taskType,
         response: response,
+        sourceVersionId: sourceVersionId,
       );
 
       await _aiGenerationRepository.markTaskCompleted(
@@ -188,6 +191,7 @@ class AiGenerationOrchestrator {
           content: jsonEncode(response),
           inputText: trimmedText,
           model: client.debugModel,
+          sourceVersionId: sourceVersionId,
         );
       }
       await _refreshKnowledgeGraph(
@@ -221,6 +225,7 @@ class AiGenerationOrchestrator {
     required int documentId,
     required String taskType,
     required Map<String, dynamic> response,
+    int? sourceVersionId,
   }) async {
     switch (taskType) {
       case AiTaskType.knowledgeCards:
@@ -246,7 +251,9 @@ class AiGenerationOrchestrator {
       case AiTaskType.practiceQuestions:
         await _aiGenerationRepository.replacePracticeQuestions(
           documentId: documentId,
-          questions: _parsePracticeQuestions(response),
+          questions: _parsePracticeQuestions(response).map((q) => {
+            ...q, if (sourceVersionId != null) 'source_version_id': '$sourceVersionId',
+          }).toList(),
         );
         return;
       default:

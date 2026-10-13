@@ -7,7 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
 import 'tabs/home_tab_page.dart';
-import 'tabs/knowledge_tab_page.dart';
+import 'book_library_page.dart';
 import 'learning_hub_pages.dart';
 import 'tabs/profile_tab_page.dart';
 
@@ -94,10 +94,8 @@ class _HomePageState extends State<HomePage> {
         onOpenTab: _selectTab,
         onDataChanged: _notifyDataChanged,
       ),
-      KnowledgeTabPage(
-        tabIndex: 1,
+      BookLibraryPage(
         refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
         onDataChanged: _notifyDataChanged,
       ),
       PracticeTabPage(onDataChanged: _notifyDataChanged),

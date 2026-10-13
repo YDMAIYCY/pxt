@@ -1,5 +1,6 @@
 class LearningResourceType {
   static const labels = {
+    'record_summary': '记录摘要',
     'knowledge_cards': '知识卡片',
     'review_outline': '复习提纲',
     'mindmap_text': '思维导图',
@@ -24,6 +25,7 @@ class LearningResourceRecord {
     required this.version,
     required this.fingerprint,
     required this.model,
+    this.sourceVersionId,
   });
   final int id;
   final int documentId;
@@ -33,6 +35,7 @@ class LearningResourceRecord {
   final int version;
   final String fingerprint;
   final String model;
+  final int? sourceVersionId;
 
   factory LearningResourceRecord.fromMap(Map<String, Object?> row) =>
       LearningResourceRecord(
@@ -44,6 +47,7 @@ class LearningResourceRecord {
         version: row['version'] as int,
         fingerprint: row['input_fingerprint'] as String,
         model: row['model'] as String,
+        sourceVersionId: row['source_version_id'] as int?,
       );
 }
 

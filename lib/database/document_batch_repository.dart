@@ -26,6 +26,7 @@ class DocumentBatchRepository {
     required String title,
     required String? originalFilePath,
     required List<DocumentBatchPageDraft> pages,
+    String? operationId,
   }) async {
     if (pages.isEmpty) {
       throw ArgumentError('学习包至少需要包含 1 页资料');
@@ -36,6 +37,15 @@ class DocumentBatchRepository {
     final now = DateTime.now().toUtc().toIso8601String();
 
     final batchId = await db.transaction((txn) async {
+      if (operationId != null) {
+        final prior = await txn.rawQuery(
+          '''SELECT d.batch_id FROM import_records r
+          JOIN source_documents d ON d.import_record_id = r.id
+          WHERE r.user_id = ? AND r.request_id = ? AND d.batch_id IS NOT NULL LIMIT 1''',
+          [userId, operationId],
+        );
+        if (prior.isNotEmpty) return prior.single['batch_id'] as int;
+      }
       final resolvedLibraryId = await _resolveLibraryId(
         txn,
         userId: userId,
@@ -76,7 +86,11 @@ class DocumentBatchRepository {
           'library_id': resolvedLibraryId,
           'batch_id': createdBatchId,
           'page_number': page.pageNumber,
-          'source_type': pageSourceType,
+          'file_page_number': page.filePageNumber,
+          'original_file_path': page.originalFilePath,
+          'source_type': page.originalFilePath != null
+              ? SourceDocumentSourceType.pdfPage
+              : pageSourceType,
           'image_path': page.savedPath,
           'original_title': page.title,
           'ocr_status': SourceDocumentOcrStatus.pending,
@@ -92,6 +106,14 @@ class DocumentBatchRepository {
         where: 'id = ? AND user_id = ?',
         whereArgs: [resolvedLibraryId, userId],
       );
+      if (operationId != null) {
+        await txn.update(
+          'import_records',
+          {'request_id': operationId},
+          where: 'user_id = ? AND operation_id = ?',
+          whereArgs: [userId, 'batch:$createdBatchId'],
+        );
+      }
 
       return createdBatchId;
     });
@@ -190,6 +212,9 @@ class DocumentBatchRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -240,11 +265,12 @@ class DocumentBatchRepository {
 
       final pageRows = await txn.query(
         AppDatabase.tableSourceDocuments,
-        columns: ['image_path'],
+        columns: ['image_path', 'original_file_path'],
         where: 'batch_id = ? AND user_id = ?',
         whereArgs: [batchId, userId],
       );
       cleanupPaths.addAll(pageRows.map((row) => row['image_path'] as String?));
+      cleanupPaths.addAll(pageRows.map((row) => row['original_file_path'] as String?));
 
       await txn.delete(
         AppDatabase.tableSourceDocuments,

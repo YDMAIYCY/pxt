@@ -3,7 +3,7 @@
 
 enum ImageInputSource { camera, gallery }
 
-enum BatchDocumentInputSource { multiImage, pdf }
+enum BatchDocumentInputSource { multiImage, pdf, files, cameraSequence }
 
 // ========== 输入结果模型 ==========
 // 承载图片选取后写入应用私有目录的结果，供后续入库流程使用。
@@ -24,10 +24,14 @@ class StoredDocumentPage {
   const StoredDocumentPage({
     required this.savedPath,
     required this.originalName,
+    this.originalFilePath,
+    this.filePageNumber,
   });
 
   final String savedPath;
   final String originalName;
+  final String? originalFilePath;
+  final int? filePageNumber;
 }
 
 class StoredBatchSelection {

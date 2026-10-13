@@ -4,13 +4,13 @@ import 'package:sqflite/sqflite.dart';
 
 import '../database/ai_generation_repository.dart';
 import '../database/app_database.dart';
+import '../database/import_record_repository.dart';
 import '../database/knowledge_graph_repository.dart';
 import '../database/knowledge_library_repository.dart';
 import '../database/learning_repository.dart';
 import '../database/models/learning_resource_record.dart';
 import '../database/models/llm_provider_config.dart';
 import '../database/models/source_document_record.dart';
-import '../database/ocr_text_repository.dart';
 import '../llm/minimax_client.dart';
 import '../ocr/local_ocr_client.dart';
 import 'ai_generation_orchestrator.dart';
@@ -125,9 +125,17 @@ class LearningResourceService {
             imagePath: imagePath,
           );
     topic = selected;
+    final prior = await understanding(document.id);
+    final selectedTopics = [
+      ...(prior?['selected_topics'] as List? ?? []).whereType<Map>().where(
+        (t) => t['title'] != selected['title'],
+      ),
+      selected,
+    ];
     final content = {
       ...analysis,
       'selected_topic': selected,
+      'selected_topics': selectedTopics,
       'direction': direction,
       'source_image_path': imagePath ?? document.imagePath,
     };
@@ -144,7 +152,8 @@ class LearningResourceService {
       'model': config.effectiveModel,
       'created_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
-    final concepts = (topic['concepts'] as List? ?? [])
+    final concepts = selectedTopics
+        .expand((t) => t['concepts'] as List? ?? [])
         .whereType<Map>()
         .map(
           (c) => KnowledgeConceptDraft(
@@ -156,7 +165,8 @@ class LearningResourceService {
           ),
         )
         .toList();
-    final links = (topic['relationships'] as List? ?? [])
+    final links = selectedTopics
+        .expand((t) => t['relationships'] as List? ?? [])
         .whereType<Map>()
         .map(
           (c) => KnowledgeConceptLinkDraft(
@@ -234,10 +244,9 @@ class LearningResourceService {
   }
 
   Future<String> sourceText(SourceDocumentRecord document) async {
-    final ocr = await OcrTextRepository(
+    final snapshot = await ImportRecordRepository(
       database: _database,
-    ).getByDocumentId(document.id);
-    final image = await understanding(document.id);
+    ).sourceSnapshot(document.userId, document.id);
     final concepts = await repository.concepts(document.userId, document.id);
     final edited = await repository.resources(document.userId, document.id);
     final seen = <String>{};
@@ -246,9 +255,7 @@ class LearningResourceService {
         .map((r) => r.content)
         .join('\n');
     return [
-      if (ocr?.effectiveText.isNotEmpty == true) ocr!.effectiveText,
-      if (image != null)
-        '图片理解（保留不确定性）：${jsonEncode(image['selected_topic'])}\n学习方向：${image['direction'] ?? '知识理解'}\n不确定：${image['uncertainties']}',
+      if (snapshot.text.isNotEmpty) snapshot.text,
       if (concepts.isNotEmpty)
         '已确认知识点：${concepts.map((c) => '${c.name}: ${c.summary}').join('\n')}',
       if (additions.isNotEmpty) '用户补充与修订：$additions',
@@ -263,6 +270,9 @@ class LearningResourceService {
   }) async {
     final source = await sourceText(document);
     if (source.trim().isEmpty) throw StateError('请先识别文字或理解图片');
+    final snapshot = await ImportRecordRepository(
+      database: _database,
+    ).sourceSnapshot(document.userId, document.id);
     final old = await repository.resources(
       document.userId,
       document.id,
@@ -380,6 +390,7 @@ class LearningResourceService {
       content: jsonEncode(response),
       inputText: source,
       model: config.effectiveModel,
+      sourceVersionId: snapshot.id,
     );
   }
 
@@ -413,7 +424,23 @@ class LearningResourceService {
       document.userId,
       conceptId,
     );
-    if (ids.isNotEmpty) return;
+    final record = await ImportRecordRepository(
+      database: _database,
+    ).forDocument(document.userId, document.id);
+    if (record == null) throw StateError('资料缺少导入记录');
+    if (ids.isNotEmpty) {
+      final db = await _database.database;
+      final local = await db.rawQuery(
+        '''SELECT id FROM practice_questions
+        WHERE id IN (${List.filled(ids.length, '?').join(',')})
+          AND document_id IN (SELECT id FROM source_documents WHERE import_record_id = ?)''',
+        [...ids, record.id],
+      );
+      if (local.isNotEmpty) return;
+    }
+    final snapshot = await ImportRecordRepository(
+      database: _database,
+    ).sourceSnapshot(document.userId, document.id);
     final concept = (await repository.concepts(
       document.userId,
       document.id,
@@ -428,9 +455,12 @@ class LearningResourceService {
     final questions = AiGenerationOrchestrator.parsePracticeQuestionsForTest(
       response,
     );
-    await AiGenerationRepository(
-      database: _database,
-    ).appendPracticeQuestions(documentId: document.id, questions: questions);
+    await AiGenerationRepository(database: _database).appendPracticeQuestions(
+      documentId: document.id,
+      questions: questions
+          .map((q) => {...q, 'source_version_id': '${snapshot.id}'})
+          .toList(),
+    );
     final db = await _database.database;
     for (final q in questions) {
       final rows = await db.query(
@@ -455,6 +485,9 @@ class LearningResourceService {
     required String difficulty,
   }) async {
     if (count < 1 || count > 20) throw ArgumentError('题量应为 1 到 20 道');
+    final snapshot = await ImportRecordRepository(
+      database: _database,
+    ).sourceSnapshot(document.userId, document.id);
     final source = await sourceText(document);
     if (source.trim().isEmpty) throw StateError('请先解析这份资料');
     final response = await (_client ?? MiniMaxClient.fromConfig(config))
@@ -472,9 +505,12 @@ class LearningResourceService {
     if (questions.map((q) => q['question_text']).toSet().length != count) {
       throw const FormatException('组卷包含重复题目，请重试');
     }
-    await AiGenerationRepository(
-      database: _database,
-    ).appendPracticeQuestions(documentId: document.id, questions: questions);
+    await AiGenerationRepository(database: _database).appendPracticeQuestions(
+      documentId: document.id,
+      questions: questions
+          .map((q) => {...q, 'source_version_id': '${snapshot.id}'})
+          .toList(),
+    );
     await repository.saveResource(
       userId: document.userId,
       documentId: document.id,
@@ -483,6 +519,7 @@ class LearningResourceService {
       content: jsonEncode(response),
       inputText: source,
       model: config.effectiveModel,
+      sourceVersionId: snapshot.id,
     );
     final db = await _database.database;
     final ids = <int>[];
@@ -490,8 +527,9 @@ class LearningResourceService {
       final rows = await db.query(
         'practice_questions',
         columns: ['id'],
-        where: 'document_id = ? AND question_text = ?',
-        whereArgs: [document.id, q['question_text']],
+        where:
+            'document_id = ? AND question_text = ? AND source_version_id = ?',
+        whereArgs: [document.id, q['question_text'], snapshot.id],
       );
       ids.add(rows.first['id'] as int);
     }

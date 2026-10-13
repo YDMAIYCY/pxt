@@ -64,6 +64,95 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
         return _pickAndStoreMultipleImages();
       case BatchDocumentInputSource.pdf:
         return _pickAndRenderPdfPages();
+      case BatchDocumentInputSource.files:
+        return _pickAndStoreFiles();
+      case BatchDocumentInputSource.cameraSequence:
+        return _captureSequence();
+    }
+  }
+
+  Future<StoredBatchSelection?> _captureSequence() async {
+    final pages = <StoredDocumentPage>[];
+    while (pages.length < 20) {
+      final selected = await pickAndStoreImage(source: ImageInputSource.camera);
+      if (selected == null) break;
+      pages.add(
+        StoredDocumentPage(
+          savedPath: selected.savedPath,
+          originalName: '拍照第 ${pages.length + 1} 张',
+        ),
+      );
+    }
+    if (pages.isEmpty) return null;
+    return StoredBatchSelection(
+      source: BatchDocumentInputSource.cameraSequence,
+      title: '连续拍照 · ${pages.length} 张',
+      originalFilePath: null,
+      pages: pages,
+    );
+  }
+
+  Future<StoredBatchSelection?> _pickAndStoreFiles() async {
+    final selected = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+      allowMultiple: true,
+      withData: false,
+    );
+    if (selected == null || selected.files.isEmpty) return null;
+    final directory = await _ensureStorageDirectory();
+    final pages = <StoredDocumentPage>[];
+    final stored = <String>[];
+    try {
+      for (final file in selected.files) {
+        if (file.path == null) throw StateError('文件无法读取：${file.name}');
+        final isPdf = p.extension(file.name).toLowerCase() == '.pdf';
+        final copy = await _copyIntoStorage(
+          sourcePath: file.path!,
+          storageDirectory: directory,
+          prefix: isPdf ? 'source_pdf' : 'source',
+        );
+        stored.add(copy);
+        if (isPdf) {
+          final rendered = await _pdfPageRenderer.renderPdf(
+            pdfPath: copy,
+            outputDirectoryPath: directory.path,
+            outputPrefix: 'pdf_page_${DateTime.now().microsecondsSinceEpoch}',
+            maxPages: _maxPdfImportPages,
+            maxLongestSide: _maxPdfRenderLongestSide,
+            maxRenderedPixels: _maxPdfRenderedPixels,
+          );
+          if (rendered.isEmpty) throw StateError('PDF 没有可导入页面：${file.name}');
+          for (final page in rendered) {
+            stored.add(page.savedPath);
+            pages.add(
+              StoredDocumentPage(
+                savedPath: page.savedPath,
+                originalName: '${file.name} · 第 ${page.pageNumber} 页',
+                originalFilePath: copy,
+                filePageNumber: page.pageNumber,
+              ),
+            );
+          }
+        } else {
+          pages.add(
+            StoredDocumentPage(savedPath: copy, originalName: file.name),
+          );
+        }
+      }
+      return StoredBatchSelection(
+        source: BatchDocumentInputSource.files,
+        title: selected.files.length == 1
+            ? selected.files.single.name
+            : '文件导入 · ${selected.files.length} 个文件',
+        originalFilePath: null,
+        pages: pages,
+      );
+    } catch (_) {
+      for (final path in stored) {
+        await _deleteStoredPath(path);
+      }
+      rethrow;
     }
   }
 
@@ -142,6 +231,8 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
           StoredDocumentPage(
             savedPath: page.savedPath,
             originalName: '${title.isEmpty ? 'PDF' : title}-${page.pageNumber}',
+            originalFilePath: pdfCopyPath,
+            filePageNumber: page.pageNumber,
           ),
         );
       }

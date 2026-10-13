@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../database/learning_repository.dart';
+import 'library_practice_page.dart';
 
 import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
@@ -11,6 +12,7 @@ class PracticeReviewPage extends StatefulWidget {
   const PracticeReviewPage({
     this.initialQuestionId,
     this.documentId,
+    this.libraryId,
     this.conceptId,
     this.wrongOnly = false,
     this.questionLimit,
@@ -24,6 +26,7 @@ class PracticeReviewPage extends StatefulWidget {
 
   final int? initialQuestionId;
   final int? documentId;
+  final int? libraryId;
   final int? conceptId;
   final bool wrongOnly;
   final int? questionLimit;
@@ -49,6 +52,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
   bool _answerRevealed = false;
   bool _isSaving = false;
   bool _isFavoriteSaving = false;
+  String _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
 
   @override
   void initState() {
@@ -74,33 +78,16 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     }
     _userId = user.id;
 
-    var questions = await _aiGenerationRepository.fetchReviewQueueByUser(
-      userId: user.id,
-      limit: 300,
-    );
-    if (widget.questionIds != null) {
-      questions = (await _aiGenerationRepository.fetchPracticeQuestionsByUser(
-        userId: user.id,
-        limit: 1000,
-      )).where((q) => widget.questionIds!.contains(q.question.id)).toList();
-      questions.sort(
-        (a, b) => widget.questionIds!
-            .indexOf(a.question.id)
-            .compareTo(widget.questionIds!.indexOf(b.question.id)),
-      );
-    }
-    if (widget.documentId != null) {
-      questions = questions
-          .where((q) => q.question.documentId == widget.documentId)
-          .toList();
-    }
-    if (widget.wrongOnly) {
-      questions = questions.where((q) => q.question.isWrong).toList();
-    }
-    if (widget.conceptId != null) {
-      final ids = await (widget.learningRepository ?? LearningRepository())
-          .questionsForConcept(user.id, widget.conceptId!);
-      questions = questions.where((q) => ids.contains(q.question.id)).toList();
+    final scoped = widget.libraryId != null || widget.documentId != null ||
+      widget.conceptId != null || widget.questionIds != null;
+    var questions = scoped
+      ? await _aiGenerationRepository.fetchScopedPracticeQuestions(
+          userId: user.id, libraryId: widget.libraryId, documentId: widget.documentId,
+          conceptId: widget.conceptId, wrongOnly: widget.wrongOnly,
+          questionIds: widget.questionIds)
+      : await _aiGenerationRepository.fetchReviewQueueByUser(userId: user.id, limit: 300);
+    if (widget.wrongOnly && !scoped) {
+      questions = questions.where((q) => q.question.wrongCount > 0 && !q.question.isMastered).toList();
     }
     if (widget.questionLimit != null) {
       questions = questions.take(widget.questionLimit!).toList();
@@ -120,14 +107,13 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       if (index >= 0) {
         _currentIndex = index;
       } else {
-        final selected = await _aiGenerationRepository
-            .fetchPracticeQuestionByUserAndId(
-              userId: user.id,
-              questionId: initialId,
-            );
-        if (selected != null) {
-          return [selected, ...questions];
-        }
+        final allowed = widget.questionIds == null || widget.questionIds!.contains(initialId);
+        final matches = !allowed ? <PracticeQuestionWithDocument>[] :
+          await _aiGenerationRepository.fetchScopedPracticeQuestions(
+            userId: user.id, libraryId: widget.libraryId, documentId: widget.documentId,
+            conceptId: widget.conceptId, wrongOnly: widget.wrongOnly,
+            questionIds: [initialId]);
+        if (matches.isNotEmpty) return [matches.single, ...questions];
       }
     }
     return questions;
@@ -136,6 +122,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
   Future<void> _reload() async {
     _answerController.clear();
     _answerRevealed = false;
+    _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
     final future = _loadQuestions();
     setState(() {
       _future = future;
@@ -143,14 +130,18 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     await future;
   }
 
-  void _completeAnswer() {
+  Future<void> _completeAnswer(PracticeQuestionRecord question) async {
     if (_answerController.text.trim().isEmpty) {
       _showMessage('请先输入你的答案');
       return;
     }
-    setState(() {
-      _answerRevealed = true;
-    });
+    final judged = evaluateObjectiveAnswer(question, _answerController.text);
+    if (judged != null) {
+      if (judged) { await _markMastered(question); }
+      else { await _retryQuestion(question); }
+      return;
+    }
+    setState(() { _answerRevealed = true; });
   }
 
   Future<void> _toggleFavorite(PracticeQuestionRecord question) async {
@@ -195,14 +186,13 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       _isSaving = true;
     });
     try {
-      await _aiGenerationRepository.markPracticeQuestionCorrect(
-        questionId: question.id,
-        userAnswer: _answerController.text,
-      );
+      await _aiGenerationRepository.submitPracticeAnswer(
+        userId: _userId!, questionId: question.id, requestId: _requestId,
+        libraryId: widget.libraryId, answer: _answerController.text, correct: true);
       if (!mounted) {
         return;
       }
-      _showMessage('已掌握，题目已移出待刷列表');
+      _showMessage('已记录本次答对，按复习进度继续巩固');
       await _reload();
     } finally {
       if (mounted) {
@@ -221,10 +211,9 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       _isSaving = true;
     });
     try {
-      await _aiGenerationRepository.markPracticeQuestionWrong(
-        questionId: question.id,
-        userAnswer: _answerController.text,
-      );
+      await _aiGenerationRepository.submitPracticeAnswer(
+        userId: _userId!, questionId: question.id, requestId: _requestId,
+        libraryId: widget.libraryId, answer: _answerController.text, correct: false);
       if (!mounted) {
         return;
       }
@@ -232,6 +221,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       setState(() {
         _answerRevealed = false;
         _answerController.clear();
+        _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
       });
     } finally {
       if (mounted) {
@@ -315,6 +305,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
               const SizedBox(height: 14),
               TextField(
                 controller: _answerController,
+                enabled: !_isSaving,
                 minLines: 3,
                 maxLines: 6,
                 decoration: const InputDecoration(
@@ -329,7 +320,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                   if (!_answerRevealed)
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _completeAnswer,
+                        onPressed: _isSaving ? null : () => _completeAnswer(question),
                         icon: const Icon(Icons.done_rounded),
                         label: const Text('完成'),
                       ),
@@ -341,7 +332,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                             ? null
                             : () => _retryQuestion(question),
                         icon: const Icon(Icons.replay_rounded),
-                        label: const Text('重新刷题'),
+                        label: const Text('本次答错'),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -351,7 +342,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                             ? null
                             : () => _markMastered(question),
                         icon: const Icon(Icons.check_circle_rounded),
-                        label: const Text('已掌握'),
+                        label: const Text('本次答对'),
                       ),
                     ),
                   ],
@@ -367,12 +358,13 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                   children: [
                     Expanded(
                       child: TextButton.icon(
-                        onPressed: _currentIndex == 0
+                        onPressed: _isSaving || _currentIndex == 0
                             ? null
                             : () {
                                 setState(() {
                                   _currentIndex--;
                                   _answerController.clear();
+                                  _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
                                   _answerRevealed = false;
                                 });
                               },
@@ -382,12 +374,14 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                     ),
                     Expanded(
                       child: TextButton.icon(
-                        onPressed: _currentIndex == questions.length - 1
+                        onPressed:
+                            _isSaving || _currentIndex == questions.length - 1
                             ? null
                             : () {
                                 setState(() {
                                   _currentIndex++;
                                   _answerController.clear();
+                                  _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
                                   _answerRevealed = false;
                                 });
                               },

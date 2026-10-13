@@ -34,6 +34,7 @@ class DocumentIngestService {
     required int userId,
     int? libraryId,
     required ImageInputSource source,
+    String? operationId,
   }) async {
     final storedImage = await _imageInputPort.pickAndStoreImage(source: source);
 
@@ -48,6 +49,7 @@ class DocumentIngestService {
         sourceType: _mapSourceType(source),
         imagePath: storedImage.savedPath,
         title: _buildDocumentTitle(storedImage),
+        operationId: operationId,
       );
     } catch (_) {
       await _cleanupStoredFile(storedImage.savedPath);
@@ -59,6 +61,7 @@ class DocumentIngestService {
     required int userId,
     int? libraryId,
     required BatchDocumentInputSource source,
+    String? operationId,
   }) async {
     final storedBatch = await _batchInputPort.pickAndStoreBatch(source: source);
     if (storedBatch == null || storedBatch.pages.isEmpty) {
@@ -74,11 +77,13 @@ class DocumentIngestService {
         title: _normalizeBatchTitle(storedBatch.title, storedBatch.source),
         originalFilePath: storedBatch.originalFilePath,
         pages: _buildPageDrafts(storedBatch),
+        operationId: operationId,
       );
     } catch (_) {
       await _cleanupStoredFile(storedBatch.originalFilePath);
       for (final page in storedBatch.pages) {
         await _cleanupStoredFile(page.savedPath);
+        await _cleanupStoredFile(page.originalFilePath);
       }
       rethrow;
     }
@@ -99,6 +104,10 @@ class DocumentIngestService {
         return DocumentBatchSourceType.multiImage;
       case BatchDocumentInputSource.pdf:
         return DocumentBatchSourceType.pdf;
+      case BatchDocumentInputSource.files:
+        return 'files';
+      case BatchDocumentInputSource.cameraSequence:
+        return 'camera_sequence';
     }
   }
 
@@ -108,6 +117,10 @@ class DocumentIngestService {
         return SourceDocumentSourceType.galleryImport;
       case BatchDocumentInputSource.pdf:
         return SourceDocumentSourceType.pdfPage;
+      case BatchDocumentInputSource.files:
+        return SourceDocumentSourceType.galleryImport;
+      case BatchDocumentInputSource.cameraSequence:
+        return SourceDocumentSourceType.cameraCapture;
     }
   }
 
@@ -143,6 +156,10 @@ class DocumentIngestService {
         return '批量图片 $timestamp';
       case BatchDocumentInputSource.pdf:
         return 'PDF 资料 $timestamp';
+      case BatchDocumentInputSource.files:
+        return '文件导入 $timestamp';
+      case BatchDocumentInputSource.cameraSequence:
+        return '连续拍照 $timestamp';
     }
   }
 
@@ -157,8 +174,12 @@ class DocumentIngestService {
           final page = entry.value;
           return DocumentBatchPageDraft(
             savedPath: page.savedPath,
-            title: '$batchTitle 第$pageNumber页',
+            title: batch.source == BatchDocumentInputSource.files
+                ? page.originalName
+                : '$batchTitle 第$pageNumber页',
             pageNumber: pageNumber,
+            originalFilePath: page.originalFilePath,
+            filePageNumber: page.filePageNumber,
           );
         })
         .toList(growable: false);

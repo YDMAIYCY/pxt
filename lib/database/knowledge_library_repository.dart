@@ -150,12 +150,23 @@ class KnowledgeLibraryRepository {
 
       final documentRows = await txn.query(
         AppDatabase.tableSourceDocuments,
-        columns: ['image_path'],
+        columns: ['image_path', 'original_file_path'],
         where: 'user_id = ? AND library_id = ?',
         whereArgs: [userId, libraryId],
       );
       cleanupPaths.addAll(
         documentRows.map((row) => row['image_path'] as String?),
+      );
+      cleanupPaths.addAll(
+        documentRows.map((row) => row['original_file_path'] as String?),
+      );
+      await txn.rawUpdate(
+        '''UPDATE import_records SET library_id = (
+          SELECT d.library_id FROM source_documents d
+          WHERE d.import_record_id = import_records.id AND d.library_id != ?
+          ORDER BY d.id LIMIT 1)
+          WHERE user_id = ? AND library_id = ?''',
+        [libraryId, userId, libraryId],
       );
 
       final batchRows = await txn.query(

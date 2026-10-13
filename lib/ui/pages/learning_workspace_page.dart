@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../database/auth_repository.dart';
 import '../../database/app_database.dart';
+import '../../database/import_record_repository.dart';
 import '../../database/knowledge_graph_repository.dart';
 import '../../database/knowledge_library_repository.dart';
 import '../../database/learning_repository.dart';
@@ -16,6 +17,9 @@ import '../../database/source_document_repository.dart';
 import '../../focus/repository/focus_repository.dart';
 import '../../generator/learning_resource_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/record_mindmap_view.dart';
+import 'rich_note_editor_page.dart';
+import 'source_version_page.dart';
 import 'ai_interview_page.dart';
 import 'image_crop_selection_page.dart';
 import 'learning_hub_pages.dart';
@@ -31,6 +35,7 @@ class LearningWorkspacePage extends StatefulWidget {
     this.database,
     this.authRepository,
     this.resourceService,
+    this.embedded = false,
     super.key,
   });
   final int documentId;
@@ -39,6 +44,7 @@ class LearningWorkspacePage extends StatefulWidget {
   final AppDatabase? database;
   final AuthRepository? authRepository;
   final LearningResourceService? resourceService;
+  final bool embedded;
   @override
   State<LearningWorkspacePage> createState() => _LearningWorkspacePageState();
 }
@@ -61,7 +67,7 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
   }
 
   Future<_WorkspaceData> _load() async {
-    final user = await (widget.authRepository ?? AuthRepository())
+    final user = await (widget.authRepository ?? AuthRepository(database: widget.database))
         .getCurrentUserProfile();
     if (user == null) throw StateError('请先登录');
     final document = await SourceDocumentRepository(
@@ -75,6 +81,10 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
       await _repository.concepts(user.id, document.id),
       await _repository.report(user.id, document.id),
       await _service.understanding(document.id),
+      sourceFingerprint: LearningRepository.fingerprint(await _service.sourceText(document)),
+      sourceVersionId: (await ImportRecordRepository(
+        database: widget.database,
+      ).sourceSnapshot(user.id, document.id)).id,
     );
   }
 
@@ -183,6 +193,7 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
       direction: direction,
       imagePath: path,
     );
+    if (mounted) setState(() => _type = 'knowledge_cards');
     // Recommend classification after parsing, while keeping the user's final choice.
     if (mounted) await _libraries(data, recommend: true);
   }
@@ -278,6 +289,33 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
     _WorkspaceData data,
     LearningResourceRecord? resource,
   ) async {
+    if (resource != null &&
+        [
+          'notes',
+          'record_summary',
+          'review_outline',
+          'deep_explanation',
+          'annotation',
+        ].contains(resource.type)) {
+      final edited = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RichNoteEditorPage(content: resource.content),
+        ),
+      );
+      if (edited != null) {
+        await _repository.saveResource(
+          userId: data.document.userId,
+          documentId: resource.documentId,
+          type: resource.type,
+          title: resource.title,
+          content: edited,
+          inputText: await _service.sourceText(data.document),
+          model: 'user',
+        );
+      }
+      return;
+    }
     Map<String, dynamic>? cardData;
     int? cardIndex;
     if (resource?.type == 'knowledge_cards') {
@@ -555,7 +593,7 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('知识包学习资源')),
+    appBar: widget.embedded ? null : AppBar(title: const Text('记录学习资源')),
     body: FutureBuilder<_WorkspaceData>(
       future: _future,
       builder: (context, snapshot) {
@@ -737,6 +775,17 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
                         resource: resource,
                         userId: data.document.userId,
                       )
+                    : ['mindmap_text', 'knowledge_tree'].contains(_type)
+                    ? RecordMindmapView(
+                        text: resourceText(resource.content),
+                        onSource: () => openLearningPage(
+                          context,
+                          resource.sourceVersionId == null
+                            ? OcrResultPage(documentId: resource.documentId)
+                            : SourceVersionPage(userId: data.document.userId,
+                              versionId: resource.sourceVersionId!, database: widget.database),
+                        ),
+                      )
                     : SelectableText(resourceText(resource.content));
                 return Card(
                   child: Padding(
@@ -750,11 +799,29 @@ class _LearningWorkspacePageState extends State<LearningWorkspacePage> {
                                 style: AppTextStyles.h3(context),
                               ),
                               const SizedBox(height: 8),
+                              if (resource.model != 'user' && ((resource.sourceVersionId != null &&
+                                  resource.sourceVersionId != data.sourceVersionId) ||
+                                  resource.fingerprint != data.sourceFingerprint))
+                                const Text(
+                                  '来源已更新，这份资源保留旧版内容，可生成新版本。',
+                                  style: TextStyle(color: AppColors.warning),
+                                ),
+                              TextButton.icon(
+                                icon: const Icon(Icons.source_outlined),
+                                label: const Text('查看来源资料'),
+                                onPressed: () => openLearningPage(
+                                  context,
+                                  resource.sourceVersionId == null
+                                    ? OcrResultPage(documentId: resource.documentId)
+                                    : SourceVersionPage(userId: data.document.userId,
+                                      versionId: resource.sourceVersionId!, database: widget.database),
+                                ),
+                              ),
                               content,
                             ],
                           )
                         : ExpansionTile(
-                            title: Text('历史版本 ${resource.version}'),
+                            title: Text('保存版本 ${resource.version} · ${resource.title}'),
                             children: [
                               Padding(
                                 padding: const EdgeInsets.all(12),
@@ -1005,14 +1072,18 @@ class _WorkspaceData {
     this.resources,
     this.concepts,
     this.report,
-    this.understanding,
-  );
+    this.understanding, {
+    required this.sourceVersionId,
+    required this.sourceFingerprint,
+  });
   final SourceDocumentRecord document;
   final LlmProviderConfig? config;
   final List<LearningResourceRecord> resources;
   final List<KnowledgeConceptRecord> concepts;
   final Map<String, Object?> report;
   final Map<String, dynamic>? understanding;
+  final int sourceVersionId;
+  final String sourceFingerprint;
 }
 
 class DueFlashcardsPage extends StatefulWidget {

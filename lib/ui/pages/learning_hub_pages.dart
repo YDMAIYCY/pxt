@@ -10,10 +10,10 @@ import 'ai_chat_page.dart';
 import 'ai_interview_page.dart';
 import 'practice_review_page.dart';
 import 'qsclaw_agent_page.dart';
-import 'learning_errors_page.dart';
 import 'tabs/focus_tab_page.dart';
 import 'tabs/tasks_tab_page.dart';
 import 'learning_workspace_page.dart';
+import 'library_practice_page.dart';
 
 Future<void> openLearningPage(
   BuildContext context,
@@ -28,62 +28,8 @@ class PracticeTabPage extends StatelessWidget {
   const PracticeTabPage({this.onDataChanged, super.key});
   final VoidCallback? onDataChanged;
   @override
-  Widget build(BuildContext context) => _Hub(
-    title: '练习',
-    subtitle: '用练习和问答检验理解，再回到薄弱知识点。',
-    items: [
-      _HubItem(
-        '自由刷题',
-        '复习已生成的题目',
-        Icons.quiz_rounded,
-        () => openLearningPage(
-          context,
-          const PracticeReviewPage(),
-          onChanged: onDataChanged,
-        ),
-      ),
-      _HubItem(
-        '智能组卷',
-        '选择资料，按需生成概念辨析和应用题',
-        Icons.playlist_add_check_rounded,
-        () => openLearningPage(
-          context,
-          const _PackPicker(),
-          onChanged: onDataChanged,
-        ),
-      ),
-      _HubItem(
-        'AI 面试',
-        '围绕知识点进行问答与追问',
-        Icons.record_voice_over_rounded,
-        () => openLearningPage(
-          context,
-          const AiInterviewPage(),
-          onChanged: onDataChanged,
-        ),
-      ),
-      _HubItem(
-        '错题重刷',
-        '练习错误与面试遗漏统一追踪',
-        Icons.psychology_rounded,
-        () => openLearningPage(
-          context,
-          const LearningErrorsPage(),
-          onChanged: onDataChanged,
-        ),
-      ),
-      _HubItem(
-        '专注计时',
-        '为当前学习开启番茄钟',
-        Icons.timer_rounded,
-        () => openLearningPage(
-          context,
-          const FocusSessionPage(),
-          onChanged: onDataChanged,
-        ),
-      ),
-    ],
-  );
+  Widget build(BuildContext context) =>
+      const LibraryPracticePage(embedded: true);
 }
 
 class CompanionTabPage extends StatelessWidget {

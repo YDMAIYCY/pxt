@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../common/source_document_file_store.dart';
 import 'app_database.dart';
+import 'import_record_repository.dart';
 import 'models/source_document_record.dart';
 
 // ========== 原始资料仓库 ==========
@@ -23,19 +24,29 @@ class SourceDocumentRepository {
     required String sourceType,
     required String imagePath,
     required String title,
+    String? operationId,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final createdAt = DateTime.now().toUtc().toIso8601String();
 
     final documentId = await db.transaction((txn) async {
+      if (operationId != null) {
+        final prior = await txn.rawQuery(
+          '''SELECT d.id FROM import_records r
+          JOIN source_documents d ON d.import_record_id = r.id
+          WHERE r.user_id = ? AND r.request_id = ? AND d.batch_id IS NULL LIMIT 1''',
+          [userId, operationId],
+        );
+        if (prior.isNotEmpty) return prior.single['id'] as int;
+      }
       final resolvedLibraryId = await _resolveLibraryId(
         txn,
         userId: userId,
         libraryId: libraryId,
       );
 
-      return txn.insert(AppDatabase.tableSourceDocuments, {
+      final id = await txn.insert(AppDatabase.tableSourceDocuments, {
         'user_id': userId,
         'library_id': resolvedLibraryId,
         'source_type': sourceType,
@@ -46,6 +57,15 @@ class SourceDocumentRepository {
         'ocr_updated_at': createdAt,
         'created_at': createdAt,
       });
+      if (operationId != null) {
+        await txn.update(
+          'import_records',
+          {'request_id': operationId},
+          where: "user_id = ? AND operation_id = ?",
+          whereArgs: [userId, 'document:$id'],
+        );
+      }
+      return id;
     });
 
     final createdDocument = await getSourceDocumentById(
@@ -81,6 +101,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -133,6 +156,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -177,6 +203,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -222,6 +251,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -256,6 +288,27 @@ class SourceDocumentRepository {
     required int documentId,
     required int libraryId,
   }) async {
+    final record = await ImportRecordRepository(
+      database: _database,
+    ).forDocument(userId, documentId);
+    if (record != null) {
+      final db = await _database.database;
+      final links = await db.rawQuery(
+        '''SELECT DISTINCT dl.library_id
+        FROM document_library_links dl JOIN source_documents d ON d.id = dl.document_id
+        WHERE d.import_record_id = ?''',
+        [record.id],
+      );
+      await ImportRecordRepository(
+        database: _database,
+      ).setLibraries(userId, record.id, [
+        libraryId,
+        ...links
+            .map((r) => r['library_id'] as int)
+            .where((id) => id != libraryId && id != record.libraryId),
+      ]);
+      return;
+    }
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
@@ -335,6 +388,8 @@ class SourceDocumentRepository {
     if (updated == 0) {
       throw StateError('资料不存在或无权更新图片');
     }
+    await db.delete('image_understandings', where: 'document_id = ?',
+      whereArgs: [documentId]);
   }
 
   Future<void> deleteDocument({

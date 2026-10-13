@@ -135,6 +135,7 @@ class _RecordingSourceDocumentRepository extends SourceDocumentRepository {
     required String sourceType,
     required String imagePath,
     required String title,
+    String? operationId,
   }) async {
     lastUserId = userId;
     lastLibraryId = libraryId;
@@ -164,6 +165,7 @@ class _ThrowingSourceDocumentRepository extends SourceDocumentRepository {
     required String sourceType,
     required String imagePath,
     required String title,
+    String? operationId,
   }) async {
     throw Exception('database write failed');
   }

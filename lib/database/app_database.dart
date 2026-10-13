@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'learning_schema.dart';
+import 'import_record_schema.dart';
+import 'practice_evidence_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -29,7 +32,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 15;
+  static const int databaseVersion = 16;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -63,13 +66,37 @@ class AppDatabase {
   }
 
   Future<void> ensureSchemaReady() async {
-    final db = await database;
-    await _ensureSchemaConsistency(db);
+    // Opening already runs creation, migration and consistency checks.
+    await database;
   }
 
   Future<Database> _open() async {
     final dbDirectory = await getDatabasesPath();
     final dbPath = p.join(dbDirectory, databaseName);
+    if (await File(dbPath).exists()) {
+      final previous = await openDatabase(
+        dbPath,
+        readOnly: true,
+        singleInstance: false,
+      );
+      final version = await previous.getVersion();
+      await previous.close();
+      if (version < databaseVersion) {
+        final backup = Directory(
+          p.join(
+            dbDirectory,
+            'backup-v$version-${DateTime.now().millisecondsSinceEpoch}',
+          ),
+        );
+        await backup.create();
+        for (final suffix in ['', '-wal', '-shm']) {
+          final file = File('$dbPath$suffix');
+          if (await file.exists()) {
+            await file.copy(p.join(backup.path, '$databaseName$suffix'));
+          }
+        }
+      }
+    }
 
     return openDatabase(
       dbPath,
@@ -396,6 +423,8 @@ class AppDatabase {
     await _createKnowledgeGraphIndexes(db);
     await _createFavoriteIndexes(db);
     await createLearningSchema(db);
+    await createImportRecordSchema(db);
+    await createPracticeEvidenceSchema(db);
   }
 
   Future<void> _upgradeTables(
@@ -445,6 +474,10 @@ class AppDatabase {
     }
     if (oldVersion < 15) {
       await createLearningSchema(db);
+    }
+    if (oldVersion < 16) {
+      await createImportRecordSchema(db);
+      await createPracticeEvidenceSchema(db);
     }
   }
 

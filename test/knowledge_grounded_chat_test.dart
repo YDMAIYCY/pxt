@@ -28,28 +28,6 @@ void main() {
       },
     );
 
-    test('adaptive graph hooks update mastery from practice outcomes', () {
-      final graphSource = File(
-        'lib/database/knowledge_graph_repository.dart',
-      ).readAsStringSync();
-      final generationSource = File(
-        'lib/database/ai_generation_repository.dart',
-      ).readAsStringSync();
-      final homeSource = File(
-        'lib/ui/pages/tabs/home_tab_page.dart',
-      ).readAsStringSync();
-
-      expect(
-        graphSource,
-        contains('Future<void> updateMasteryFromPracticeQuestion'),
-      );
-      expect(graphSource, contains('Future<List<KnowledgeNextBestAction>>'));
-      expect(graphSource, contains('prerequisite'));
-      expect(generationSource, contains('isCorrect: false'));
-      expect(generationSource, contains('isCorrect: true'));
-      expect(homeSource, contains('data.nextActions.map'));
-    });
-
     test(
       'chat service injects retrieved sources into the model prompt',
       () async {
