@@ -48,6 +48,8 @@ class SourceDocumentRecord {
     required this.ocrStatus,
     required this.aiDone,
     this.libraryId,
+    this.importRecordId,
+    this.originalFilePath,
     this.batchId,
     this.pageNumber,
     this.ocrErrorMessage,
@@ -57,6 +59,8 @@ class SourceDocumentRecord {
   final int id;
   final int userId;
   final int? libraryId;
+  final int? importRecordId;
+  final String? originalFilePath;
   final int? batchId;
   final int? pageNumber;
   final String sourceType;
@@ -128,6 +132,8 @@ class SourceDocumentRecord {
 
     return SourceDocumentRecord(
       id: map['id'] as int,
+      importRecordId: map['import_record_id'] as int?,
+      originalFilePath: map['original_file_path'] as String?,
       userId: map['user_id'] as int,
       libraryId: map['library_id'] as int?,
       batchId: map['batch_id'] as int?,

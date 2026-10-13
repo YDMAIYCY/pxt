@@ -100,6 +100,8 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
     required int userId,
     required String name,
     String? description,
+    String coverTheme = 'math',
+    int coverColor = 0xFF5B90FF,
   }) async {
     createdNames.add(name);
     final library = KnowledgeLibraryRecord(

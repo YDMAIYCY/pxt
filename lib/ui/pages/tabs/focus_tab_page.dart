@@ -449,12 +449,12 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
           ),
           if (stats != null) ...[
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
               children: [
                 _MiniStatBadge(icon: Icons.timer_rounded, label: '今日', value: _formatSeconds(stats.todaySeconds)),
-                const SizedBox(width: 10),
                 _MiniStatBadge(icon: Icons.track_changes_rounded, label: '番茄', value: '${stats.todayPomodoros}个'),
-                const SizedBox(width: 10),
                 _MiniStatBadge(icon: Icons.stars_rounded, label: '积分', value: '${stats.totalPoints}'),
               ],
             ),

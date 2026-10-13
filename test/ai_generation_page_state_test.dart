@@ -250,6 +250,7 @@ class _ThrowingAiGenerationOrchestrator extends AiGenerationOrchestrator {
     required String ocrText,
     required String taskType,
     LlmProviderConfig? llmConfig,
+    bool appendResults = false,
   }) async {
     throw StateError('network failed');
   }
@@ -268,6 +269,7 @@ class _RefiningAiGenerationOrchestrator extends AiGenerationOrchestrator {
     required String currentResultText,
     required String feedback,
     LlmProviderConfig? llmConfig,
+    bool appendResults = false,
   }) async {
     lastTaskType = taskType;
     lastCurrentResult = currentResultText;

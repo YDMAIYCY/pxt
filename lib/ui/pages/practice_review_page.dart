@@ -9,6 +9,7 @@ import '../../database/models/ai_result_records.dart';
 class PracticeReviewPage extends StatefulWidget {
   const PracticeReviewPage({
     this.initialQuestionId,
+    this.recordId,
     this.authRepository,
     this.aiGenerationRepository,
     this.favoriteRepository,
@@ -16,6 +17,7 @@ class PracticeReviewPage extends StatefulWidget {
   });
 
   final int? initialQuestionId;
+  final int? recordId;
   final AuthRepository? authRepository;
   final AiGenerationRepository? aiGenerationRepository;
   final FavoriteRepository? favoriteRepository;
@@ -61,10 +63,16 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     }
     _userId = user.id;
 
-    final questions = await _aiGenerationRepository.fetchReviewQueueByUser(
-      userId: user.id,
-      limit: 300,
-    );
+    final questions = widget.recordId != null
+        ? await _aiGenerationRepository.fetchPracticeQuestionsByUser(
+            userId: user.id,
+            recordId: widget.recordId,
+            limit: 100000,
+          )
+        : await _aiGenerationRepository.fetchReviewQueueByUser(
+            userId: user.id,
+            limit: 300,
+          );
     final favoriteKeys = await _favoriteRepository.fetchFavoriteKeys(user.id);
     if (mounted) {
       setState(() => _favoriteKeys = favoriteKeys);
@@ -85,7 +93,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
               userId: user.id,
               questionId: initialId,
             );
-        if (selected != null) {
+        if (selected != null && widget.recordId == null) {
           return [selected, ...questions];
         }
       }

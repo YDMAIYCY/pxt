@@ -217,17 +217,20 @@ class AiGenerationRepository {
   Future<void> replaceKnowledgeCards({
     required int documentId,
     required List<Map<String, String>> cards,
+    bool append = false,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      await txn.delete(
-        AppDatabase.tableKnowledgeCards,
-        where: 'document_id = ?',
-        whereArgs: [documentId],
-      );
+      if (!append) {
+        await txn.delete(
+          AppDatabase.tableKnowledgeCards,
+          where: 'document_id = ?',
+          whereArgs: [documentId],
+        );
+      }
 
       for (final card in cards) {
         await txn.insert(AppDatabase.tableKnowledgeCards, {
@@ -244,17 +247,20 @@ class AiGenerationRepository {
     required int documentId,
     required String title,
     required String outlineText,
+    bool append = false,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      await txn.delete(
-        AppDatabase.tableReviewOutlines,
-        where: 'document_id = ?',
-        whereArgs: [documentId],
-      );
+      if (!append) {
+        await txn.delete(
+          AppDatabase.tableReviewOutlines,
+          where: 'document_id = ?',
+          whereArgs: [documentId],
+        );
+      }
 
       await txn.insert(AppDatabase.tableReviewOutlines, {
         'document_id': documentId,
@@ -268,17 +274,20 @@ class AiGenerationRepository {
   Future<void> replaceMindmapText({
     required int documentId,
     required String mindmapText,
+    bool append = false,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      await txn.delete(
-        AppDatabase.tableMindmapTexts,
-        where: 'document_id = ?',
-        whereArgs: [documentId],
-      );
+      if (!append) {
+        await txn.delete(
+          AppDatabase.tableMindmapTexts,
+          where: 'document_id = ?',
+          whereArgs: [documentId],
+        );
+      }
 
       await txn.insert(AppDatabase.tableMindmapTexts, {
         'document_id': documentId,
@@ -291,17 +300,20 @@ class AiGenerationRepository {
   Future<void> replacePracticeQuestions({
     required int documentId,
     required List<Map<String, String>> questions,
+    bool append = false,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      await txn.delete(
-        AppDatabase.tablePracticeQuestions,
-        where: 'document_id = ?',
-        whereArgs: [documentId],
-      );
+      if (!append) {
+        await txn.delete(
+          AppDatabase.tablePracticeQuestions,
+          where: 'document_id = ?',
+          whereArgs: [documentId],
+        );
+      }
 
       for (final question in questions) {
         await txn.insert(AppDatabase.tablePracticeQuestions, {
@@ -435,6 +447,7 @@ class AiGenerationRepository {
   Future<List<PracticeQuestionWithDocument>> fetchPracticeQuestionsByUser({
     required int userId,
     String? reviewStatus,
+    int? recordId,
     int? libraryId,
     int limit = 100,
   }) async {
@@ -448,6 +461,10 @@ class AiGenerationRepository {
     if (reviewStatus != null) {
       args.add(reviewStatus);
     }
+    final recordClause = recordId == null
+        ? ''
+        : 'AND documents.import_record_id = ?';
+    if (recordId != null) args.add(recordId);
     args.add(limit);
 
     final rows = await db.rawQuery('''
@@ -458,6 +475,7 @@ class AiGenerationRepository {
       WHERE documents.user_id = ?
         $libraryClause
         $statusClause
+        $recordClause
       ORDER BY questions.created_at DESC, questions.id DESC
       LIMIT ?
       ''', args);

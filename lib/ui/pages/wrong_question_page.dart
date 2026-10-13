@@ -11,6 +11,7 @@ import 'practice_review_page.dart';
 class WrongQuestionPage extends StatefulWidget {
   const WrongQuestionPage({
     required this.item,
+    this.recordId,
     this.aiGenerationRepository,
     this.authRepository,
     this.llmConfigRepository,
@@ -19,6 +20,7 @@ class WrongQuestionPage extends StatefulWidget {
   });
 
   final PracticeQuestionWithDocument item;
+  final int? recordId;
   final AiGenerationRepository? aiGenerationRepository;
   final AuthRepository? authRepository;
   final LlmConfigRepository? llmConfigRepository;
@@ -160,6 +162,7 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
       MaterialPageRoute(
         builder: (_) => PracticeReviewPage(
           initialQuestionId: questionId,
+          recordId: widget.recordId,
           authRepository: _authRepository,
           aiGenerationRepository: _aiGenerationRepository,
         ),

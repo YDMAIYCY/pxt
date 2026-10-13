@@ -1,5 +1,6 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'import_record_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -10,7 +11,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 14;
+  static const int databaseVersion = 17;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -37,6 +38,25 @@ class AppDatabase {
   static const String tableFavorites = 'favorites';
 
   Database? _database;
+  bool _recordSchemaReady = false;
+
+  static Future<AppDatabase> openForTesting(
+    DatabaseFactory factory, {
+    String path = inMemoryDatabasePath,
+  }) async {
+    final app = AppDatabase._();
+    app._database = await factory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: databaseVersion,
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onCreate: app._createTables,
+        onUpgrade: app._upgradeTables,
+        onOpen: app._ensureSchemaConsistency,
+      ),
+    );
+    return app;
+  }
 
   Future<Database> get database async {
     _database ??= await _open();
@@ -376,6 +396,7 @@ class AppDatabase {
     );
     await _createKnowledgeGraphIndexes(db);
     await _createFavoriteIndexes(db);
+    await createImportRecordSchema(db);
   }
 
   Future<void> _upgradeTables(
@@ -422,6 +443,9 @@ class AppDatabase {
     }
     if (oldVersion < 14) {
       await _upgradeFavoritesToV14(db);
+    }
+    if (oldVersion < 17) {
+      await createImportRecordSchema(db);
     }
   }
 
@@ -1132,6 +1156,10 @@ class AppDatabase {
     await _upgradeFocusToV11(db);
     await _upgradeKnowledgeGraphToV12(db);
     await _upgradeRichPracticeQuestionsToV13(db);
+    if (!_recordSchemaReady) {
+      await createImportRecordSchema(db);
+      _recordSchemaReady = true;
+    }
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

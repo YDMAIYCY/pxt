@@ -142,6 +142,8 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
     required int userId,
     required String name,
     String? description,
+    String coverTheme = 'math',
+    int coverColor = 0xFF5B90FF,
   }) async {
     final library = KnowledgeLibraryRecord(
       id: _libraries.length + 1,
@@ -194,6 +196,7 @@ class _EmptyAiGenerationRepository extends AiGenerationRepository {
     String? reviewStatus,
     int? libraryId,
     int limit = 100,
+    int? recordId,
   }) async {
     return const <PracticeQuestionWithDocument>[];
   }

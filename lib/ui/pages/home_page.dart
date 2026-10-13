@@ -3,11 +3,17 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../common/app_assets.dart';
 import '../../database/auth_repository.dart';
+import '../../database/import_record_repository.dart';
+import '../../database/knowledge_library_repository.dart';
+import '../../database/models/import_record.dart';
+import '../../database/models/knowledge_library_record.dart';
 import '../theme/app_theme.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
 import 'tabs/home_tab_page.dart';
-import 'tabs/knowledge_tab_page.dart';
+import 'book_library_page.dart';
+import 'knowledge_record_list_page.dart';
+import 'import_record_detail_page.dart';
 import 'tabs/focus_tab_page.dart';
 import 'tabs/profile_tab_page.dart';
 import 'tabs/tasks_tab_page.dart';
@@ -25,7 +31,16 @@ const List<_BottomDockItem> _bottomDockItems = [
 
 // ========== Main Shell ==========
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({
+    this.initialTab = 0,
+    this.initialRecordId,
+    this.autoOcr = false,
+    super.key,
+  });
+
+  final int initialTab;
+  final int? initialRecordId;
+  final bool autoOcr;
 
   static const routeName = '/home';
 
@@ -41,10 +56,15 @@ class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
   bool _isCheckingSession = true;
   late final List<Widget> _tabs;
+  final _knowledgeNavigator = GlobalKey<NavigatorState>();
+  ImportRecord? _initialRecord;
+  KnowledgeLibraryRecord? _initialLibrary;
 
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialTab;
+    _activeTabNotifier.value = _currentIndex;
     _tabs = _buildTabs();
     _ensureActiveSession();
   }
@@ -69,7 +89,19 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() => _isCheckingSession = false);
+    if (widget.initialRecordId != null) {
+      _initialRecord = await ImportRecordRepository().get(
+        currentUser.id,
+        widget.initialRecordId!,
+      );
+      final libraries = await KnowledgeLibraryRepository().fetchLibraries(
+        currentUser.id,
+      );
+      _initialLibrary = libraries
+          .where((l) => l.id == _initialRecord?.libraryId)
+          .firstOrNull;
+    }
+    if (mounted) setState(() => _isCheckingSession = false);
   }
 
   void _notifyDataChanged() {
@@ -95,11 +127,42 @@ class _HomePageState extends State<HomePage> {
         onOpenTab: _selectTab,
         onDataChanged: _notifyDataChanged,
       ),
-      KnowledgeTabPage(
-        tabIndex: 1,
-        refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
-        onDataChanged: _notifyDataChanged,
+      ValueListenableBuilder<int>(
+        valueListenable: _activeTabNotifier,
+        builder: (_, active, child) => NavigatorPopHandler<Object?>(
+          enabled: active == 1,
+          onPopWithResult: (result) =>
+              _knowledgeNavigator.currentState!.pop(result),
+          child: Navigator(
+            key: _knowledgeNavigator,
+            onGenerateInitialRoutes: (_, _) => [
+              MaterialPageRoute(
+                builder: (_) => BookLibraryPage(
+                  refreshListenable: _refreshNotifier,
+                  onDataChanged: _notifyDataChanged,
+                ),
+              ),
+              if (_initialLibrary != null)
+                MaterialPageRoute(
+                  builder: (_) => BookDetailPage(library: _initialLibrary!),
+                ),
+              if (_initialRecord != null)
+                MaterialPageRoute(
+                  builder: (_) => ImportRecordDetailPage(
+                    recordId: _initialRecord!.id,
+                    userId: _initialRecord!.userId,
+                    autoOcr: widget.autoOcr,
+                  ),
+                ),
+            ],
+            onGenerateRoute: (_) => MaterialPageRoute(
+              builder: (_) => BookLibraryPage(
+                refreshListenable: _refreshNotifier,
+                onDataChanged: _notifyDataChanged,
+              ),
+            ),
+          ),
+        ),
       ),
       FocusTabPage(
         tabIndex: 2,

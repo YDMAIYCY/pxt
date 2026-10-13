@@ -40,6 +40,7 @@ class SourceDocumentRepository {
         'library_id': resolvedLibraryId,
         'source_type': sourceType,
         'image_path': imagePath,
+        'original_file_path': imagePath,
         'original_title': title.trim(),
         'ocr_status': SourceDocumentOcrStatus.pending,
         'ocr_error_message': null,
@@ -77,6 +78,8 @@ class SourceDocumentRepository {
     final rows = await db.rawQuery('''
       SELECT
         documents.id,
+        documents.import_record_id,
+        documents.original_file_path,
         documents.user_id,
         documents.library_id,
         documents.batch_id,
@@ -126,6 +129,8 @@ class SourceDocumentRepository {
     final rows = await db.rawQuery('''
       SELECT
         documents.id,
+        documents.import_record_id,
+        documents.original_file_path,
         documents.user_id,
         documents.library_id,
         documents.batch_id,
@@ -170,6 +175,8 @@ class SourceDocumentRepository {
       '''
       SELECT
         documents.id,
+        documents.import_record_id,
+        documents.original_file_path,
         documents.user_id,
         documents.library_id,
         documents.batch_id,
@@ -215,6 +222,8 @@ class SourceDocumentRepository {
       '''
       SELECT
         documents.id,
+        documents.import_record_id,
+        documents.original_file_path,
         documents.user_id,
         documents.library_id,
         documents.batch_id,
@@ -342,7 +351,7 @@ class SourceDocumentRepository {
     final db = await _database.database;
     final rows = await db.query(
       AppDatabase.tableSourceDocuments,
-      columns: ['image_path', 'source_type', 'batch_id'],
+      columns: ['image_path', 'original_file_path', 'source_type', 'batch_id'],
       where: 'id = ? AND user_id = ?',
       whereArgs: [documentId, userId],
       limit: 1,
@@ -351,7 +360,10 @@ class SourceDocumentRepository {
       throw StateError('资料不存在或无权删除');
     }
 
-    final cleanupPaths = <String?>[rows.first['image_path'] as String?];
+    final cleanupPaths = <String?>[
+      rows.first['image_path'] as String?,
+      rows.first['original_file_path'] as String?,
+    ];
     final batchId = rows.first['batch_id'] as int?;
     final isPdfDocument =
         rows.first['source_type'] == SourceDocumentSourceType.pdfDocument &&

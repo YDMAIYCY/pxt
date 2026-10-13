@@ -34,12 +34,14 @@ class DocumentBatchRecord {
     required this.createdAt,
     required this.updatedAt,
     this.libraryId,
+    this.importRecordId,
     this.originalFilePath,
   });
 
   final int id;
   final int userId;
   final int? libraryId;
+  final int? importRecordId;
   final String sourceType;
   final String title;
   final String? originalFilePath;
@@ -64,6 +66,7 @@ class DocumentBatchRecord {
 
     return DocumentBatchRecord(
       id: map['id'] as int,
+      importRecordId: map['import_record_id'] as int?,
       userId: map['user_id'] as int,
       libraryId: map['library_id'] as int?,
       sourceType: (map['source_type'] as String?)?.trim() ?? '',

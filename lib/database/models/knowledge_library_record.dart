@@ -10,6 +10,8 @@ class KnowledgeLibraryRecord {
     required this.updatedAt,
     this.description,
     this.documentCount = 0,
+    this.coverTheme = 'math',
+    this.coverColor = 0xFF5B90FF,
   });
 
   final int id;
@@ -19,6 +21,8 @@ class KnowledgeLibraryRecord {
   final DateTime createdAt;
   final DateTime updatedAt;
   final int documentCount;
+  final String coverTheme;
+  final int coverColor;
 
   factory KnowledgeLibraryRecord.fromMap(Map<String, Object?> map) {
     final createdAt = (map['created_at'] as String?) ?? '';
@@ -32,6 +36,8 @@ class KnowledgeLibraryRecord {
       createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
       updatedAt: DateTime.tryParse(updatedAt)?.toLocal() ?? DateTime.now(),
       documentCount: _readInt(map['document_count']),
+      coverTheme: map['cover_theme'] as String? ?? 'math',
+      coverColor: map['cover_color'] as int? ?? 0xFF5B90FF,
     );
   }
 

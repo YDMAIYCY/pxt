@@ -52,12 +52,14 @@ class AiGenerationOrchestrator {
     required String ocrText,
     required String taskType,
     LlmProviderConfig? llmConfig,
+    bool appendResults = false,
   }) {
     return _runTask(
       documentId: documentId,
       ocrText: ocrText,
       taskType: taskType,
       llmConfig: llmConfig,
+      appendResults: appendResults,
     );
   }
 
@@ -68,12 +70,14 @@ class AiGenerationOrchestrator {
     required String currentResultText,
     required String feedback,
     LlmProviderConfig? llmConfig,
+    bool appendResults = false,
   }) {
     return _runTask(
       documentId: documentId,
       ocrText: ocrText,
       taskType: taskType,
       llmConfig: llmConfig,
+      appendResults: appendResults,
       currentResultText: currentResultText,
       feedback: feedback,
     );
@@ -83,6 +87,7 @@ class AiGenerationOrchestrator {
     required int documentId,
     required String ocrText,
     LlmProviderConfig? llmConfig,
+    bool appendResults = false,
   }) async {
     final results = <AiSingleTaskResult>[];
 
@@ -92,6 +97,7 @@ class AiGenerationOrchestrator {
         ocrText: ocrText,
         taskType: taskType,
         llmConfig: llmConfig,
+        appendResults: appendResults,
       );
       results.add(result);
     }
@@ -106,6 +112,7 @@ class AiGenerationOrchestrator {
     LlmProviderConfig? llmConfig,
     String? currentResultText,
     String? feedback,
+    bool appendResults = false,
   }) async {
     final trimmedText = ocrText.trim();
     if (trimmedText.isEmpty) {
@@ -146,6 +153,7 @@ class AiGenerationOrchestrator {
         documentId: documentId,
         taskType: taskType,
         response: response,
+        appendResults: appendResults,
       );
 
       await _aiGenerationRepository.markTaskCompleted(
@@ -183,11 +191,13 @@ class AiGenerationOrchestrator {
     required int documentId,
     required String taskType,
     required Map<String, dynamic> response,
+    bool appendResults = false,
   }) async {
     switch (taskType) {
       case AiTaskType.knowledgeCards:
         await _aiGenerationRepository.replaceKnowledgeCards(
           documentId: documentId,
+          append: appendResults,
           cards: _parseKnowledgeCards(response),
         );
         return;
@@ -195,6 +205,7 @@ class AiGenerationOrchestrator {
         final outline = _parseReviewOutline(response);
         await _aiGenerationRepository.replaceReviewOutline(
           documentId: documentId,
+          append: appendResults,
           title: outline.$1,
           outlineText: outline.$2,
         );
@@ -202,12 +213,14 @@ class AiGenerationOrchestrator {
       case AiTaskType.mindmapText:
         await _aiGenerationRepository.replaceMindmapText(
           documentId: documentId,
+          append: appendResults,
           mindmapText: _parseMindmapText(response),
         );
         return;
       case AiTaskType.practiceQuestions:
         await _aiGenerationRepository.replacePracticeQuestions(
           documentId: documentId,
+          append: appendResults,
           questions: _parsePracticeQuestions(response),
         );
         return;

@@ -25,12 +25,7 @@ class KnowledgeLibraryRepository {
     final rows = await db.rawQuery(
       '''
       SELECT
-        libraries.id,
-        libraries.user_id,
-        libraries.name,
-        libraries.description,
-        libraries.created_at,
-        libraries.updated_at,
+        libraries.*,
         (
           SELECT COUNT(*)
           FROM ${AppDatabase.tableSourceDocuments} documents
@@ -61,6 +56,8 @@ class KnowledgeLibraryRepository {
     required int userId,
     required String name,
     String? description,
+    String coverTheme = 'math',
+    int coverColor = 0xFF5B90FF,
   }) async {
     final trimmedName = name.trim();
     if (trimmedName.isEmpty) {
@@ -87,6 +84,8 @@ class KnowledgeLibraryRepository {
         'user_id': userId,
         'name': trimmedName,
         'description': description?.trim(),
+        'cover_theme': coverTheme,
+        'cover_color': coverColor,
         'created_at': now,
         'updated_at': now,
       });
@@ -97,6 +96,88 @@ class KnowledgeLibraryRepository {
       throw StateError('知识库创建后读取失败');
     }
     return library;
+  }
+
+  Future<KnowledgeLibraryRecord> updateLibrary({
+    required int userId,
+    required int libraryId,
+    required String name,
+    String? description,
+    required String coverTheme,
+    required int coverColor,
+  }) async {
+    if (name.trim().isEmpty) throw ArgumentError('知识库名称不能为空');
+    final db = await _database.database;
+    await db.transaction((txn) async {
+      final duplicate = await txn.query(
+        'knowledge_libraries',
+        where: 'user_id=? AND name=? AND id!=?',
+        whereArgs: [userId, name.trim(), libraryId],
+      );
+      if (duplicate.isNotEmpty) throw StateError('已存在同名知识库');
+      final n = await txn.update(
+        'knowledge_libraries',
+        {
+          'name': name.trim(),
+          'description': description?.trim(),
+          'cover_theme': coverTheme,
+          'cover_color': coverColor,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'id=? AND user_id=?',
+        whereArgs: [libraryId, userId],
+      );
+      if (n == 0) throw StateError('知识库不存在');
+    });
+    return (await _findLibraryById(db, userId: userId, id: libraryId))!;
+  }
+
+  // Removing a classification never discards learning history.
+  Future<void> deleteLibraryKeepingRecords({
+    required int userId,
+    required int libraryId,
+  }) async {
+    final db = await _database.database;
+    await db.transaction((txn) async {
+      final current = await txn.query(
+        'knowledge_libraries',
+        where: 'id=? AND user_id=?',
+        whereArgs: [libraryId, userId],
+      );
+      if (current.isEmpty) throw StateError('知识库不存在');
+      final others = await txn.query(
+        'knowledge_libraries',
+        where: 'user_id=? AND id!=? AND name=?',
+        whereArgs: [userId, libraryId, '待整理'],
+      );
+      final now = DateTime.now().toUtc().toIso8601String();
+      final target = others.isEmpty
+          ? await txn.insert('knowledge_libraries', {
+              'user_id': userId,
+              'name': '待整理',
+              'description': '删除知识库后保留的资料',
+              'created_at': now,
+              'updated_at': now,
+            })
+          : others.first['id'] as int;
+      for (final table in [
+        'import_records',
+        'source_documents',
+        'document_batches',
+      ]) {
+        await txn.update(
+          table,
+          {'library_id': target},
+          where: 'user_id=? AND library_id=?',
+          whereArgs: [userId, libraryId],
+        );
+      }
+      await txn.delete(
+        'knowledge_libraries',
+        where: 'id=? AND user_id=?',
+        whereArgs: [libraryId, userId],
+      );
+    });
   }
 
   Future<void> deleteLibraryAndContents({
@@ -191,12 +272,7 @@ class KnowledgeLibraryRepository {
     final rows = await db.rawQuery(
       '''
       SELECT
-        libraries.id,
-        libraries.user_id,
-        libraries.name,
-        libraries.description,
-        libraries.created_at,
-        libraries.updated_at,
+        libraries.*,
         (
           SELECT COUNT(*)
           FROM ${AppDatabase.tableSourceDocuments} documents

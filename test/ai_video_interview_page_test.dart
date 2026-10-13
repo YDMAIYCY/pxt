@@ -85,6 +85,7 @@ class _FakeAiGenerationRepository extends AiGenerationRepository {
     String? reviewStatus,
     int? libraryId,
     int limit = 100,
+    int? recordId,
   }) async {
     return [
       PracticeQuestionWithDocument(

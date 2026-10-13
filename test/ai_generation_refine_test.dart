@@ -93,6 +93,7 @@ class _CapturingAiGenerationRepository extends AiGenerationRepository {
   Future<void> replaceMindmapText({
     required int documentId,
     required String mindmapText,
+    bool append = false,
   }) async {
     replacedMindmapText = mindmapText;
   }

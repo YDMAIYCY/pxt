@@ -192,7 +192,10 @@ void main() {
     expect(find.text('QSClaw'), findsOneWidget);
     expect(find.text('\u4e0b\u4e00\u6b65\u63a8\u8350'), findsOneWidget);
     expect(find.textContaining('AI'), findsNothing);
-    expect(find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'), findsNothing);
+    expect(
+      find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'),
+      findsNothing,
+    );
   });
 
   testWidgets('Home QSClaw quick entry opens the agent page', (tester) async {
@@ -429,6 +432,7 @@ class _FakeAiGenerationRepository extends AiGenerationRepository {
     String? reviewStatus,
     int? libraryId,
     int limit = 100,
+    int? recordId,
   }) async {
     return const [];
   }

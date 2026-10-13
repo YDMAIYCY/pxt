@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../database/import_record_repository.dart';
+import 'home_page.dart';
 
 import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
@@ -50,6 +52,7 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
   SourceDocumentRecord? _document;
   OcrTextRecord? _ocrRecord;
 
+  int? _importRecordId;
   bool _isGeneratingAll = false;
   final Set<String> _generatingTaskTypes = <String>{};
 
@@ -103,6 +106,7 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
       widget.documentId,
     );
 
+    _importRecordId = document.importRecordId;
     _document = document;
     _ocrRecord = ocrRecord;
 
@@ -137,6 +141,18 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     return latestConfig;
   }
 
+  Future<String> _generationText() async {
+    final document = _document!;
+    if (document.importRecordId == null) return _ocrRecord!.effectiveText;
+    final repo = ImportRecordRepository();
+    final record = await repo.get(document.userId, document.importRecordId!);
+    if (record == null) throw StateError('导入记录不存在');
+    if (record.pages.any((p) => !p.ocrDone)) {
+      throw StateError('请先完成本次记录所有页面的 OCR 识别与校对');
+    }
+    return repo.sourceText(record);
+  }
+
   Future<void> _generateSingle(String taskType) async {
     if (_isGeneratingAll || _generatingTaskTypes.contains(taskType)) {
       return;
@@ -161,9 +177,10 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     try {
       final result = await _aiGenerationOrchestrator.generateSingle(
         documentId: document!.id,
-        ocrText: ocrRecord!.effectiveText,
+        ocrText: await _generationText(),
         taskType: taskType,
         llmConfig: llmConfig,
+        appendResults: true,
       );
 
       if (!mounted) {
@@ -209,8 +226,9 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     try {
       final batchResult = await _aiGenerationOrchestrator.generateAll(
         documentId: document!.id,
-        ocrText: ocrRecord!.effectiveText,
+        ocrText: await _generationText(),
         llmConfig: llmConfig,
+        appendResults: true,
       );
 
       if (!mounted) {
@@ -267,11 +285,12 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
     try {
       final result = await _aiGenerationOrchestrator.regenerateWithFeedback(
         documentId: document!.id,
-        ocrText: ocrRecord!.effectiveText,
+        ocrText: await _generationText(),
         taskType: taskType,
         currentResultText: currentResultText,
         feedback: feedback,
         llmConfig: llmConfig,
+        appendResults: true,
       );
 
       if (!mounted) return;
@@ -296,12 +315,15 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('修改${AiTaskType.labelOf(taskType)}'),
+        contentPadding: const EdgeInsets.all(24),
         content: TextField(
           controller: controller,
           autofocus: true,
           minLines: 3,
           maxLines: 6,
-          decoration: const InputDecoration(hintText: '例如：太简洁了，请展开每个分支并补充易错点'),
+          decoration: const InputDecoration(
+            hintText: '新版本会追加保存。请输入修改要求，例如补充易错点',
+          ),
         ),
         actions: [
           TextButton(
@@ -396,6 +418,20 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
+              if (_importRecordId != null)
+                TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HomePage(
+                        initialTab: 1,
+                        initialRecordId: _importRecordId,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.auto_stories_outlined),
+                  label: const Text('进入本次导入记录'),
+                ),
               _GenerationHeader(
                 document: data.document,
                 llmConfig: data.llmConfig,

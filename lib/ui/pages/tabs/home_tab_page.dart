@@ -25,7 +25,7 @@ import '../document_batch_detail_page.dart';
 import '../document_detail_page.dart';
 import '../image_crop_selection_page.dart';
 import '../qsclaw_agent_page.dart';
-import '../../../game/games_hub_page.dart';
+import '../home_page.dart';
 
 class HomeTabPage extends StatefulWidget {
   const HomeTabPage({
@@ -239,7 +239,21 @@ class _HomeTabPageState extends State<HomeTabPage> {
       if (!mounted || document == null) return;
       await _offerCropForImportedDocument(document);
       if (!mounted) return;
-      await _openDocument(document.id);
+      if (document.importRecordId != null) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomePage(
+              initialTab: 1,
+              initialRecordId: document.importRecordId,
+              autoOcr: true,
+            ),
+          ),
+        );
+        if (mounted) await _afterDataChanged();
+      } else {
+        await _openDocument(document.id);
+      }
     } catch (error) {
       if (mounted) _showMessage('\u5bfc\u5165\u5931\u8d25\uff1a$error');
     } finally {
@@ -283,7 +297,21 @@ class _HomeTabPageState extends State<HomeTabPage> {
         source: source,
       );
       if (!mounted || batch == null) return;
-      await _openBatch(batch.id);
+      if (batch.importRecordId != null) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomePage(
+              initialTab: 1,
+              initialRecordId: batch.importRecordId,
+              autoOcr: true,
+            ),
+          ),
+        );
+        if (mounted) await _afterDataChanged();
+      } else {
+        await _openBatch(batch.id);
+      }
     } catch (error) {
       if (mounted) {
         _showMessage('\u6279\u91cf\u5bfc\u5165\u5931\u8d25\uff1a$error');
@@ -450,13 +478,6 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (mounted) await _afterDataChanged();
   }
 
-  Future<void> _openGames() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const GamesHubPage()));
-    if (mounted) await _refresh();
-  }
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -523,7 +544,6 @@ class _HomeTabPageState extends State<HomeTabPage> {
                         onCamera: () =>
                             _handleImageImport(ImageInputSource.camera),
                         onImport: _openImportSourceSheet,
-                        onGames: _openGames,
                       ),
                       const SizedBox(height: 14),
                       _RecentLearningGrid(
@@ -972,13 +992,11 @@ class _QuickActions extends StatelessWidget {
     required this.isImporting,
     required this.onCamera,
     required this.onImport,
-    required this.onGames,
   });
 
   final bool isImporting;
   final VoidCallback onCamera;
   final VoidCallback onImport;
-  final VoidCallback onGames;
 
   @override
   Widget build(BuildContext context) {
@@ -1005,14 +1023,6 @@ class _QuickActions extends StatelessWidget {
                   iconAsset: AppAssets.iconAlbum,
                   title: '导入资料',
                   onTap: isImporting ? null : onImport,
-                ),
-              ),
-              SizedBox(
-                width: width,
-                child: _ActionTile(
-                  icon: Icons.games_rounded,
-                  title: '益智游戏',
-                  onTap: onGames,
                 ),
               ),
             ],
@@ -1266,13 +1276,11 @@ class _Section extends StatelessWidget {
 
 class _ActionTile extends StatelessWidget {
   const _ActionTile({
-    this.icon,
-    this.iconAsset,
+    required this.iconAsset,
     required this.title,
     required this.onTap,
   });
-  final IconData? icon;
-  final String? iconAsset;
+  final String iconAsset;
   final String title;
   final VoidCallback? onTap;
 
@@ -1300,18 +1308,15 @@ class _ActionTile extends StatelessWidget {
           ),
           child: Row(
             children: [
-              if (iconAsset != null)
-                SvgPicture.asset(
-                  iconAsset!,
-                  width: 24,
-                  height: 24,
-                  colorFilter: ColorFilter.mode(
-                    AppColors.primary,
-                    BlendMode.srcIn,
-                  ),
-                )
-              else if (icon != null)
-                Icon(icon, size: 25, color: AppColors.primary),
+              SvgPicture.asset(
+                iconAsset,
+                width: 24,
+                height: 24,
+                colorFilter: ColorFilter.mode(
+                  AppColors.primary,
+                  BlendMode.srcIn,
+                ),
+              ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(

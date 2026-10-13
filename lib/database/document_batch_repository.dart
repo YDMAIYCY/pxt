@@ -62,6 +62,7 @@ class DocumentBatchRepository {
           'page_number': null,
           'source_type': SourceDocumentSourceType.pdfDocument,
           'image_path': originalFilePath ?? '',
+          'original_file_path': originalFilePath,
           'original_title': title.trim().isEmpty ? 'PDF 资料' : title.trim(),
           'ocr_status': SourceDocumentOcrStatus.pending,
           'ocr_error_message': null,
@@ -78,6 +79,9 @@ class DocumentBatchRepository {
           'page_number': page.pageNumber,
           'source_type': pageSourceType,
           'image_path': page.savedPath,
+          'original_file_path': sourceType == DocumentBatchSourceType.pdf
+              ? originalFilePath
+              : page.savedPath,
           'original_title': page.title,
           'ocr_status': SourceDocumentOcrStatus.pending,
           'ocr_error_message': null,
@@ -117,6 +121,7 @@ class DocumentBatchRepository {
     final rows = await db.rawQuery('''
       SELECT
         batches.id,
+        (SELECT id FROM import_records r WHERE r.user_id=batches.user_id AND r.operation_id='batch:' || batches.id) AS import_record_id,
         batches.user_id,
         batches.library_id,
         batches.source_type,
@@ -159,6 +164,7 @@ class DocumentBatchRepository {
       '''
       SELECT
         batches.id,
+        (SELECT id FROM import_records r WHERE r.user_id=batches.user_id AND r.operation_id='batch:' || batches.id) AS import_record_id,
         batches.user_id,
         batches.library_id,
         batches.source_type,
@@ -186,6 +192,8 @@ class DocumentBatchRepository {
       '''
       SELECT
         documents.id,
+        documents.import_record_id,
+        documents.original_file_path,
         documents.user_id,
         documents.library_id,
         documents.batch_id,
