@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../learning_workspace_page.dart';
 
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
@@ -728,7 +729,18 @@ class _KnowledgeTabPageState extends State<KnowledgeTabPage> {
         onOpenConcept: (item) {
           final documentId = item.concept.documentId;
           if (documentId == null) return;
-          _openDocument(documentId);
+          Navigator.of(context)
+              .push(
+                MaterialPageRoute(
+                  builder: (_) => LearningWorkspacePage(
+                    documentId: documentId,
+                    conceptId: item.concept.id,
+                  ),
+                ),
+              )
+              .then((_) {
+                if (mounted) _refresh();
+              });
         },
       );
     }

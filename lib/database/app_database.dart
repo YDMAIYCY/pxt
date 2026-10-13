@@ -1,5 +1,6 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'learning_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -7,10 +8,28 @@ import 'package:sqflite/sqflite.dart';
 class AppDatabase {
   AppDatabase._();
 
+  static Future<AppDatabase> openForTesting(
+    DatabaseFactory factory, {
+    String path = inMemoryDatabasePath,
+  }) async {
+    final instance = AppDatabase._();
+    instance._database = await factory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: databaseVersion,
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onCreate: instance._createTables,
+        onUpgrade: instance._upgradeTables,
+        onOpen: instance._ensureSchemaConsistency,
+      ),
+    );
+    return instance;
+  }
+
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 14;
+  static const int databaseVersion = 15;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -376,6 +395,7 @@ class AppDatabase {
     );
     await _createKnowledgeGraphIndexes(db);
     await _createFavoriteIndexes(db);
+    await createLearningSchema(db);
   }
 
   Future<void> _upgradeTables(
@@ -422,6 +442,9 @@ class AppDatabase {
     }
     if (oldVersion < 14) {
       await _upgradeFavoritesToV14(db);
+    }
+    if (oldVersion < 15) {
+      await createLearningSchema(db);
     }
   }
 

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'learning_workspace_page.dart';
 
 import 'package:flutter/material.dart';
 
@@ -128,7 +129,7 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('资料详情'),
+        title: const Text('知识包详情'),
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
       ),
@@ -155,6 +156,21 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
               children: [
                 _ImageSection(document: data.document),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LearningWorkspacePage(
+                          documentId: widget.documentId,
+                        ),
+                      ),
+                    );
+                    if (mounted) await _refresh();
+                  },
+                  icon: const Icon(Icons.auto_stories_rounded),
+                  label: const Text('理解图片与学习资源'),
+                ),
                 const SizedBox(height: 14),
                 _ActionSection(
                   document: data.document,

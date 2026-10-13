@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../learning_hub_pages.dart';
 
 import '../../../common/app_assets.dart';
 import '../../../common/profile_image_store.dart';
@@ -586,7 +587,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   Future<void> _openWrongQuestionsEntry() async {
     final onOpenTab = widget.onOpenTab;
     if (onOpenTab != null) {
-      onOpenTab(3);
+      onOpenTab(2);
       return;
     }
 
@@ -831,6 +832,26 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
             style: AppTextStyles.bodySmall(context),
           ),
           const SizedBox(height: 16),
+          _SettingTile(
+            icon: Icons.event_note_rounded,
+            title: '计划管理',
+            subtitle: '学习计划、专注计时和复习安排',
+            onTap: () => openLearningPage(
+              context,
+              const FocusSessionPage(),
+              onChanged: widget.onDataChanged,
+            ),
+          ),
+          _SettingTile(
+            icon: Icons.pending_actions_rounded,
+            title: '任务记录',
+            subtitle: '到期练习、生成任务与待处理资料',
+            onTap: () => openLearningPage(
+              context,
+              const LearningPlansPage(),
+              onChanged: widget.onDataChanged,
+            ),
+          ),
           _SettingTile(
             icon: Icons.collections_bookmark_rounded,
             title: '收藏',

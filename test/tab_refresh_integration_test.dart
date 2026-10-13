@@ -189,38 +189,36 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('QSClaw'), findsOneWidget);
-    expect(find.text('\u4e0b\u4e00\u6b65\u63a8\u8350'), findsOneWidget);
-    expect(find.textContaining('AI'), findsNothing);
-    expect(find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'), findsNothing);
+    expect(find.text('拍一下，开始学习'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('今日学习建议'), 100);
+    await tester.pumpAndSettle();
+    expect(find.text('今日学习建议'), findsOneWidget);
+    expect(find.text('益智游戏'), findsNothing);
+    expect(
+      find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'),
+      findsNothing,
+    );
   });
 
-  testWidgets('Home QSClaw quick entry opens the agent page', (tester) async {
+  testWidgets('home companion entry uses the new fourth tab', (tester) async {
+    final opened = <int>[];
     await tester.pumpWidget(
       _wrap(
         HomeTabPage(
-          refreshVersion: 0,
           authRepository: _FakeAuthRepository(),
           sourceDocumentRepository: _FakeSourceDocumentRepository(),
           aiGenerationRepository: _FakeAiGenerationRepository(),
           documentBatchRepository: _FakeDocumentBatchRepository(),
           knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-          qsClawPageBuilder: () => const _MarkerPage('qsclaw-chat'),
+          onOpenTab: opened.add,
         ),
       ),
     );
     await tester.pumpAndSettle();
-
-    await tester.scrollUntilVisible(
-      find.text('QSClaw'),
-      120,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await tester.scrollUntilVisible(find.text('AI 学伴'), 120);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('QSClaw'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('qsclaw-chat'), findsOneWidget);
+    await tester.tap(find.text('AI 学伴'));
+    expect(opened, [3]);
   });
 
   testWidgets('Profile keeps favorites entry without wrong-question shortcut', (
@@ -248,6 +246,7 @@ void main() {
       120,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('收藏'));
     await tester.pumpAndSettle();
 
@@ -269,17 +268,6 @@ const _testUser = UserProfile(
   avatarStyle: ProfilePresetIds.defaultAvatarStyle,
   backgroundStyle: ProfilePresetIds.defaultBackgroundStyle,
 );
-
-class _MarkerPage extends StatelessWidget {
-  const _MarkerPage(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(body: Center(child: Text(label)));
-  }
-}
 
 class _FakeAuthRepository extends AuthRepository {
   @override

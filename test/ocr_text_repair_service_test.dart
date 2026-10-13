@@ -43,6 +43,7 @@ class _FakeMiniMaxClient extends MiniMaxClient {
     required String systemPrompt,
     required String userPrompt,
     Map<String, dynamic>? jsonSchema,
+    List<({String base64, String mimeType})>? images,
   }) async {
     lastUserPrompt = userPrompt;
     return response;

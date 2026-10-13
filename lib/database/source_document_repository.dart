@@ -88,13 +88,15 @@ class SourceDocumentRepository {
         documents.ocr_error_message,
         documents.ocr_updated_at,
         documents.created_at,
+        (SELECT c.name FROM learning_attempts a JOIN knowledge_concepts c ON c.id = a.concept_id
+          WHERE a.document_id = documents.id ORDER BY a.id DESC LIMIT 1) AS last_concept_name,
         CASE
           WHEN EXISTS (
             SELECT 1
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
@@ -105,7 +107,8 @@ class SourceDocumentRepository {
           documents.source_type = '${SourceDocumentSourceType.pdfPage}'
           AND documents.batch_id IS NOT NULL
         )
-      ORDER BY documents.created_at DESC
+      ORDER BY COALESCE((SELECT MAX(created_at) FROM learning_attempts WHERE document_id = documents.id),
+        (SELECT MAX(created_at) FROM learning_resources WHERE document_id = documents.id), documents.created_at) DESC
       LIMIT ?
       ''', args);
 
@@ -143,7 +146,7 @@ class SourceDocumentRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
@@ -187,7 +190,7 @@ class SourceDocumentRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
@@ -232,7 +235,7 @@ class SourceDocumentRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
@@ -455,6 +458,6 @@ class SourceDocumentRepository {
     }
 
     args.add(libraryId);
-    return 'AND documents.library_id = ?';
+    return 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)';
   }
 }

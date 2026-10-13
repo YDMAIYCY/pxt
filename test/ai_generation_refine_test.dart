@@ -53,6 +53,7 @@ class _CapturingMiniMaxClient extends MiniMaxClient {
     required String systemPrompt,
     required String userPrompt,
     Map<String, dynamic>? jsonSchema,
+    List<({String base64, String mimeType})>? images,
   }) async {
     lastUserPrompt = userPrompt;
     return {'mindmap_text': '一次函数\n- 定义域\n- 图像\n- 易错点'};

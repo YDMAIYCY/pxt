@@ -92,50 +92,38 @@ class KnowledgeGraphRepository {
     final now = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      final oldConceptRows = await txn.query(
-        AppDatabase.tableKnowledgeConcepts,
-        columns: ['id'],
-        where: 'document_id = ? AND user_id = ?',
-        whereArgs: [documentId, userId],
-      );
-      final oldConceptIds = oldConceptRows
-          .map((row) => row['id'])
-          .whereType<int>()
-          .toList(growable: false);
-      if (oldConceptIds.isNotEmpty) {
-        final placeholders = List.filled(oldConceptIds.length, '?').join(',');
-        await txn.delete(
-          AppDatabase.tableKnowledgeConceptLinks,
-          where:
-              'from_concept_id IN ($placeholders) OR to_concept_id IN ($placeholders)',
-          whereArgs: [...oldConceptIds, ...oldConceptIds],
-        );
-      }
       await txn.delete(
-        AppDatabase.tableKnowledgeConcepts,
-        where: 'document_id = ? AND user_id = ?',
-        whereArgs: [documentId, userId],
+        'concept_documents',
+        where: 'document_id = ?',
+        whereArgs: [documentId],
       );
-
       final conceptIdsByName = <String, int>{};
       for (final concept in draft.concepts) {
         final name = concept.name.trim();
-        if (name.isEmpty || conceptIdsByName.containsKey(name)) {
-          continue;
-        }
-        final conceptId = await txn.insert(AppDatabase.tableKnowledgeConcepts, {
-          'user_id': userId,
-          'library_id': libraryId,
+        if (name.isEmpty || conceptIdsByName.containsKey(name)) continue;
+        final existing = await txn.rawQuery(
+          'SELECT id FROM knowledge_concepts WHERE user_id = ? AND LOWER(TRIM(name)) = LOWER(?) ORDER BY id LIMIT 1',
+          [userId, name],
+        );
+        final conceptId = existing.isNotEmpty
+            ? existing.first['id'] as int
+            : await txn.insert(AppDatabase.tableKnowledgeConcepts, {
+                'user_id': userId,
+                'library_id': libraryId,
+                'document_id': documentId,
+                'name': name,
+                'summary': concept.summary.trim(),
+                'evidence_text': concept.evidenceText.trim(),
+                'source_type': sourceType,
+                'source_id': null,
+                'mastery_score': 0,
+                'weakness_score': 0,
+                'created_at': now,
+                'updated_at': now,
+              });
+        await txn.insert('concept_documents', {
+          'concept_id': conceptId,
           'document_id': documentId,
-          'name': name,
-          'summary': concept.summary.trim(),
-          'evidence_text': concept.evidenceText.trim(),
-          'source_type': sourceType,
-          'source_id': null,
-          'mastery_score': _clampScore(concept.masteryScore),
-          'weakness_score': _clampScore(concept.weaknessScore),
-          'created_at': now,
-          'updated_at': now,
         });
         conceptIdsByName[name] = conceptId;
       }
@@ -154,6 +142,14 @@ class KnowledgeGraphRepository {
         if (!seenLinks.add(key)) {
           continue;
         }
+        final prior = await txn.query(
+          AppDatabase.tableKnowledgeConceptLinks,
+          columns: ['id'],
+          where:
+              'user_id = ? AND from_concept_id = ? AND to_concept_id = ? AND relation_label = ?',
+          whereArgs: [userId, fromId, toId, relation],
+        );
+        if (prior.isNotEmpty) continue;
         await txn.insert(AppDatabase.tableKnowledgeConceptLinks, {
           'user_id': userId,
           'library_id': libraryId,
@@ -372,7 +368,8 @@ class KnowledgeGraphRepository {
     final db = await _database.database;
     final rows = await db.query(
       AppDatabase.tableKnowledgeConcepts,
-      where: 'user_id = ? AND document_id = ?',
+      where:
+          'user_id = ? AND id IN (SELECT concept_id FROM concept_documents WHERE document_id = ?)',
       whereArgs: [userId, documentId],
       orderBy: 'weakness_score DESC, updated_at DESC',
       limit: 80,
@@ -395,7 +392,7 @@ class KnowledgeGraphRepository {
       return scored.map((item) => item.$2).toList(growable: false);
     }
 
-    return concepts.take(3).toList(growable: false);
+    return const [];
   }
 
   int _conceptQuestionScore(KnowledgeConceptRecord concept, String lowerText) {
@@ -440,7 +437,10 @@ class KnowledgeGraphRepository {
       return '';
     }
     args.add(libraryId);
+    if (tableAlias == null) args.add(libraryId);
     final prefix = tableAlias == null ? '' : '$tableAlias.';
-    return 'AND ${prefix}library_id = ?';
+    return tableAlias == null
+        ? 'AND (from_concept_id IN (SELECT cd.concept_id FROM concept_documents cd JOIN document_library_links dl ON dl.document_id = cd.document_id WHERE dl.library_id = ?) OR to_concept_id IN (SELECT cd.concept_id FROM concept_documents cd JOIN document_library_links dl ON dl.document_id = cd.document_id WHERE dl.library_id = ?))'
+        : 'AND ${prefix}id IN (SELECT cd.concept_id FROM concept_documents cd JOIN document_library_links dl ON dl.document_id = cd.document_id WHERE dl.library_id = ?)';
   }
 }

@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../../database/learning_repository.dart';
+import '../../database/source_document_repository.dart';
+import '../../generator/learning_resource_service.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -32,6 +36,11 @@ class AiInterviewPage extends StatefulWidget {
     this.cloudSpeechService,
     this.libraryId,
     this.libraryName,
+    this.documentId,
+    this.conceptId,
+    this.feynman = false,
+    this.learningRepository,
+    this.initialErrorId,
     super.key,
   });
 
@@ -43,6 +52,11 @@ class AiInterviewPage extends StatefulWidget {
   final CloudSpeechTranscriptionService? cloudSpeechService;
   final int? libraryId;
   final String? libraryName;
+  final int? documentId;
+  final int? conceptId;
+  final bool feynman;
+  final LearningRepository? learningRepository;
+  final int? initialErrorId;
 
   @override
   State<AiInterviewPage> createState() => _AiInterviewPageState();
@@ -79,6 +93,9 @@ class _AiInterviewPageState extends State<AiInterviewPage> {
   String _speechStatusText = '等待回答';
   final List<String> _cloudTranscriptSegments = <String>[];
   int _followUpRound = 0;
+  int? _userId;
+  String _sourceContext = '';
+  final List<String> _answerHistory = [];
 
   @override
   void initState() {
@@ -112,18 +129,65 @@ class _AiInterviewPageState extends State<AiInterviewPage> {
     if (user == null) {
       return const _InterviewSessionData.notReady('请先登录后再开始面试练习');
     }
+    _userId = user.id;
 
     final config = await _llmConfigRepository.getByUserId(user.id);
     if (config == null || !config.isConfigured) {
       return const _InterviewSessionData.notReady('请先在“我的”页面配置 AI 模型，再开始面试练习');
     }
 
-    final questions = await _aiGenerationRepository
-        .fetchPracticeQuestionsByUser(
+    var questions = await _aiGenerationRepository.fetchPracticeQuestionsByUser(
+      userId: user.id,
+      libraryId: widget.libraryId,
+      limit: 100,
+    );
+    if (widget.documentId != null) {
+      questions = questions
+          .where((q) => q.question.documentId == widget.documentId)
+          .toList();
+    }
+    if (widget.conceptId != null) {
+      final repository = widget.learningRepository ?? LearningRepository();
+      var ids = await repository.questionsForConcept(
+        user.id,
+        widget.conceptId!,
+      );
+      if (ids.isEmpty && widget.documentId != null) {
+        final document = await SourceDocumentRepository().getSourceDocumentById(
           userId: user.id,
-          libraryId: widget.libraryId,
-          limit: 100,
+          documentId: widget.documentId!,
         );
+        if (document != null) {
+          await LearningResourceService().generateConceptQuestions(
+            document,
+            config,
+            widget.conceptId!,
+          );
+        }
+        ids = await repository.questionsForConcept(user.id, widget.conceptId!);
+        questions = await _aiGenerationRepository.fetchPracticeQuestionsByUser(
+          userId: user.id,
+          limit: 300,
+        );
+      }
+      questions = questions.where((q) => ids.contains(q.question.id)).toList();
+    } else if (questions.isEmpty && widget.documentId != null) {
+      final document = await SourceDocumentRepository().getSourceDocumentById(
+        userId: user.id,
+        documentId: widget.documentId!,
+      );
+      if (document != null) {
+        await LearningResourceService().generate(
+          document,
+          config,
+          'interview_bank',
+        );
+        questions = (await _aiGenerationRepository.fetchPracticeQuestionsByUser(
+          userId: user.id,
+          limit: 300,
+        )).where((q) => q.question.documentId == widget.documentId).toList();
+      }
+    }
     if (questions.isEmpty) {
       return _InterviewSessionData.notReady(
         widget.libraryName == null
@@ -132,10 +196,38 @@ class _AiInterviewPageState extends State<AiInterviewPage> {
       );
     }
 
-    return _InterviewSessionData.ready(
-      config: config,
-      question: _pickInterviewQuestion(questions),
-    );
+    if (widget.documentId != null) {
+      final document = await SourceDocumentRepository().getSourceDocumentById(
+        userId: user.id,
+        documentId: widget.documentId!,
+      );
+      if (document != null) {
+        _sourceContext = await LearningResourceService().sourceText(document);
+      }
+      final errors = await (widget.learningRepository ?? LearningRepository())
+          .errors(
+            user.id,
+            documentId: widget.documentId,
+            conceptId: widget.conceptId,
+          );
+      _sourceContext +=
+          '\n之前的学习缺口：${errors.map((e) => '${e.prompt}: ${e.correction}').join('\n')}';
+    }
+    var selected = _pickInterviewQuestion(questions);
+    if (widget.initialErrorId != null) {
+      final id = await (widget.learningRepository ?? LearningRepository())
+          .prepareErrorRetry(user.id, widget.initialErrorId!);
+      selected =
+          await _aiGenerationRepository.fetchPracticeQuestionByUserAndId(
+            userId: user.id,
+            questionId: id,
+          ) ??
+          selected;
+    }
+    if (widget.feynman) {
+      selected = _contextualQuestion(selected, feynmanPrompt: true);
+    }
+    return _InterviewSessionData.ready(config: config, question: selected);
   }
 
   PracticeQuestionWithDocument _pickInterviewQuestion(
@@ -173,10 +265,42 @@ class _AiInterviewPageState extends State<AiInterviewPage> {
 
     try {
       final feedback = await _interviewService.evaluateAnswer(
-        question: activeQuestion,
+        question: _contextualQuestion(activeQuestion),
         userAnswer: answer,
         config: data.config!,
       );
+      await (widget.learningRepository ?? LearningRepository())
+          .recordQuestionAttempt(
+            _userId!,
+            data.question!.question.id,
+            feedback.score >= 70 &&
+                feedback.missingPoints.isEmpty &&
+                feedback.misconceptions.isEmpty,
+            answer,
+            conceptId: widget.conceptId,
+            origin: widget.feynman ? 'feynman' : 'interview',
+            prompt: activeQuestion.question.questionText,
+            score: feedback.score,
+            feedback: jsonEncode({
+              'correction': feedback.correction,
+              'missing_points': feedback.missingPoints,
+              'misconceptions': feedback.misconceptions,
+              'standard_answer': feedback.standardAnswer,
+              'hit_points': feedback.hitPoints,
+            }),
+          );
+      _answerHistory.add(
+        '问题：${activeQuestion.question.questionText}\n回答：$answer\n反馈：${feedback.correction}',
+      );
+      if (widget.initialErrorId != null &&
+          feedback.score >= 70 &&
+          feedback.missingPoints.isEmpty &&
+          feedback.misconceptions.isEmpty) {
+        await (widget.learningRepository ?? LearningRepository()).resolveError(
+          _userId!,
+          widget.initialErrorId!,
+        );
+      }
       if (!mounted) return;
       setState(() => _feedback = feedback);
     } catch (error) {
@@ -216,6 +340,34 @@ class _AiInterviewPageState extends State<AiInterviewPage> {
         setState(() => _isPreparingCamera = false);
       }
     }
+  }
+
+  PracticeQuestionWithDocument _contextualQuestion(
+    PracticeQuestionWithDocument item, {
+    bool feynmanPrompt = false,
+  }) {
+    final q = item.question;
+    return PracticeQuestionWithDocument(
+      documentTitle: item.documentTitle,
+      question: PracticeQuestionRecord(
+        id: q.id,
+        documentId: q.documentId,
+        questionText: feynmanPrompt
+            ? '请用自己的话向一个初学者讲清楚：${q.questionText}。AI 将以学习者身份检查逻辑并提问。'
+            : q.questionText,
+        answerText: q.id < 0 ? null : q.answerText,
+        analysisText:
+            '${q.analysisText ?? ''}\n资料上下文：$_sourceContext\n已完成的问答：${_answerHistory.join('\n\n')}',
+        difficulty: q.difficulty,
+        reviewStatus: q.reviewStatus,
+        wrongCount: q.wrongCount,
+        createdAt: q.createdAt,
+        questionKind: q.questionKind,
+        optionsJson: q.id < 0 ? null : q.optionsJson,
+        rubricJson: q.id < 0 ? null : q.rubricJson,
+        expectedKeywordsJson: q.id < 0 ? null : q.expectedKeywordsJson,
+      ),
+    );
   }
 
   Future<void> _beginInterview() async {
@@ -638,7 +790,7 @@ class _AiInterviewPageState extends State<AiInterviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    final libraryName = widget.libraryName ?? '当前知识库';
+    final libraryName = widget.feynman ? '费曼学习' : widget.libraryName ?? '当前知识库';
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(title: Text('$libraryName 面试')),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../database/learning_repository.dart';
 
 import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
@@ -9,16 +10,28 @@ import '../../database/models/ai_result_records.dart';
 class PracticeReviewPage extends StatefulWidget {
   const PracticeReviewPage({
     this.initialQuestionId,
+    this.documentId,
+    this.conceptId,
+    this.wrongOnly = false,
+    this.questionLimit,
+    this.questionIds,
     this.authRepository,
     this.aiGenerationRepository,
     this.favoriteRepository,
+    this.learningRepository,
     super.key,
   });
 
   final int? initialQuestionId;
+  final int? documentId;
+  final int? conceptId;
+  final bool wrongOnly;
+  final int? questionLimit;
+  final List<int>? questionIds;
   final AuthRepository? authRepository;
   final AiGenerationRepository? aiGenerationRepository;
   final FavoriteRepository? favoriteRepository;
+  final LearningRepository? learningRepository;
 
   @override
   State<PracticeReviewPage> createState() => _PracticeReviewPageState();
@@ -61,10 +74,37 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     }
     _userId = user.id;
 
-    final questions = await _aiGenerationRepository.fetchReviewQueueByUser(
+    var questions = await _aiGenerationRepository.fetchReviewQueueByUser(
       userId: user.id,
       limit: 300,
     );
+    if (widget.questionIds != null) {
+      questions = (await _aiGenerationRepository.fetchPracticeQuestionsByUser(
+        userId: user.id,
+        limit: 1000,
+      )).where((q) => widget.questionIds!.contains(q.question.id)).toList();
+      questions.sort(
+        (a, b) => widget.questionIds!
+            .indexOf(a.question.id)
+            .compareTo(widget.questionIds!.indexOf(b.question.id)),
+      );
+    }
+    if (widget.documentId != null) {
+      questions = questions
+          .where((q) => q.question.documentId == widget.documentId)
+          .toList();
+    }
+    if (widget.wrongOnly) {
+      questions = questions.where((q) => q.question.isWrong).toList();
+    }
+    if (widget.conceptId != null) {
+      final ids = await (widget.learningRepository ?? LearningRepository())
+          .questionsForConcept(user.id, widget.conceptId!);
+      questions = questions.where((q) => ids.contains(q.question.id)).toList();
+    }
+    if (widget.questionLimit != null) {
+      questions = questions.take(widget.questionLimit!).toList();
+    }
     final favoriteKeys = await _favoriteRepository.fetchFavoriteKeys(user.id);
     if (mounted) {
       setState(() => _favoriteKeys = favoriteKeys);

@@ -4,6 +4,7 @@ import 'app_database.dart';
 import 'models/ai_generation_task_record.dart';
 import 'models/ai_result_records.dart';
 import 'knowledge_graph_repository.dart';
+import 'learning_repository.dart';
 import '../review/review_schedule_policy.dart';
 
 class AiGenerationRepository {
@@ -291,19 +292,25 @@ class AiGenerationRepository {
   Future<void> replacePracticeQuestions({
     required int documentId,
     required List<Map<String, String>> questions,
+  }) => appendPracticeQuestions(documentId: documentId, questions: questions);
+
+  Future<void> appendPracticeQuestions({
+    required int documentId,
+    required List<Map<String, String>> questions,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      await txn.delete(
-        AppDatabase.tablePracticeQuestions,
-        where: 'document_id = ?',
-        whereArgs: [documentId],
-      );
-
       for (final question in questions) {
+        final existing = await txn.query(
+          AppDatabase.tablePracticeQuestions,
+          columns: ['id'],
+          where: 'document_id = ? AND question_text = ?',
+          whereArgs: [documentId, (question['question_text'] ?? '').trim()],
+        );
+        if (existing.isNotEmpty) continue;
         await txn.insert(AppDatabase.tablePracticeQuestions, {
           'document_id': documentId,
           'question_text': (question['question_text'] ?? '').trim(),
@@ -739,6 +746,14 @@ class AiGenerationRepository {
       questionId: questionId,
       isCorrect: false,
     );
+    final scope = await _knowledgeGraphRepository.findDocumentScope(
+      question.documentId,
+    );
+    if (scope != null) {
+      await LearningRepository(
+        database: _database,
+      ).recordQuestionAttempt(scope.userId, questionId, false, userAnswer);
+    }
   }
 
   Future<void> markPracticeQuestionCorrect({
@@ -815,6 +830,14 @@ class AiGenerationRepository {
       questionId: questionId,
       isCorrect: true,
     );
+    final scope = await _knowledgeGraphRepository.findDocumentScope(
+      question.documentId,
+    );
+    if (scope != null) {
+      await LearningRepository(
+        database: _database,
+      ).recordQuestionAttempt(scope.userId, questionId, true, userAnswer);
+    }
   }
 
   Future<StudyOverviewStats> fetchStudyOverviewStats(int userId) async {
@@ -1118,7 +1141,9 @@ class AiGenerationRepository {
   }
 
   String _buildLibraryClause(int? libraryId) {
-    return libraryId == null ? '' : 'AND documents.library_id = ?';
+    return libraryId == null
+        ? ''
+        : 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)';
   }
 
   String _appendLibraryClause(int? libraryId, List<Object?> args) {
@@ -1126,6 +1151,6 @@ class AiGenerationRepository {
       return '';
     }
     args.add(libraryId);
-    return 'AND documents.library_id = ?';
+    return 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)';
   }
 }

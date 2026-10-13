@@ -52,6 +52,7 @@ class SourceDocumentRecord {
     this.pageNumber,
     this.ocrErrorMessage,
     this.ocrUpdatedAt,
+    this.lastConceptName,
   });
 
   final int id;
@@ -67,6 +68,7 @@ class SourceDocumentRecord {
   final bool aiDone;
   final String? ocrErrorMessage;
   final DateTime? ocrUpdatedAt;
+  final String? lastConceptName;
 
   bool get ocrDone => ocrStatus == SourceDocumentOcrStatus.success;
 
@@ -143,6 +145,7 @@ class SourceDocumentRecord {
         fallbackDone: ocrDoneFallback,
       ),
       aiDone: _readBool(map['ai_done']),
+      lastConceptName: map['last_concept_name'] as String?,
       ocrErrorMessage: (map['ocr_error_message'] as String?)?.trim(),
       ocrUpdatedAt: rawOcrUpdatedAt.isEmpty
           ? null

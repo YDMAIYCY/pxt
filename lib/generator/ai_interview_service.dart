@@ -42,7 +42,7 @@ class AiInterviewService {
     final client = _miniMaxClient ?? MiniMaxClient.fromConfig(config);
     final response = await client.generateStructuredJson(
       systemPrompt:
-          'You are a strict but supportive study interviewer. Score answers only against the supplied practice question and standard answer. Ask diverse follow-up questions that resemble a real oral interview. Return JSON only.',
+          'You are a supportive knowledge interviewer for learners of any age and field. Score against the supplied sources and reference answer. Follow-up questions may differ from the original question: use the source context and conversation history, never reuse an unrelated reference answer. In Feynman mode act as a curious beginner and check clarity, reasoning and omissions. Explain uncertainty when the source is insufficient. Return JSON only.',
       userPrompt: _buildPrompt(question: question, userAnswer: userAnswer),
       jsonSchema: _feedbackSchema,
     );
@@ -85,17 +85,17 @@ Original analysis: ${record.analysisText}
 Expected keywords: $keywords
 Rubric: $rubric
 
-Student answer:
+Learner answer:
 $userAnswer
 
 Return:
 - score: integer 0-100
-- hit_points: concepts the student answered correctly
+- hit_points: concepts the learner answered correctly
 - missing_points: important concepts missing from the answer
 - misconceptions: incorrect or risky statements
 - correction: concise coaching feedback
 - standard_answer: a polished correct answer
-- next_follow_up: one short but varied follow-up interview question. Do not repeat the current question. Prefer one of these directions each time: counterexample, real-world application, boundary condition, why/how mechanism, comparison with a similar concept, error diagnosis, or asking the student to teach it in simpler words.
+- next_follow_up: one short but varied follow-up interview question. Do not repeat the current question. Prefer one of these directions each time: counterexample, real-world application, boundary condition, why/how mechanism, comparison with a similar concept, error diagnosis, or asking the learner to teach it in simpler words.
 ''';
   }
 

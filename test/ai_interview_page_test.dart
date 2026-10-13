@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'support/noop_learning_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:pxt1/database/ai_generation_repository.dart';
@@ -15,6 +16,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AiInterviewPage(
+          learningRepository: NoopLearningRepository(),
           authRepository: _FakeAuthRepository(),
           aiGenerationRepository: _FakeAiGenerationRepository(),
           llmConfigRepository: _FakeLlmConfigRepository(),

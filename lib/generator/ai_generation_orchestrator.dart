@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../database/ai_generation_repository.dart';
 import '../database/knowledge_graph_repository.dart';
+import '../database/learning_repository.dart';
 import '../database/models/ai_generation_task_record.dart';
 import '../database/models/ai_result_records.dart';
 import '../database/models/llm_provider_config.dart';
@@ -34,7 +35,10 @@ class AiGenerationOrchestrator {
     AiGenerationRepository? aiGenerationRepository,
     KnowledgeGraphRepository? knowledgeGraphRepository,
     KnowledgeGraphExtractionService? knowledgeGraphExtractionService,
+    LearningRepository? learningRepository,
   }) : _miniMaxClient = miniMaxClient ?? MiniMaxClient(),
+       _clientOverride = miniMaxClient,
+       _learningRepository = learningRepository ?? LearningRepository(),
        _aiGenerationRepository =
            aiGenerationRepository ?? AiGenerationRepository(),
        _knowledgeGraphRepository =
@@ -43,6 +47,8 @@ class AiGenerationOrchestrator {
            knowledgeGraphExtractionService ?? KnowledgeGraphExtractionService();
 
   final MiniMaxClient _miniMaxClient;
+  final MiniMaxClient? _clientOverride;
+  final LearningRepository _learningRepository;
   final AiGenerationRepository _aiGenerationRepository;
   final KnowledgeGraphRepository _knowledgeGraphRepository;
   final KnowledgeGraphExtractionService _knowledgeGraphExtractionService;
@@ -117,6 +123,25 @@ class AiGenerationOrchestrator {
     }
 
     final promptTemplate = _promptTemplateOf(taskType);
+    final scope = await _knowledgeGraphRepository.findDocumentScope(documentId);
+    if (scope != null && feedback == null) {
+      final cached = await _learningRepository.resources(
+        scope.userId,
+        documentId,
+        type: taskType,
+      );
+      final model = llmConfig?.effectiveModel ?? _miniMaxClient.debugModel;
+      if (cached.isNotEmpty &&
+          cached.first.fingerprint ==
+              LearningRepository.fingerprint(trimmedText) &&
+          cached.first.model == model) {
+        return AiSingleTaskResult(
+          taskType: taskType,
+          success: true,
+          message: '已复用保存的${AiTaskType.labelOf(taskType)}',
+        );
+      }
+    }
     final taskRecord = await _aiGenerationRepository.markTaskRunning(
       documentId: documentId,
       taskType: taskType,
@@ -128,9 +153,11 @@ class AiGenerationOrchestrator {
     );
 
     try {
-      final client = llmConfig == null
-          ? _miniMaxClient
-          : MiniMaxClient.fromConfig(llmConfig);
+      final client =
+          _clientOverride ??
+          (llmConfig == null
+              ? _miniMaxClient
+              : MiniMaxClient.fromConfig(llmConfig));
       final response = await client.generateStructuredJson(
         systemPrompt: _systemPrompt,
         userPrompt: _buildUserPrompt(
@@ -152,6 +179,17 @@ class AiGenerationOrchestrator {
         taskId: taskRecord.id,
         resultText: const JsonEncoder.withIndent('  ').convert(response),
       );
+      if (scope != null) {
+        await _learningRepository.saveResource(
+          userId: scope.userId,
+          documentId: documentId,
+          type: taskType,
+          title: AiTaskType.labelOf(taskType),
+          content: jsonEncode(response),
+          inputText: trimmedText,
+          model: client.debugModel,
+        );
+      }
       await _refreshKnowledgeGraph(
         documentId: documentId,
         ocrText: trimmedText,
@@ -224,6 +262,12 @@ class AiGenerationOrchestrator {
   }) async {
     final scope = await _knowledgeGraphRepository.findDocumentScope(documentId);
     if (scope == null) {
+      return;
+    }
+    if ((await _learningRepository.concepts(
+      scope.userId,
+      documentId,
+    )).isNotEmpty) {
       return;
     }
 

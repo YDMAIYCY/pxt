@@ -47,7 +47,7 @@ void main() {
       expect(graphSource, contains('prerequisite'));
       expect(generationSource, contains('isCorrect: false'));
       expect(generationSource, contains('isCorrect: true'));
-      expect(homeSource, contains('_NextBestActionSection'));
+      expect(homeSource, contains('data.nextActions.map'));
     });
 
     test(

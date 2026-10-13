@@ -113,6 +113,7 @@ class MiniMaxClient {
     required String systemPrompt,
     required String userPrompt,
     Map<String, dynamic>? jsonSchema,
+    List<({String base64, String mimeType})>? images,
   }) async {
     if (_apiKey.isEmpty) {
       throw MiniMaxException('未配置 $_providerLabel API Key，请先到“我的”页配置大模型。');
@@ -133,6 +134,38 @@ class MiniMaxClient {
       userPrompt: userPrompt,
       jsonSchema: jsonSchema,
     );
+
+    if (images != null && images.isNotEmpty) {
+      if (!_usesOpenAiCompatible && !_usesTokenPlan) {
+        throw const MiniMaxException(
+          '图片理解需要支持视觉的模型，请在模型设置中使用 OpenAI 兼容接口或支持图片的 Token Plan 模型。',
+        );
+      }
+      final content = <Map<String, Object?>>[
+        for (final image in images)
+          if (_usesTokenPlan)
+            {
+              'type': 'image',
+              'source': {
+                'type': 'base64',
+                'media_type': image.mimeType,
+                'data': image.base64,
+              },
+            }
+          else
+            {
+              'type': 'image_url',
+              'image_url': {
+                'url': 'data:${image.mimeType};base64,${image.base64}',
+              },
+            },
+        {'type': 'text', 'text': userPrompt},
+      ];
+      body['messages'] = [
+        if (!_usesTokenPlan) {'role': 'system', 'content': systemPrompt},
+        {'role': 'user', 'content': content},
+      ];
+    }
 
     try {
       final response = await _httpClient

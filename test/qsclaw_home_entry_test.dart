@@ -14,97 +14,58 @@ import 'package:pxt1/database/source_document_repository.dart';
 import 'package:pxt1/ui/pages/tabs/home_tab_page.dart';
 
 void main() {
-  testWidgets('HomeTabPage opens QSClaw agent entry', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: HomeTabPage(
-            authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: _FakeSourceDocumentRepository(),
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
-            knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-            qsClawPageBuilder: () => const _MarkerPage('qsclaw-opened'),
-          ),
-        ),
+  Widget home({ValueChanged<int>? onOpenTab}) => MaterialApp(
+    home: Scaffold(
+      body: HomeTabPage(
+        authRepository: _FakeAuthRepository(),
+        sourceDocumentRepository: _FakeSourceDocumentRepository(),
+        aiGenerationRepository: _FakeAiGenerationRepository(),
+        documentBatchRepository: _FakeDocumentBatchRepository(),
+        knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+        onOpenTab: onOpenTab,
       ),
-    );
-    await tester.pumpAndSettle();
+    ),
+  );
 
-    await tester.scrollUntilVisible(find.text('QSClaw'), 120);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('QSClaw'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'home prioritizes capture and learning suggestions without games',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 720));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(home());
+      await tester.pumpAndSettle();
+      for (final label in [
+        '拍学通',
+        '今天想学习什么？',
+        '拍一下，开始学习',
+        '拍照',
+        '相册',
+        '文件',
+        '继续学习',
+      ]) {
+        expect(find.text(label), findsOneWidget);
+      }
+      await tester.scrollUntilVisible(find.text('AI 快速面试'), 100);
+      expect(find.text('今日学习建议'), findsOneWidget);
+      expect(find.text('益智游戏'), findsNothing);
+      expect(find.text('QSClaw'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
-    expect(find.text('qsclaw-opened'), findsOneWidget);
-  });
-
-  testWidgets('HomeTabPage does not show AI interview entry', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: HomeTabPage(
-            authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: _FakeSourceDocumentRepository(),
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
-            knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('AI 面试'), findsNothing);
-    expect(find.text('AI 面试官'), findsNothing);
-  });
-
-  testWidgets('HomeTabPage renders core Chinese labels without mojibake', (
+  testWidgets('home links to practice and companion navigation indices', (
     tester,
   ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: HomeTabPage(
-            authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: _FakeSourceDocumentRepository(),
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
-            knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-          ),
-        ),
-      ),
-    );
+    final opened = <int>[];
+    await tester.pumpWidget(home(onOpenTab: opened.add));
     await tester.pumpAndSettle();
-
-    const labels = [
-      '\u5feb\u901f\u5165\u53e3',
-      '\u62cd\u7167\u8bc6\u522b',
-      '\u5bfc\u5165\u8d44\u6599',
-      '\u76ca\u667a\u6e38\u620f',
-      '\u6700\u8fd1\u5b66\u4e60\u5305',
-      '\u6700\u8fd1\u5904\u7406\u8d44\u6599',
-      '\u6700\u8fd1\u751f\u6210\u6210\u679c',
-      '\u5b66\u4e60\u7edf\u8ba1',
-    ];
-    for (final label in labels) {
-      expect(find.text(label), findsOneWidget);
-    }
-
-    expect(find.textContaining('\u9396'), findsNothing);
-    expect(find.textContaining('\u9422'), findsNothing);
+    await tester.scrollUntilVisible(find.text('查看全部'), 120);
+    await tester.tap(find.text('查看全部'));
+    expect(opened, [2]);
+    await tester.scrollUntilVisible(find.text('AI 学伴'), 120);
+    await tester.tap(find.text('AI 学伴'));
+    expect(opened, [2, 3]);
   });
-}
-
-class _MarkerPage extends StatelessWidget {
-  const _MarkerPage(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(body: Center(child: Text(label)));
-  }
 }
 
 class _FakeAuthRepository extends AuthRepository {

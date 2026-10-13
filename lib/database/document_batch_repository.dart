@@ -203,7 +203,7 @@ class DocumentBatchRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
@@ -311,6 +311,6 @@ class DocumentBatchRepository {
       return '';
     }
     args.add(libraryId);
-    return 'AND batches.library_id = ?';
+    return 'AND batches.id IN (SELECT d.batch_id FROM source_documents d JOIN document_library_links dl ON dl.document_id = d.id WHERE dl.library_id = ?)';
   }
 }

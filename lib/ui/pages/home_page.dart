@@ -8,9 +8,8 @@ import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
 import 'tabs/home_tab_page.dart';
 import 'tabs/knowledge_tab_page.dart';
-import 'tabs/focus_tab_page.dart';
+import 'learning_hub_pages.dart';
 import 'tabs/profile_tab_page.dart';
-import 'tabs/tasks_tab_page.dart';
 
 const List<_BottomDockItem> _bottomDockItems = [
   _BottomDockItem(label: '\u9996\u9875', iconAsset: AppAssets.navHome),
@@ -18,8 +17,8 @@ const List<_BottomDockItem> _bottomDockItems = [
     label: '\u77e5\u8bc6\u5e93',
     iconAsset: AppAssets.navKnowledge,
   ),
-  _BottomDockItem(label: '\u4e13\u6ce8', icon: Icons.psychology_alt_rounded),
-  _BottomDockItem(label: '\u4efb\u52a1', iconAsset: AppAssets.navTask),
+  _BottomDockItem(label: '练习', icon: Icons.quiz_rounded),
+  _BottomDockItem(label: 'AI 学伴', icon: Icons.chat_bubble_outline_rounded),
   _BottomDockItem(label: '\u6211\u7684', iconAsset: AppAssets.navProfile),
 ];
 
@@ -101,18 +100,8 @@ class _HomePageState extends State<HomePage> {
         activeTabListenable: _activeTabNotifier,
         onDataChanged: _notifyDataChanged,
       ),
-      FocusTabPage(
-        tabIndex: 2,
-        refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
-        onDataChanged: _notifyDataChanged,
-      ),
-      TasksTabPage(
-        tabIndex: 3,
-        refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
-        onDataChanged: _notifyDataChanged,
-      ),
+      PracticeTabPage(onDataChanged: _notifyDataChanged),
+      const CompanionTabPage(),
       ProfileTabPage(
         tabIndex: 4,
         refreshListenable: _refreshNotifier,

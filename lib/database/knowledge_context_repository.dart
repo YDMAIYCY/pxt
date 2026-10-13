@@ -43,6 +43,22 @@ class KnowledgeContextRepository {
     int? libraryId,
   }) async {
     final candidates = <KnowledgeContextSource>[];
+    candidates.addAll(
+      await _querySources(
+        """
+      SELECT r.document_id, COALESCE(documents.original_title, '') AS document_title,
+        r.id AS source_id, r.title AS title, r.content AS snippet
+      FROM learning_resources r JOIN source_documents documents ON documents.id = r.document_id
+      WHERE documents.user_id = ?
+        ${libraryId == null ? '' : 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)'}
+        AND r.id IN (SELECT MAX(id) FROM learning_resources GROUP BY document_id, type)
+      ORDER BY r.id DESC LIMIT ?
+      """,
+        _queryArgs(userId: userId, libraryId: libraryId, limit: perTypeLimit),
+        'learning_resource',
+        '学习资源',
+      ),
+    );
 
     candidates.addAll(
       await _querySources(
@@ -71,7 +87,7 @@ class KnowledgeContextRepository {
         LEFT JOIN ${AppDatabase.tableSourceDocuments} documents
           ON documents.id = concepts.document_id
         WHERE concepts.user_id = ?
-          ${libraryId == null ? '' : 'AND concepts.library_id = ?'}
+          ${libraryId == null ? '' : 'AND concepts.id IN (SELECT cd.concept_id FROM concept_documents cd JOIN document_library_links dl ON dl.document_id = cd.document_id WHERE dl.library_id = ?)'}
         ORDER BY concepts.weakness_score DESC,
                  concepts.updated_at DESC,
                  concepts.id DESC
@@ -94,7 +110,7 @@ class KnowledgeContextRepository {
         JOIN ${AppDatabase.tableSourceDocuments} documents
           ON documents.id = ocr.document_id
         WHERE documents.user_id = ?
-          ${libraryId == null ? '' : 'AND documents.library_id = ?'}
+          ${libraryId == null ? '' : 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)'}
         ORDER BY ocr.updated_at DESC, ocr.id DESC
         LIMIT ?
         ''',
@@ -116,7 +132,7 @@ class KnowledgeContextRepository {
         JOIN ${AppDatabase.tableSourceDocuments} documents
           ON documents.id = cards.document_id
         WHERE documents.user_id = ?
-          ${libraryId == null ? '' : 'AND documents.library_id = ?'}
+          ${libraryId == null ? '' : 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)'}
         ORDER BY cards.id DESC
         LIMIT ?
         ''',
@@ -138,7 +154,7 @@ class KnowledgeContextRepository {
         JOIN ${AppDatabase.tableSourceDocuments} documents
           ON documents.id = outlines.document_id
         WHERE documents.user_id = ?
-          ${libraryId == null ? '' : 'AND documents.library_id = ?'}
+          ${libraryId == null ? '' : 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)'}
         ORDER BY outlines.id DESC
         LIMIT ?
         ''',
@@ -160,7 +176,7 @@ class KnowledgeContextRepository {
         JOIN ${AppDatabase.tableSourceDocuments} documents
           ON documents.id = questions.document_id
         WHERE documents.user_id = ?
-          ${libraryId == null ? '' : 'AND documents.library_id = ?'}
+          ${libraryId == null ? '' : 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)'}
         ORDER BY questions.wrong_count DESC, questions.id DESC
         LIMIT ?
         ''',
