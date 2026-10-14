@@ -19,6 +19,7 @@ import '../widgets/knowledge_outcome_tile.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'record_results_page.dart';
 import 'record_source_page.dart';
+import 'interview/interview_prepare_page.dart';
 
 class ImportRecordDetailPage extends StatefulWidget {
   const ImportRecordDetailPage({
@@ -242,6 +243,26 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
   }
 
   Future<void> _results(ImportRecord record, String type, String title) async {
+    if (type == 'interview') {
+      final libraryId = record.libraryId ?? widget.libraryId;
+      if (libraryId == null) {
+        _message('这条记录尚未归档到知识库，请先移动到某个知识库再开始面试。');
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InterviewPreparePage(
+            userId: record.userId,
+            libraryId: libraryId,
+            recordId: record.id,
+            database: widget.database,
+          ),
+        ),
+      );
+      if (mounted) await _refresh();
+      return;
+    }
     if (type == 'ocr') {
       await _sources(record);
       return;
@@ -568,7 +589,8 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                       return Wrap(
                         spacing: 10,
                         runSpacing: 10,
-                        children: knowledgeOutcomes.map((item) {
+                        children: [
+                          ...knowledgeOutcomes.map((item) {
                           final count = item.type == 'ocr'
                               ? record.pages.length
                               : record.counts[item.type] ?? 0;
@@ -588,7 +610,20 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                                   _results(record, item.type, item.title),
                             ),
                           );
-                        }).toList(),
+                          }),
+                          SizedBox(
+                            width: width,
+                            child: OutcomeTile(
+                              title: 'AI 面试',
+                              description: '基于本次记录\n进行语音问答',
+                              color: const Color(0xFF4F7BFF),
+                              icon: Icons.record_voice_over_outlined,
+                              countLabel: '开始面试',
+                              onTap: () =>
+                                  _results(record, 'interview', 'AI 面试'),
+                            ),
+                          ),
+                        ],
                       );
                     },
                   ),

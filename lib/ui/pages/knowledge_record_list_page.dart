@@ -14,6 +14,8 @@ import '../widgets/knowledge_components.dart';
 import '../widgets/knowledge_library_editor.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'import_record_detail_page.dart';
+import 'interview/interview_prepare_page.dart';
+import 'interview/interview_history_page.dart';
 
 class BookDetailPage extends StatefulWidget {
   const BookDetailPage({required this.library, this.database, super.key});
@@ -101,6 +103,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
   }
 
   Future<void> _import() async {
+    // 面试入口与导入互斥：导入进行中不允许启动面试。
     if (_importing) return;
     final source = await showModalBottomSheet<String>(
       context: context,
@@ -196,6 +199,34 @@ class _BookDetailPageState extends State<BookDetailPage> {
           libraryId: _library.id,
           database: widget.database,
           autoOcr: autoOcr,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
+  Future<void> _startInterview() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InterviewPreparePage(
+          userId: _library.userId,
+          libraryId: _library.id,
+          database: widget.database,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
+  Future<void> _openHistory() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InterviewHistoryPage(
+          userId: _library.userId,
+          libraryId: _library.id,
+          database: widget.database,
         ),
       ),
     );
@@ -350,10 +381,29 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   ),
                   Align(
                     alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: _importing ? null : _import,
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: Text(_importing ? '导入中…' : '导入资料'),
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 4,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _importing ? null : _startInterview,
+                          icon: const Icon(
+                            Icons.record_voice_over_outlined,
+                            size: 18,
+                          ),
+                          label: const Text('AI 面试'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _importing ? null : _openHistory,
+                          icon: const Icon(Icons.history_rounded, size: 18),
+                          label: const Text('历史'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _importing ? null : _import,
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: Text(_importing ? '导入中…' : '导入资料'),
+                        ),
+                      ],
                     ),
                   ),
                   if (snapshot.connectionState != ConnectionState.done)

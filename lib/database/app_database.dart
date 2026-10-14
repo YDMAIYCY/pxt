@@ -1,6 +1,7 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'import_record_schema.dart';
+import 'interview_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -11,7 +12,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 17;
+  static const int databaseVersion = 18;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -397,6 +398,7 @@ class AppDatabase {
     await _createKnowledgeGraphIndexes(db);
     await _createFavoriteIndexes(db);
     await createImportRecordSchema(db);
+    await createInterviewSchema(db);
   }
 
   Future<void> _upgradeTables(
@@ -446,6 +448,10 @@ class AppDatabase {
     }
     if (oldVersion < 17) {
       await createImportRecordSchema(db);
+    }
+    // Additive only: interview history keeps snapshot IDs when sources move.
+    if (oldVersion < 18) {
+      await createInterviewSchema(db);
     }
   }
 
@@ -1160,6 +1166,8 @@ class AppDatabase {
       await createImportRecordSchema(db);
       _recordSchemaReady = true;
     }
+    // Interview tables are additive; IF NOT EXISTS keeps reopen idempotent.
+    await createInterviewSchema(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

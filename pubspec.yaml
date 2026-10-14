@@ -47,6 +47,9 @@ dependencies:
   speech_to_text: ^7.4.0
   record: ^6.2.1
   graphview: ^1.5.1
+  sherpa_onnx: ^1.13.8
+  flutter_tts: ^4.2.5
+  audioplayers: ^6.7.1
 
 dev_dependencies:
   sqflite_common_ffi: ^2.3.6
