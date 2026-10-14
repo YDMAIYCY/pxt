@@ -6,7 +6,7 @@ import 'package:pxt1/database/models/ai_result_records.dart';
 void main() {
   group('Stage 12 review metadata', () {
     test('database version and training table are registered', () {
-      expect(AppDatabase.databaseVersion, 17);
+      expect(AppDatabase.databaseVersion, 18);
       expect(
         AppDatabase.tableWrongQuestionTrainings,
         'wrong_question_trainings',
@@ -15,6 +15,12 @@ void main() {
       expect(AppDatabase.tableAiChatMessages, 'ai_chat_messages');
       expect(AppDatabase.tableKnowledgeConcepts, 'knowledge_concepts');
       expect(AppDatabase.tableKnowledgeConceptLinks, 'knowledge_concept_links');
+      // v18 新增跨知识库规范图谱表。
+      expect(AppDatabase.tableGraphNodes, 'graph_nodes');
+      expect(AppDatabase.tableGraphEdges, 'graph_edges');
+      expect(AppDatabase.tableGraphNodeSources, 'graph_node_sources');
+      expect(AppDatabase.tableGraphEdgeEvidence, 'graph_edge_evidence');
+      expect(AppDatabase.tableGraphBuildJobs, 'graph_build_jobs');
     });
 
     test('practice question reads spaced review metadata', () {

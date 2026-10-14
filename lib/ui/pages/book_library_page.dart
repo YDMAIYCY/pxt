@@ -11,6 +11,7 @@ import '../widgets/knowledge_components.dart';
 import '../widgets/knowledge_library_editor.dart';
 import 'knowledge_record_list_page.dart';
 import 'import_record_detail_page.dart';
+import 'knowledge_graph_page.dart';
 
 class BookLibraryPage extends StatefulWidget {
   const BookLibraryPage({
@@ -114,6 +115,19 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     if (mounted) _reload();
   }
 
+  Future<void> _openKnowledgeGraph(int userId) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => KnowledgeGraphPage(
+          userId: userId,
+          database: widget.database,
+        ),
+      ),
+    );
+    if (mounted) _reload();
+  }
+
   @override
   Widget build(BuildContext context) => FutureBuilder(
     future: _future,
@@ -199,6 +213,16 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
               children: [
                 Expanded(
                   child: Text('我的知识库', style: AppTextStyles.h2(context)),
+                ),
+                IconButton(
+                  onPressed: () => _openKnowledgeGraph(data.userId),
+                  tooltip: '知识图谱',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(
+                    Icons.hub_rounded,
+                    size: 20,
+                    color: AppColors.primary,
+                  ),
                 ),
                 TextButton.icon(
                   onPressed: () => _edit(data.userId),

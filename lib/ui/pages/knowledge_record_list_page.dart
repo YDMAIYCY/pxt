@@ -14,6 +14,7 @@ import '../widgets/knowledge_components.dart';
 import '../widgets/knowledge_library_editor.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'import_record_detail_page.dart';
+import 'knowledge_graph_page.dart';
 
 class BookDetailPage extends StatefulWidget {
   const BookDetailPage({required this.library, this.database, super.key});
@@ -202,6 +203,21 @@ class _BookDetailPageState extends State<BookDetailPage> {
     if (mounted) await _refresh();
   }
 
+  /// 进入知识图谱，默认只选中当前知识库；用户仍可在图谱里组合其他知识库。
+  Future<void> _openKnowledgeGraph() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => KnowledgeGraphPage(
+          initialLibraryIds: <int>[_library.id],
+          userId: _library.userId,
+          database: widget.database,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: Colors.transparent,
@@ -281,6 +297,11 @@ class _BookDetailPageState extends State<BookDetailPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  _KnowledgeGraphEntry(
+                    libraryName: _library.name,
+                    onTap: _openKnowledgeGraph,
+                  ),
+                  const SizedBox(height: 14),
                   KnowledgeSearchField(
                     hint: '搜索记录、知识点…',
                     onChanged: (v) {
@@ -504,6 +525,75 @@ class ImportRecordTile extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// 单本知识库内的「查看知识图谱」入口。
+class _KnowledgeGraphEntry extends StatelessWidget {
+  const _KnowledgeGraphEntry({required this.libraryName, required this.onTap});
+
+  final String libraryName;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    borderRadius: BorderRadius.circular(18),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Ink(
+        padding: const EdgeInsets.fromLTRB(15, 13, 12, 13),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFEFF6FF), Colors.white, Color(0xFFF5F3FF)],
+          ),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFD7E4FB)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: const Color(0xFFD7E4FB)),
+              ),
+              child: const Icon(
+                Icons.hub_rounded,
+                color: AppColors.primary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '查看知识图谱',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '默认选中「$libraryName」，可再组合其他知识库',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.caption(context),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textTertiary,
             ),
           ],
         ),

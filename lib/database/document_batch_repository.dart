@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../common/source_document_file_store.dart';
 import 'app_database.dart';
+import 'graph_repository.dart';
 import 'models/document_batch_record.dart';
 import 'models/source_document_record.dart';
 
@@ -269,6 +270,7 @@ class DocumentBatchRepository {
       throw StateError('学习包不存在或无权删除');
     }
     await _fileStore.deleteAllIfManaged(cleanupPaths);
+    await GraphRepository(database: _database).pruneOrphans(userId);
   }
 
   Future<int?> _resolveLibraryId(

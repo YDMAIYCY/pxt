@@ -11,7 +11,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 17;
+  static const int databaseVersion = 18;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -36,6 +36,14 @@ class AppDatabase {
   static const String tableKnowledgeConcepts = 'knowledge_concepts';
   static const String tableKnowledgeConceptLinks = 'knowledge_concept_links';
   static const String tableFavorites = 'favorites';
+
+  // 跨知识库动态知识图谱（v18）：规范实体 / 关系 / 来源 / 证据 / 构建任务。
+  static const String tableGraphNodes = 'graph_nodes';
+  static const String tableGraphEdges = 'graph_edges';
+  static const String tableGraphNodeSources = 'graph_node_sources';
+  static const String tableGraphEdgeEvidence = 'graph_edge_evidence';
+  static const String tableGraphBuildJobs = 'graph_build_jobs';
+  static const String tableGraphViewPrefs = 'graph_view_prefs';
 
   Database? _database;
   bool _recordSchemaReady = false;
@@ -327,6 +335,7 @@ class AppDatabase {
 
     await _createKnowledgeGraphTables(db);
     await _createFavoriteTables(db);
+    await _createCanonicalGraphTables(db);
 
     await db.execute(
       'CREATE INDEX idx_users_username ON $tableUsers(username);',
@@ -396,6 +405,7 @@ class AppDatabase {
     );
     await _createKnowledgeGraphIndexes(db);
     await _createFavoriteIndexes(db);
+    await _createCanonicalGraphIndexes(db);
     await createImportRecordSchema(db);
   }
 
@@ -446,6 +456,9 @@ class AppDatabase {
     }
     if (oldVersion < 17) {
       await createImportRecordSchema(db);
+    }
+    if (oldVersion < 18) {
+      await _upgradeCanonicalGraphToV18(db);
     }
   }
 
@@ -869,6 +882,10 @@ class AppDatabase {
   }
 
   Future<void> _upgradeRichPracticeQuestionsToV13(Database db) async {
+    // 历史库可能还没有练习题表；补齐前先确认表存在，避免升级中断。
+    if (!await _tableExists(db, tablePracticeQuestions)) {
+      return;
+    }
     await _addColumnIfMissing(
       db,
       tablePracticeQuestions,
@@ -952,6 +969,168 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_knowledge_links_from_concept ON $tableKnowledgeConceptLinks(from_concept_id);',
     );
+  }
+
+  // ========== 跨知识库动态知识图谱（v18） ==========
+  // 规范实体层：与 per-document 的 knowledge_concepts 并存，负责跨库去重与来源追溯。
+  Future<void> _createCanonicalGraphTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableGraphNodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        canonical_key TEXT NOT NULL,
+        canonical_name TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        entity_type TEXT NOT NULL DEFAULT '概念',
+        description TEXT,
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'active',
+        merged_into_node_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, canonical_key),
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(merged_into_node_id) REFERENCES $tableGraphNodes(id) ON DELETE SET NULL
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableGraphEdges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        source_node_id INTEGER NOT NULL,
+        target_node_id INTEGER NOT NULL,
+        relation_type TEXT NOT NULL,
+        directed INTEGER NOT NULL DEFAULT 1,
+        description TEXT,
+        confidence REAL NOT NULL DEFAULT 0.6,
+        review_status TEXT NOT NULL DEFAULT 'auto',
+        origin TEXT NOT NULL DEFAULT 'document',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, source_node_id, target_node_id, relation_type),
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(source_node_id) REFERENCES $tableGraphNodes(id) ON DELETE CASCADE,
+        FOREIGN KEY(target_node_id) REFERENCES $tableGraphNodes(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableGraphNodeSources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        knowledge_base_id INTEGER,
+        import_record_id INTEGER,
+        source_document_id INTEGER,
+        source_page_id INTEGER,
+        source_text_range TEXT,
+        evidence_text TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(node_id) REFERENCES $tableGraphNodes(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(knowledge_base_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
+        FOREIGN KEY(import_record_id) REFERENCES import_records(id) ON DELETE CASCADE,
+        FOREIGN KEY(source_document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableGraphEdgeEvidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        edge_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        knowledge_base_id INTEGER,
+        import_record_id INTEGER,
+        source_document_id INTEGER,
+        source_page_id INTEGER,
+        evidence_text TEXT,
+        confidence REAL NOT NULL DEFAULT 0.6,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(edge_id) REFERENCES $tableGraphEdges(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(knowledge_base_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
+        FOREIGN KEY(import_record_id) REFERENCES import_records(id) ON DELETE CASCADE,
+        FOREIGN KEY(source_document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableGraphBuildJobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        scope TEXT NOT NULL,
+        scope_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'pending',
+        progress INTEGER NOT NULL DEFAULT 0,
+        total_units INTEGER NOT NULL DEFAULT 0,
+        done_units INTEGER NOT NULL DEFAULT 0,
+        source_version TEXT,
+        model_version TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    // 视图筛选偏好独立存储，不混入知识实体网络。
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableGraphViewPrefs (
+        user_id INTEGER PRIMARY KEY,
+        selected_library_ids_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+  }
+
+  Future<void> _createCanonicalGraphIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_nodes_user ON $tableGraphNodes(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_nodes_status ON $tableGraphNodes(user_id, status);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_nodes_name ON $tableGraphNodes(user_id, canonical_name);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_edges_user ON $tableGraphEdges(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON $tableGraphEdges(source_node_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON $tableGraphEdges(target_node_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_node_sources_node ON $tableGraphNodeSources(node_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_node_sources_kb ON $tableGraphNodeSources(knowledge_base_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_node_sources_doc ON $tableGraphNodeSources(source_document_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_node_sources_record ON $tableGraphNodeSources(import_record_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_edge_evidence_edge ON $tableGraphEdgeEvidence(edge_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_edge_evidence_kb ON $tableGraphEdgeEvidence(knowledge_base_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_graph_build_jobs_scope ON $tableGraphBuildJobs(user_id, scope, scope_id);',
+    );
+  }
+
+  Future<void> _upgradeCanonicalGraphToV18(Database db) async {
+    await _createCanonicalGraphTables(db);
+    await _createCanonicalGraphIndexes(db);
   }
 
   Future<void> _createFavoriteTables(Database db) async {
@@ -1155,6 +1334,7 @@ class AppDatabase {
     await _upgradeAiChatToV10(db);
     await _upgradeFocusToV11(db);
     await _upgradeKnowledgeGraphToV12(db);
+    await _upgradeCanonicalGraphToV18(db);
     await _upgradeRichPracticeQuestionsToV13(db);
     if (!_recordSchemaReady) {
       await createImportRecordSchema(db);

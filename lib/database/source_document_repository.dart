@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../common/source_document_file_store.dart';
 import 'app_database.dart';
+import 'graph_repository.dart';
 import 'models/source_document_record.dart';
 
 // ========== 原始资料仓库 ==========
@@ -412,6 +413,9 @@ class SourceDocumentRepository {
       throw StateError('资料不存在或无权删除');
     }
     await _fileStore.deleteAllIfManaged(cleanupPaths);
+    // 资料的图谱来源映射随外键级联删除；这里只失效变成孤立的实体，
+    // 其他记录仍在引用的知识点不受影响。
+    await GraphRepository(database: _database).pruneOrphans(userId);
   }
 
   Future<int?> _resolveLibraryId(

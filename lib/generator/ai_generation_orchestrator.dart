@@ -6,6 +6,7 @@ import '../database/models/ai_generation_task_record.dart';
 import '../database/models/ai_result_records.dart';
 import '../database/models/llm_provider_config.dart';
 import '../llm/minimax_client.dart';
+import 'graph_builder_service.dart';
 import 'knowledge_graph_extraction_service.dart';
 
 class AiSingleTaskResult {
@@ -34,18 +35,21 @@ class AiGenerationOrchestrator {
     AiGenerationRepository? aiGenerationRepository,
     KnowledgeGraphRepository? knowledgeGraphRepository,
     KnowledgeGraphExtractionService? knowledgeGraphExtractionService,
+    KnowledgeGraphBuilder? knowledgeGraphBuilder,
   }) : _miniMaxClient = miniMaxClient ?? MiniMaxClient(),
        _aiGenerationRepository =
            aiGenerationRepository ?? AiGenerationRepository(),
        _knowledgeGraphRepository =
            knowledgeGraphRepository ?? KnowledgeGraphRepository(),
        _knowledgeGraphExtractionService =
-           knowledgeGraphExtractionService ?? KnowledgeGraphExtractionService();
+           knowledgeGraphExtractionService ?? KnowledgeGraphExtractionService(),
+       _knowledgeGraphBuilder = knowledgeGraphBuilder ?? KnowledgeGraphBuilder();
 
   final MiniMaxClient _miniMaxClient;
   final AiGenerationRepository _aiGenerationRepository;
   final KnowledgeGraphRepository _knowledgeGraphRepository;
   final KnowledgeGraphExtractionService _knowledgeGraphExtractionService;
+  final KnowledgeGraphBuilder _knowledgeGraphBuilder;
 
   Future<AiSingleTaskResult> generateSingle({
     required int documentId,
@@ -252,6 +256,17 @@ class AiGenerationOrchestrator {
     } catch (_) {
       // Knowledge graph extraction is a secondary enrichment step. Keep the
       // generated learning material available even when graph extraction fails.
+    }
+
+    // 同步增量更新跨知识库规范图谱：新资料进入图谱，旧内容不会被全量重建。
+    try {
+      await _knowledgeGraphBuilder.buildForDocument(
+        userId: scope.userId,
+        documentId: documentId,
+        llmConfig: llmConfig,
+      );
+    } catch (_) {
+      // 规范图谱是二次增强；失败不影响本次 AI 成果。
     }
   }
 

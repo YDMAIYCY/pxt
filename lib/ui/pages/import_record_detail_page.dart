@@ -11,6 +11,7 @@ import '../../database/models/knowledge_library_record.dart';
 import '../../database/ocr_text_repository.dart';
 import '../../database/source_document_repository.dart';
 import '../../generator/ai_generation_orchestrator.dart';
+import '../../generator/graph_builder_service.dart';
 import '../../pipeline/ocr_pipeline_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/knowledge_book_cover.dart';
@@ -283,6 +284,7 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
             for (final e in {
               'rename': '重命名',
               'move': '移动至其他知识库',
+              'graph': '重建本条记录的知识图谱',
               'delete': '删除记录及关联内容',
             }.entries)
               ListTile(
@@ -327,6 +329,8 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
           ),
         );
         if (target != null) await _repo.move(widget.userId, record.id, target);
+      } else if (action == 'graph') {
+        await _rebuildGraph(record);
       } else if (action == 'delete' &&
           await knowledgeConfirmDelete(
             context,
@@ -340,6 +344,46 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
     } catch (error) {
       _message('$error');
     }
+  }
+
+  /// 单条记录重新构建知识图谱：只重跑这条记录的资料，不影响其他记录。
+  Future<void> _rebuildGraph(ImportRecord record) async {
+    final config = await LlmConfigRepository(
+      database: widget.database,
+    ).getByUserId(widget.userId);
+    if (config == null) {
+      if (mounted) _message('还没有配置大模型，请先到「我的」页填写 API Key。');
+      return;
+    }
+    final pages = record.sources;
+    if (pages.isEmpty) {
+      if (mounted) _message('这条记录还没有可抽取的资料页。');
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = true);
+    final builder = KnowledgeGraphBuilder(database: widget.database);
+    var succeeded = 0;
+    final failures = <String>[];
+    for (final page in pages) {
+      try {
+        await builder.buildForDocument(
+          userId: widget.userId,
+          documentId: page.id,
+          llmConfig: config,
+        );
+        succeeded++;
+      } catch (error) {
+        failures.add('${page.title}：$error');
+      }
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _message(
+      failures.isEmpty
+          ? '知识图谱已重建：处理 $succeeded 页资料'
+          : '重建完成 $succeeded 页，${failures.length} 页失败：${failures.first}',
+    );
   }
 
   Future<void> _tag(ImportRecord record) async {
