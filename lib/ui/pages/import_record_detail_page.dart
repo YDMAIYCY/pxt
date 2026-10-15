@@ -20,6 +20,8 @@ import '../widgets/knowledge_outcome_tile.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'record_results_page.dart';
 import 'record_source_page.dart';
+import '../../agent/eclaw_context.dart';
+import 'ai_chat_page.dart';
 
 class ImportRecordDetailPage extends StatefulWidget {
   const ImportRecordDetailPage({
@@ -448,6 +450,14 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                       ),
                       const Spacer(),
                       IconButton(
+                        tooltip: '问 EClaw',
+                        onPressed: _busy ? null : () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => AiChatPage(database: widget.database,
+                            initialContext: EClawContext(knowledgeBaseId: record.libraryId,
+                              importRecordId: record.id)))),
+                        icon: const Icon(Icons.smart_toy_outlined),
+                      ),
+                      IconButton(
                         tooltip: '记录管理',
                         onPressed: _busy ? null : () => _manage(record),
                         icon: const Icon(Icons.more_horiz),
@@ -568,17 +578,19 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                         ),
                       ),
                       TextButton(
-                        onPressed: _busy ? null : () => _ocr(record),
-                        child: const Text(
-                          '识别 / 重试',
-                          style: TextStyle(fontSize: 12),
+                        onPressed: _busy ? null : () => record.isFeishu
+                            ? _sources(record, record.anchor.id) : _ocr(record),
+                        child: Text(
+                          record.isFeishu ? '原文 / 同步' : '识别 / 重试',
+                          style: const TextStyle(fontSize: 12),
                         ),
                       ),
                       TextButton(
-                        onPressed: _busy ? null : () => _generate(record),
-                        child: const Text(
-                          '继续生成',
-                          style: TextStyle(fontSize: 12),
+                        onPressed: _busy ? null : () => record.isFeishu
+                            ? _sources(record, record.anchor.id) : _generate(record),
+                        child: Text(
+                          record.isFeishu ? '整理知识点' : '继续生成',
+                          style: const TextStyle(fontSize: 12),
                         ),
                       ),
                     ],

@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
@@ -17,6 +18,23 @@ import kotlin.math.sqrt
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+        MethodChannel(
+            messenger,
+            "pxt1/office_renderer",
+            StandardMethodCodec.INSTANCE,
+            messenger.makeBackgroundTaskQueue(),
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "renderOffice") {
+                result.notImplemented()
+            } else {
+                try {
+                    result.success(OfficeDocumentRenderer.render(call.arguments))
+                } catch (error: Throwable) {
+                    result.error("OFFICE_RENDER_FAILED", error.message ?: "Office 文档导入失败", null)
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_RENDERER_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

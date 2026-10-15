@@ -11,7 +11,7 @@ class PaixuetongApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '拍学通',
+      title: '智学帮',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       initialRoute: GuidePage.routeName,

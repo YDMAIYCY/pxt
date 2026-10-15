@@ -26,6 +26,7 @@ import '../document_detail_page.dart';
 import '../image_crop_selection_page.dart';
 import '../qsclaw_agent_page.dart';
 import '../home_page.dart';
+import '../interview/interview_prepare_page.dart';
 
 class HomeTabPage extends StatefulWidget {
   const HomeTabPage({
@@ -441,20 +442,16 @@ class _HomeTabPageState extends State<HomeTabPage> {
             children: [
               ListTile(
                 leading: const Icon(Icons.photo_library_rounded),
-                title: const Text('导入图片'),
+                title: const Text('相册导入'),
                 onTap: () =>
                     Navigator.of(sheetContext).pop(_ImportAction.gallery),
               ),
               ListTile(
-                leading: const Icon(Icons.collections_rounded),
-                title: const Text('多图导入'),
+                leading: const Icon(Icons.description_rounded),
+                title: const Text('文档导入'),
+                subtitle: const Text('PDF、Word、PPT'),
                 onTap: () =>
-                    Navigator.of(sheetContext).pop(_ImportAction.multiImage),
-              ),
-              ListTile(
-                leading: const Icon(Icons.picture_as_pdf_rounded),
-                title: const Text('导入 PDF'),
-                onTap: () => Navigator.of(sheetContext).pop(_ImportAction.pdf),
+                    Navigator.of(sheetContext).pop(_ImportAction.document),
               ),
             ],
           ),
@@ -464,11 +461,9 @@ class _HomeTabPageState extends State<HomeTabPage> {
     if (!mounted || action == null) return;
     switch (action) {
       case _ImportAction.gallery:
-        await _handleImageImport(ImageInputSource.gallery);
-      case _ImportAction.multiImage:
         await _handleBatchImport(BatchDocumentInputSource.multiImage);
-      case _ImportAction.pdf:
-        await _handleBatchImport(BatchDocumentInputSource.pdf);
+      case _ImportAction.document:
+        await _handleBatchImport(BatchDocumentInputSource.document);
     }
   }
 
@@ -541,6 +536,12 @@ class _HomeTabPageState extends State<HomeTabPage> {
                       const SizedBox(height: 12),
                       _QuickActions(
                         isImporting: _isImporting,
+                        onInterview: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                InterviewPreparePage(userId: data.user.id),
+                          ),
+                        ),
                         onCamera: () =>
                             _handleImageImport(ImageInputSource.camera),
                         onImport: _openImportSourceSheet,
@@ -736,7 +737,7 @@ class _AgentCommandStrip extends StatelessWidget {
                       width: 72,
                       height: 72,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE9FBF8),
+                        color: const Color(0xFFEAF3FF),
                         borderRadius: BorderRadius.circular(18),
                         boxShadow: [
                           BoxShadow(
@@ -748,8 +749,8 @@ class _AgentCommandStrip extends StatelessWidget {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: Image.asset(
-                        'assets/images/qsclaw_robot_icon.png',
-                        fit: BoxFit.cover,
+                        'assets/images/eclaw_robot_avatar.png',
+                        fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) =>
                             const Icon(
                               Icons.smart_toy_rounded,
@@ -770,7 +771,7 @@ class _AgentCommandStrip extends StatelessWidget {
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 Text(
-                                  'QSClaw',
+                                  'EClaw',
                                   style: AppTextStyles.h2(context).copyWith(
                                     fontWeight: FontWeight.w900,
                                     fontSize: 20,
@@ -780,7 +781,7 @@ class _AgentCommandStrip extends StatelessWidget {
                             ),
                             const SizedBox(height: 7),
                             Text(
-                              '你的专属拍学通智能助手。',
+                              '你的专属智能学习助手',
                               maxLines: 4,
                               softWrap: true,
                               style: AppTextStyles.bodySmall(context).copyWith(
@@ -800,6 +801,9 @@ class _AgentCommandStrip extends StatelessWidget {
                   width: double.infinity,
                   child: FilledButton.icon(
                     onPressed: onOpenQsClaw,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2870F5),
+                    ),
                     icon: const Icon(Icons.chat_bubble_rounded, size: 18),
                     label: const Text('开始聊天'),
                   ),
@@ -884,7 +888,7 @@ class _NextBestActionSection extends StatelessWidget {
     if (actions.isEmpty) {
       return _Section(
         title: '下一步推荐',
-        child: const _EmptyHint(text: '导入资料并生成知识图谱后，QSClaw 会根据薄弱知识点推荐下一步。'),
+        child: const _EmptyHint(text: '导入资料并生成知识图谱后，EClaw 会根据薄弱知识点推荐下一步。'),
       );
     }
 
@@ -992,11 +996,13 @@ class _QuickActions extends StatelessWidget {
     required this.isImporting,
     required this.onCamera,
     required this.onImport,
+    required this.onInterview,
   });
 
   final bool isImporting;
   final VoidCallback onCamera;
   final VoidCallback onImport;
+  final VoidCallback onInterview;
 
   @override
   Widget build(BuildContext context) {
@@ -1025,6 +1031,14 @@ class _QuickActions extends StatelessWidget {
                   onTap: isImporting ? null : onImport,
                 ),
               ),
+              SizedBox(
+                width: constraints.maxWidth,
+                child: _ActionTile(
+                  iconAsset: AppAssets.iconAi,
+                  title: 'AI 面试',
+                  onTap: onInterview,
+                ),
+              ),
             ],
           );
         },
@@ -1033,7 +1047,7 @@ class _QuickActions extends StatelessWidget {
   }
 }
 
-enum _ImportAction { gallery, multiImage, pdf }
+enum _ImportAction { gallery, document }
 
 // ========== Recent Learning Grid ==========
 class _RecentLearningGrid extends StatelessWidget {
@@ -1094,7 +1108,7 @@ class _RecentBatchesSection extends StatelessWidget {
     return _Section(
       title: '最近学习包',
       child: batches.isEmpty
-          ? const _EmptyHint(text: '导入 PDF 或多图后会出现在这里。')
+          ? const _EmptyHint(text: '从相册或文档导入的资料会出现在这里。')
           : Column(
               children: batches
                   .map(

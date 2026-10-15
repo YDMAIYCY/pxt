@@ -32,14 +32,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('QSClaw'), findsOneWidget);
+    expect(find.text('EClaw'), findsOneWidget);
     expect(find.text('先看定义'), findsOneWidget);
 
     await tester.tap(find.byTooltip('对话菜单'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('新建对话'));
     await tester.pumpAndSettle();
-    expect(find.text('QSClaw'), findsWidgets);
+    expect(find.text('EClaw'), findsWidgets);
 
     await tester.enterText(find.byType(TextField), '导数是什么');
     await tester.tap(find.byTooltip('发送'));
@@ -154,6 +154,7 @@ class _FakeQsClawAgentService extends QsClawAgentService {
   Future<QsClawRunResult> runCommand({
     required int userId,
     required String command,
+    bool confirmed = false,
   }) async {
     return QsClawRunResult(
       draft: const QsClawCommandDraft(
@@ -182,6 +183,9 @@ class _FakeKnowledgeContextRepository extends KnowledgeContextRepository {
     required int userId,
     required String query,
     int? libraryId,
+    int? knowledgeBaseId,
+    int? importRecordId,
+    int? documentId,
     int limit = 6,
   }) async {
     return const <KnowledgeContextSource>[];
@@ -285,6 +289,7 @@ class _FakeAiChatRepository extends AiChatRepository {
     required String content,
     String? provider,
     String? model,
+    Map<String,Object?> metadata = const {},
   }) async {
     final message = AiChatMessageRecord(
       id: _nextMessageId++,
@@ -293,6 +298,7 @@ class _FakeAiChatRepository extends AiChatRepository {
       content: content,
       provider: provider,
       model: model,
+      metadata: Map<String,dynamic>.from(metadata),
       createdAt: DateTime.utc(2026, 5, 29, 9, _nextMessageId),
     );
     messages.putIfAbsent(sessionId, () => []).add(message);

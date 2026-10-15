@@ -12,6 +12,7 @@ import '../../database/source_document_repository.dart';
 import '../theme/app_theme.dart';
 import 'ai_generation_page.dart';
 import 'ocr_result_page.dart';
+import 'feishu_source_view.dart';
 
 class DocumentDetailPage extends StatefulWidget {
   const DocumentDetailPage({
@@ -149,6 +150,21 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
           }
 
           final data = snapshot.data!;
+          if (data.document.sourceType == SourceDocumentSourceType.feishuDocx) {
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text(data.document.title, style: Theme.of(context).textTheme.titleLarge),
+                SelectableText(data.ocrRecord?.effectiveText ?? ''),
+                OutlinedButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => FeishuSourceView(source: data.document),
+                  )),
+                  child: const Text('原文 / 知识点 / 同步'),
+                ),
+              ],
+            );
+          }
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(

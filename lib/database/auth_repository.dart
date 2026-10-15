@@ -1,6 +1,7 @@
 import 'app_database.dart';
 import 'models/user_profile.dart';
 import 'password_hasher.dart';
+import '../feishu/feishu_controller.dart';
 
 // ========== 认证结果模型 ==========
 // 统一返回登录、注册等认证动作的结果。
@@ -215,6 +216,7 @@ class AuthRepository {
   }
 
   Future<void> logoutCurrentUser() async {
+    await FeishuController.signOut(_database);
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 

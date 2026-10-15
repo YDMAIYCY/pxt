@@ -47,6 +47,7 @@ void main() {
 
       final result = await service.runCommand(
         userId: 7,
+        confirmed: true,
         command:
             '$_helpMe$_organize$_about$_advancedMath${_of}pdf$_comma$_create$_mathKnowledgeLibrary',
       );
@@ -115,6 +116,7 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
     String? description,
     String coverTheme = 'math',
     int coverColor = 0xFF5B90FF,
+    String? operationKey,
   }) async {
     final library = KnowledgeLibraryRecord(
       id: 100,

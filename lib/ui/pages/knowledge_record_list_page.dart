@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../agent/eclaw_context.dart';
+import '../widgets/ask_eclaw_button.dart';
 import '../../camera/document_input_contract.dart';
 import '../../database/app_database.dart';
 import '../../database/document_batch_repository.dart';
@@ -17,9 +19,10 @@ import 'import_record_detail_page.dart';
 import 'knowledge_graph_page.dart';
 
 class BookDetailPage extends StatefulWidget {
-  const BookDetailPage({required this.library, this.database, super.key});
+  const BookDetailPage({required this.library, this.database, this.autoImport = false, super.key});
   final KnowledgeLibraryRecord library;
   final AppDatabase? database;
+  final bool autoImport;
   @override
   State<BookDetailPage> createState() => _BookDetailPageState();
 }
@@ -36,6 +39,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
   void initState() {
     super.initState();
     _future = _load();
+    if (widget.autoImport) WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _import(); });
   }
 
   Future<List<ImportRecord>> _load() =>
@@ -113,14 +117,13 @@ class _BookDetailPageState extends State<BookDetailPage> {
           children: [
             for (final e in {
               'camera': '拍照导入',
-              'gallery': '单张图片',
-              'images': '多张图片（同一条记录）',
-              'pdf': 'PDF 导入（同一条记录）',
+              'gallery': '相册导入',
+              'document': '文档导入',
             }.entries)
               ListTile(
                 leading: Icon(
-                  e.key == 'pdf'
-                      ? Icons.picture_as_pdf_outlined
+                  e.key == 'document'
+                      ? Icons.description_outlined
                       : Icons.add_photo_alternate_outlined,
                 ),
                 title: Text(e.value),
@@ -142,13 +145,11 @@ class _BookDetailPageState extends State<BookDetailPage> {
         ),
       );
       ImportRecord? record;
-      if (source == 'camera' || source == 'gallery') {
+      if (source == 'camera') {
         final doc = await ingest.importFromInput(
           userId: _library.userId,
           libraryId: _library.id,
-          source: source == 'camera'
-              ? ImageInputSource.camera
-              : ImageInputSource.gallery,
+          source: ImageInputSource.camera,
         );
         if (doc != null) {
           record = await _records.forDocument(_library.userId, doc.id);
@@ -157,8 +158,8 @@ class _BookDetailPageState extends State<BookDetailPage> {
         final batch = await ingest.importBatchFromInput(
           userId: _library.userId,
           libraryId: _library.id,
-          source: source == 'pdf'
-              ? BatchDocumentInputSource.pdf
+          source: source == 'document'
+              ? BatchDocumentInputSource.document
               : BatchDocumentInputSource.multiImage,
         );
         if (batch != null) {
@@ -234,7 +235,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   .where(
                     (r) =>
                         _source == null ||
-                        (_source == 'pdf' ? r.isPdf : r.isCamera),
+                        (_source == 'document' ? r.isDocument : r.isCamera),
                   )
                   .toList();
               if (_oldest) {
@@ -254,6 +255,8 @@ class _BookDetailPageState extends State<BookDetailPage> {
                         ),
                       ),
                       const Spacer(),
+                      AskEClawButton(database:widget.database,
+                        scope:EClawContext(knowledgeBaseId:widget.library.id)),
                       TextButton.icon(
                         onPressed: _manage,
                         icon: const Icon(Icons.edit_outlined, size: 17),
@@ -317,7 +320,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                         for (final e in <String?, String>{
                           null: '全部',
                           'camera': '拍照',
-                          'pdf': 'PDF',
+                          'document': '文档',
                         }.entries)
                           Padding(
                             padding: const EdgeInsets.only(right: 8),
@@ -394,7 +397,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       title: all.isEmpty && _query.isEmpty
                           ? '还没有导入记录'
                           : '没有匹配的记录',
-                      message: '一次拍照、多图或 PDF 导入，归档为一条记录。',
+                      message: '一次拍照、相册或文档导入，归档为一条记录。',
                       action: FilledButton.icon(
                         onPressed: _importing ? null : _import,
                         icon: const Icon(Icons.add),

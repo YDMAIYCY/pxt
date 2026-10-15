@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 // ========== AI Chat 数据模型 ==========
 // 会话模型用于历史列表，消息模型用于聊天正文回溯。
 
@@ -82,6 +84,7 @@ class AiChatMessageRecord {
     required this.createdAt,
     this.provider,
     this.model,
+    this.metadata = const {},
   });
 
   final int id;
@@ -90,6 +93,7 @@ class AiChatMessageRecord {
   final String content;
   final String? provider;
   final String? model;
+  final Map<String, dynamic> metadata;
   final DateTime createdAt;
 
   bool get isUser => role == AiChatMessageRole.user;
@@ -112,6 +116,7 @@ class AiChatMessageRecord {
       content: (map['content'] as String?)?.trim() ?? '',
       provider: provider == null || provider.isEmpty ? null : provider,
       model: model == null || model.isEmpty ? null : model,
+      metadata: jsonDecode(map['metadata_json'] as String? ?? '{}') as Map<String, dynamic>,
       createdAt: DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import 'dart:convert';
 
 import '../common/source_document_file_store.dart';
 import 'app_database.dart';
@@ -17,7 +18,7 @@ class KnowledgeLibraryRepository {
   final AppDatabase _database;
   final SourceDocumentFileStore _fileStore;
 
-  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId) async {
+  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId, {String source = 'all'}) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     await _ensureDefaultLibrary(db, userId);
@@ -26,6 +27,10 @@ class KnowledgeLibraryRepository {
       '''
       SELECT
         libraries.*,
+        COALESCE((SELECT c.container_type FROM feishu_containers c WHERE c.user_id=libraries.user_id AND c.library_id=libraries.id LIMIT 1), 'local') AS source_type,
+        (SELECT c.sync_status FROM feishu_containers c WHERE c.user_id=libraries.user_id AND c.library_id=libraries.id
+          ORDER BY CASE c.sync_status WHEN 'expired' THEN 0 WHEN 'syncing' THEN 1 WHEN 'failed' THEN 2 WHEN 'pending' THEN 3 ELSE 4 END LIMIT 1) AS sync_status,
+        (SELECT MAX(c.synced_at) FROM feishu_containers c WHERE c.user_id=libraries.user_id AND c.library_id=libraries.id) AS synced_at,
         (
           SELECT COUNT(*)
           FROM ${AppDatabase.tableSourceDocuments} documents
@@ -33,6 +38,8 @@ class KnowledgeLibraryRepository {
         ) AS document_count
       FROM ${AppDatabase.tableKnowledgeLibraries} libraries
       WHERE libraries.user_id = ?
+        ${source == 'feishu' ? 'AND EXISTS' : source == 'local' ? 'AND NOT EXISTS' : ''}
+        ${source == 'all' ? '' : '(SELECT 1 FROM feishu_containers c WHERE c.library_id=libraries.id AND c.user_id=libraries.user_id)'}
       ORDER BY libraries.updated_at DESC, libraries.id ASC
       ''',
       [userId],
@@ -58,6 +65,7 @@ class KnowledgeLibraryRepository {
     String? description,
     String coverTheme = 'math',
     int coverColor = 0xFF5B90FF,
+    String? operationKey,
   }) async {
     final trimmedName = name.trim();
     if (trimmedName.isEmpty) {
@@ -69,6 +77,10 @@ class KnowledgeLibraryRepository {
     final now = DateTime.now().toUtc().toIso8601String();
 
     final libraryId = await db.transaction((txn) async {
+      if(operationKey!=null) {
+        final receipt=await txn.query('agent_operation_receipts',where:'operation_key=? AND user_id=?',whereArgs:[operationKey,userId]);
+        if(receipt.isNotEmpty) return (jsonDecode(receipt.single['result_json'] as String) as Map)['libraryId'] as int;
+      }
       final duplicated = await txn.query(
         AppDatabase.tableKnowledgeLibraries,
         columns: ['id'],
@@ -77,10 +89,15 @@ class KnowledgeLibraryRepository {
         limit: 1,
       );
       if (duplicated.isNotEmpty) {
+        if(operationKey!=null) {
+          final id=duplicated.single['id'] as int;
+          await txn.insert('agent_operation_receipts',{'operation_key':operationKey,'user_id':userId,'result_json':jsonEncode({'libraryId':id})});
+          return id;
+        }
         throw StateError('已存在同名知识库');
       }
 
-      return txn.insert(AppDatabase.tableKnowledgeLibraries, {
+      final id=await txn.insert(AppDatabase.tableKnowledgeLibraries, {
         'user_id': userId,
         'name': trimmedName,
         'description': description?.trim(),
@@ -89,6 +106,8 @@ class KnowledgeLibraryRepository {
         'created_at': now,
         'updated_at': now,
       });
+      if(operationKey!=null) await txn.insert('agent_operation_receipts',{'operation_key':operationKey,'user_id':userId,'result_json':jsonEncode({'libraryId':id})});
+      return id;
     });
 
     final library = await _findLibraryById(db, userId: userId, id: libraryId);
@@ -164,6 +183,7 @@ class KnowledgeLibraryRepository {
         'import_records',
         'source_documents',
         'document_batches',
+        'feishu_documents',
       ]) {
         await txn.update(
           table,

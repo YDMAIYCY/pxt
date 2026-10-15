@@ -34,12 +34,23 @@ class ImportRecord {
     (s) => s.sourceType == 'pdf_document' || s.sourceType == 'pdf_page',
   );
   bool get isCamera => sources.any((s) => s.sourceType == 'camera_capture');
-  String get sourceLabel => isPdf
-      ? 'PDF 导入'
+  bool get isDocument =>
+      isPdf ||
+      sources.any((s) => s.sourceType == SourceDocumentSourceType.officePage);
+  bool get isFeishu => sources.any((s) => s.sourceType == 'feishu_docx');
+  String get sourceLabel => isFeishu
+      ? '飞书导入'
+      : isDocument
+      ? '文档导入'
       : isCamera
       ? '拍照导入'
-      : '图片导入';
-  String get pageLabel => '${pages.length} ${isPdf ? '页' : '张'}';
+      : '相册导入';
+  String get pageLabel =>
+      '${pages.length} ${isFeishu
+          ? '篇'
+          : isDocument
+          ? '页'
+          : '张'}';
   int get resourceCount => counts.values.fold(0, (a, b) => a + b);
   String get statusLabel {
     if (runningTasks > 0) return 'AI 生成中';
@@ -49,6 +60,9 @@ class ImportRecord {
     }
     if (pages.any((s) => s.ocrStatus == 'needs_review')) return '待校对';
     if (pages.isEmpty || pages.any((s) => !s.ocrDone)) return '待 OCR 识别';
+    if (isFeishu) {
+      return (counts['knowledge_cards'] ?? 0) > 0 ? '知识点已整理' : '待整理知识点';
+    }
     return [
           'knowledge_cards',
           'review_outlines',

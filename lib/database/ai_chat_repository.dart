@@ -1,3 +1,6 @@
+import 'dart:convert';
+import '../agent/eclaw_context.dart';
+
 import 'app_database.dart';
 import 'models/ai_chat_records.dart';
 
@@ -64,11 +67,11 @@ class AiChatRepository {
       AppDatabase.tableAiChatMessages,
       where: 'session_id = ?',
       whereArgs: [sessionId],
-      orderBy: 'created_at ASC, id ASC',
+      orderBy: 'id DESC',
       limit: limit,
     );
 
-    return rows.map(AiChatMessageRecord.fromMap).toList(growable: false);
+    return rows.reversed.map(AiChatMessageRecord.fromMap).toList(growable: false);
   }
 
   Future<void> renameSession({
@@ -114,6 +117,7 @@ class AiChatRepository {
     required String content,
     String? provider,
     String? model,
+    Map<String, Object?> metadata = const {},
   }) async {
     final normalizedContent = content.trim();
     if (normalizedContent.isEmpty) {
@@ -129,6 +133,7 @@ class AiChatRepository {
       'content': normalizedContent,
       'provider': provider?.trim(),
       'model': model?.trim(),
+      'metadata_json': jsonEncode(metadata),
       'created_at': now,
     });
 
@@ -177,6 +182,27 @@ class AiChatRepository {
       return null;
     }
     return AiChatSessionRecord.fromMap(rows.first);
+  }
+
+  Future<void> requireOwner(int userId, int sessionId) async {
+    if (await _findSessionById(userId: userId, sessionId: sessionId) == null) {
+      throw StateError('会话不存在或无权访问');
+    }
+  }
+
+  Future<EClawContext> loadContext(int userId, int sessionId) async {
+    await requireOwner(userId, sessionId);
+    final db = await _database.database;
+    final rows = await db.query(AppDatabase.tableAiChatSessions,
+      columns: ['context_json'], where: 'id=? AND user_id=?', whereArgs: [sessionId,userId]);
+    return EClawContext.fromJson(jsonDecode(rows.single['context_json'] as String) as Map<String,dynamic>);
+  }
+
+  Future<void> saveContext(int userId, int sessionId, EClawContext context) async {
+    await requireOwner(userId, sessionId);
+    final db = await _database.database;
+    await db.update(AppDatabase.tableAiChatSessions, {'context_json':jsonEncode(context.toJson())},
+      where: 'id=? AND user_id=?', whereArgs: [sessionId,userId]);
   }
 
   String _normalizeTitle(String value) {

@@ -303,8 +303,11 @@ class ImportRecordRepository {
   }
 
   Future<void> move(int userId, int id, int libraryId) async {
-    final db = await _database.database;
-    await db.transaction((txn) async {
+    final db=await _database.database;
+    await db.transaction((txn)=>_moveRecord(txn,userId,id,libraryId));
+  }
+
+  Future<void> _moveRecord(DatabaseExecutor txn,int userId,int id,int libraryId) async {
       if ((await txn.query(
         'knowledge_libraries',
         where: 'id=? AND user_id=?',
@@ -318,6 +321,23 @@ class ImportRecordRepository {
         whereArgs: [id, userId],
       );
       if (record.isEmpty) throw StateError('记录不存在');
+      final remote = await txn.rawQuery('''
+        SELECT f.document_id FROM feishu_documents f
+        JOIN source_documents s ON s.id=f.source_id
+        WHERE f.user_id=? AND s.import_record_id=?
+      ''', [userId, id]);
+      for (final doc in remote) {
+        final duplicate = await txn.rawQuery('''
+          SELECT f.source_id FROM feishu_documents f JOIN source_documents s ON s.id=f.source_id
+          WHERE f.user_id=? AND f.library_id=? AND f.document_id=? AND s.import_record_id!=?
+        ''', [userId, libraryId, doc['document_id'], id]);
+        if (duplicate.isNotEmpty) throw StateError('目标知识库已有同一篇飞书文档，请先处理重复资料');
+      }
+      await txn.rawUpdate('''
+        UPDATE feishu_documents SET library_id=?
+        WHERE user_id=? AND source_id IN
+          (SELECT id FROM source_documents WHERE user_id=? AND import_record_id=?)
+      ''', [libraryId, userId, userId, id]);
       await txn.update(
         'import_records',
         {'library_id': libraryId, 'needs_library_review': 0},
@@ -339,6 +359,57 @@ class ImportRecordRepository {
           whereArgs: [int.parse(op.substring(6)), userId],
         );
       }
+
+    final now=DateTime.now().toUtc().toIso8601String();
+    await txn.update('knowledge_concepts',{'library_id':libraryId,'updated_at':now},
+      where:'user_id=? AND document_id IN (SELECT id FROM source_documents WHERE user_id=? AND import_record_id=?)',whereArgs:[userId,userId,id]);
+    await txn.update('graph_node_sources',{'knowledge_base_id':libraryId},
+      where:'user_id=? AND (import_record_id=? OR source_document_id IN (SELECT id FROM source_documents WHERE user_id=? AND import_record_id=?))',whereArgs:[userId,id,userId,id]);
+    await txn.update('graph_edge_evidence',{'knowledge_base_id':libraryId},
+      where:'user_id=? AND (import_record_id=? OR source_document_id IN (SELECT id FROM source_documents WHERE user_id=? AND import_record_id=?))',whereArgs:[userId,id,userId,id]);
+  }
+
+  /// Batch mutation and undo receipt commit together. No partially moved PDFs.
+  Future<Map<String,dynamic>> moveBatch(int userId,List<int> ids,int target,
+      {required String operationKey,int? sourceLibraryId,int? sourceRecordId}) async {
+    final db=await _database.database;
+    return db.transaction((txn) async {
+      final receipt=await txn.query('agent_operation_receipts',where:'operation_key=? AND user_id=?',whereArgs:[operationKey,userId]);
+      if(receipt.isNotEmpty)return Map<String,dynamic>.from(jsonDecode(receipt.single['result_json'] as String) as Map);
+      if(ids.isEmpty)throw StateError('没有匹配资料，未移动任何数据');
+      final original=<Map<String,Object?>>[];
+      for(final id in ids.toSet()) {
+        final rows=await txn.query('import_records',columns:['id','library_id'],where:'id=? AND user_id=?',whereArgs:[id,userId]);
+        if(rows.isEmpty)throw StateError('资料已删除或无权访问');
+        if(sourceLibraryId!=null && rows.single['library_id']!=sourceLibraryId)throw StateError('资料已移出当前知识库，请重新搜索');
+        if(sourceRecordId!=null && id!=sourceRecordId)throw StateError('超出当前记录');
+        original.add({'recordId':id,'libraryId':rows.single['library_id']});
+      }
+      for(final id in ids.toSet()) {await _moveRecord(txn,userId,id,target);}
+      final result=<String,dynamic>{'message':'已整理 ${ids.toSet().length} 份资料。',
+        'movedCount':ids.toSet().length,'libraryId':target,'destination':'knowledge',
+        'undoKey':operationKey,'original':original};
+      await txn.insert('agent_operation_receipts',{'operation_key':operationKey,'user_id':userId,'result_json':jsonEncode(result)});
+      return result;
+    });
+  }
+
+  Future<Map<String,dynamic>> undoMove(int userId,String key) async {
+    final db=await _database.database;
+    return db.transaction((txn) async {
+      final rows=await txn.query('agent_operation_receipts',where:'operation_key=? AND user_id=?',whereArgs:[key,userId]);
+      if(rows.isEmpty)throw StateError('找不到可撤销的整理记录');
+      final result=Map<String,dynamic>.from(jsonDecode(rows.single['result_json'] as String) as Map);
+      if(result['undone']==true)return {'message':'这次整理已撤销'};
+      final original=result['original'] as List;
+      for(final item in original) {
+        final record=await txn.query('import_records',columns:['library_id'],where:'id=? AND user_id=?',whereArgs:[item['recordId'],userId]);
+        if(record.isEmpty || record.single['library_id']!=result['libraryId'] || item['libraryId']==null)throw StateError('资料已发生变化，不能自动撤销');
+      }
+      for(final item in original) {await _moveRecord(txn,userId,item['recordId'] as int,item['libraryId'] as int);}
+      result['undone']=true;
+      await txn.update('agent_operation_receipts',{'result_json':jsonEncode(result)},where:'operation_key=? AND user_id=?',whereArgs:[key,userId]);
+      return {'message':'已撤销这次整理'};
     });
   }
 

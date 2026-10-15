@@ -12,6 +12,8 @@ import '../widgets/record_mindmap_view.dart';
 import 'record_source_page.dart';
 import 'practice_review_page.dart';
 import 'wrong_question_page.dart';
+import '../../agent/eclaw_context.dart';
+import '../widgets/ask_eclaw_button.dart';
 
 class RecordResultsPage extends StatefulWidget {
   const RecordResultsPage({
@@ -127,7 +129,8 @@ class _RecordResultsPageState extends State<RecordResultsPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.title)),
+    appBar: AppBar(title: Text(widget.title),actions:[AskEClawButton(database:widget.database,
+      scope:EClawContext(knowledgeBaseId:widget.record.libraryId,importRecordId:widget.record.id))]),
     body: RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(

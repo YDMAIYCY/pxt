@@ -44,7 +44,13 @@ class QsClawAgentService {
   Future<QsClawRunResult> runCommand({
     required int userId,
     required String command,
+    bool confirmed = false,
   }) async {
+    if ((_isMaterialCollectionCommand(command) ||
+            _isDemoSeedCommand(command)) &&
+        !confirmed) {
+      throw StateError('此操作需要用户确认，请使用 EClaw 任务确认流程');
+    }
     final draft = parseCommand(command);
     final steps = <QsClawAgentStep>[];
     KnowledgeLibraryRecord? library;
@@ -56,6 +62,7 @@ class QsClawAgentService {
       final result = await _toolRegistry.run(
         QsClawToolNames.seedDebugDemoData,
         userId: userId,
+        confirmed: confirmed,
       );
       steps.add(QsClawAgentStep.fromToolResult(result));
       return QsClawRunResult(
@@ -94,7 +101,7 @@ class QsClawAgentService {
         userId: userId,
         args: {
           'libraryName': draft.libraryName,
-          'description': 'QSClaw $_autoCreated: ${draft.topic}',
+          'description': 'EClaw $_autoCreated: ${draft.topic}',
         },
       );
       steps.add(QsClawAgentStep.fromToolResult(result));
@@ -119,6 +126,7 @@ class QsClawAgentService {
       final moveResult = await _toolRegistry.run(
         QsClawToolNames.moveDocumentToLibrary,
         userId: userId,
+        confirmed: confirmed,
         args: {'library': library, 'documents': matchedDocuments},
       );
       steps.add(QsClawAgentStep.fromToolResult(moveResult));

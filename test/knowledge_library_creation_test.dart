@@ -144,6 +144,7 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
     String? description,
     String coverTheme = 'math',
     int coverColor = 0xFF5B90FF,
+    String? operationKey,
   }) async {
     final library = KnowledgeLibraryRecord(
       id: _libraries.length + 1,

@@ -31,15 +31,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(find.text('QSClaw'), 120);
+    await tester.scrollUntilVisible(find.text('EClaw'), 120);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('QSClaw'));
+    await tester.tap(find.text('EClaw'));
     await tester.pumpAndSettle();
 
     expect(find.text('qsclaw-opened'), findsOneWidget);
   });
 
-  testWidgets('HomeTabPage does not show AI interview entry', (tester) async {
+  testWidgets('HomeTabPage shows the AI interview quick entry', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -55,8 +55,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('AI 面试'), findsNothing);
+    // 旧版占位式入口的文案不应再出现。
     expect(find.text('AI 面试官'), findsNothing);
+    await tester.scrollUntilVisible(find.text('AI 面试'), 120);
+    await tester.pumpAndSettle();
+    expect(find.text('AI 面试'), findsOneWidget);
   });
 
   testWidgets('HomeTabPage renders core Chinese labels without mojibake', (

@@ -19,6 +19,8 @@ import '../widgets/knowledge_graph_canvas.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'document_detail_page.dart';
 import 'import_record_detail_page.dart';
+import '../../agent/eclaw_context.dart';
+import '../widgets/ask_eclaw_button.dart';
 
 // ========== 跨知识库动态知识图谱页面 ==========
 // 只保留两部分：顶部所选知识库 + 图谱主画布。底部沿用应用原有导航栏。
@@ -622,6 +624,8 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
             icon: const Icon(Icons.auto_awesome_rounded, size: 19),
             tooltip: '重新构建图谱',
           ),
+          if(_selectedLibraryIds.length==1) AskEClawButton(database:widget.database,
+            scope:EClawContext(knowledgeBaseId:_selectedLibraryIds.single)),
           IconButton(
             onPressed: () => _canvasController.resetView(),
             icon: const Icon(Icons.center_focus_strong_rounded, size: 20),

@@ -10,6 +10,7 @@ import '../../database/source_document_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/knowledge_components.dart';
 import 'ocr_result_page.dart';
+import 'feishu_source_view.dart';
 
 class RecordSourcePage extends StatefulWidget {
   const RecordSourcePage({
@@ -54,6 +55,9 @@ class _RecordSourcePageState extends State<RecordSourcePage> {
   @override
   Widget build(BuildContext context) {
     final source = _pages[_index];
+    if (source.sourceType == 'feishu_docx') {
+      return FeishuSourceView(source: source, database: widget.database);
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text('原始资料 · ${_index + 1}/${_pages.length}'),
@@ -82,6 +86,8 @@ class _RecordSourcePageState extends State<RecordSourcePage> {
                   child: Image.file(
                     File(
                       source.sourceType == 'pdf_page' ||
+                              source.sourceType ==
+                                  SourceDocumentSourceType.officePage ||
                               source.sourceType == 'pdf_document'
                           ? source.imagePath
                           : source.originalFilePath ?? source.imagePath,

@@ -80,7 +80,7 @@ class DocumentBatchRepository {
           'page_number': page.pageNumber,
           'source_type': pageSourceType,
           'image_path': page.savedPath,
-          'original_file_path': sourceType == DocumentBatchSourceType.pdf
+          'original_file_path': sourceType != DocumentBatchSourceType.multiImage
               ? originalFilePath
               : page.savedPath,
           'original_title': page.title,

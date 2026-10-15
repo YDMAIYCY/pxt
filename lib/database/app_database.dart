@@ -1,6 +1,9 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'import_record_schema.dart';
+import 'interview_schema.dart';
+import 'eclaw_schema.dart';
+import 'feishu_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -11,7 +14,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 18;
+  static const int databaseVersion = 22;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -407,6 +410,10 @@ class AppDatabase {
     await _createFavoriteIndexes(db);
     await _createCanonicalGraphIndexes(db);
     await createImportRecordSchema(db);
+    await createInterviewSchema(db);
+    await createEClawSchema(db);
+    await createFeishuSchema(db);
+    await upgradeFeishuToV22(db);
   }
 
   Future<void> _upgradeTables(
@@ -459,6 +466,18 @@ class AppDatabase {
     }
     if (oldVersion < 18) {
       await _upgradeCanonicalGraphToV18(db);
+    }
+    if (oldVersion < 19) {
+      await createInterviewSchema(db);
+    }
+    if (oldVersion < 20) {
+      await createEClawSchema(db);
+    }
+    if (oldVersion < 21) {
+      await createFeishuSchema(db);
+    }
+    if (oldVersion < 22) {
+      await upgradeFeishuToV22(db);
     }
   }
 
@@ -1335,9 +1354,13 @@ class AppDatabase {
     await _upgradeFocusToV11(db);
     await _upgradeKnowledgeGraphToV12(db);
     await _upgradeCanonicalGraphToV18(db);
+    await createInterviewSchema(db);
+    await createEClawSchema(db);
     await _upgradeRichPracticeQuestionsToV13(db);
     if (!_recordSchemaReady) {
       await createImportRecordSchema(db);
+      await createFeishuSchema(db);
+      await upgradeFeishuToV22(db);
       _recordSchemaReady = true;
     }
   }

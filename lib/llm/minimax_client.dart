@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_runtime_config.dart';
 import '../database/models/llm_provider_config.dart';
+import 'llm_request_support.dart';
 
 class MiniMaxException implements Exception {
   const MiniMaxException(this.message);
@@ -26,6 +27,9 @@ class MiniMaxClient {
     String? provider,
     Duration? timeout,
     int? maxCompletionTokens,
+    double? temperature,
+    String responseFormat = 'auto',
+    String? sessionId,
   }) : _httpClient = httpClient ?? http.Client(),
        _provider = LlmProvider.normalize(provider ?? LlmProvider.minimax),
        _apiMode = _resolveApiMode(
@@ -55,18 +59,27 @@ class MiniMaxClient {
        _timeout =
            timeout ?? Duration(seconds: AppRuntimeConfig.requestTimeoutSeconds),
        _maxCompletionTokens =
-           maxCompletionTokens ?? AppRuntimeConfig.minimaxMaxCompletionTokens;
+           maxCompletionTokens ?? AppRuntimeConfig.minimaxMaxCompletionTokens,
+       _temperature = temperature,
+       _responseFormat = responseFormat,
+       _sessionId = sessionId ?? 'zxb-${DateTime.now().microsecondsSinceEpoch}';
 
-  MiniMaxClient.fromConfig(LlmProviderConfig config, {http.Client? httpClient})
-    : _httpClient = httpClient ?? http.Client(),
-      _provider = config.provider,
-      _apiMode = config.apiMode,
-      _apiKey = config.apiKey.trim(),
-      _groupId = '',
-      _model = config.effectiveModel,
-      _endpoint = config.effectiveEndpoint,
-      _timeout = Duration(seconds: AppRuntimeConfig.requestTimeoutSeconds),
-      _maxCompletionTokens = config.effectiveMaxTokens;
+  MiniMaxClient.fromConfig(
+    LlmProviderConfig config, {
+    http.Client? httpClient,
+    String? sessionId,
+  }) : _httpClient = httpClient ?? http.Client(),
+       _provider = config.provider,
+       _apiMode = config.effectiveApiMode,
+       _apiKey = config.apiKey.trim(),
+       _groupId = '',
+       _model = config.effectiveModel,
+       _endpoint = config.effectiveEndpoint,
+       _timeout = Duration(seconds: AppRuntimeConfig.requestTimeoutSeconds),
+       _maxCompletionTokens = config.effectiveMaxTokens,
+       _temperature = config.temperature,
+       _responseFormat = config.responseFormat,
+       _sessionId = sessionId ?? 'zxb-${DateTime.now().microsecondsSinceEpoch}';
 
   final http.Client _httpClient;
   final Uri _endpoint;
@@ -77,6 +90,16 @@ class MiniMaxClient {
   final String _apiMode;
   final Duration _timeout;
   final int _maxCompletionTokens;
+  final double? _temperature;
+  final String _responseFormat;
+  final String _sessionId;
+
+  Map<String, String> get _headers => LlmRequestSupport.headers(
+    provider: _provider,
+    apiKey: _apiKey,
+    apiMode: _apiMode,
+    sessionId: _sessionId,
+  );
 
   Uri get debugEndpoint => _endpoint;
 
@@ -105,9 +128,13 @@ class MiniMaxClient {
       _provider == LlmProvider.minimax && _apiMode == LlmApiMode.tokenPlan;
 
   bool get _usesOpenAiCompatible =>
-      _provider != LlmProvider.minimax ||
-      _provider == LlmProvider.kimi ||
-      _apiMode == LlmApiMode.openAiCompatible;
+      _apiMode == LlmApiMode.openAiCompatible ||
+      (_provider != LlmProvider.minimax &&
+          !const [
+            LlmApiMode.anthropic,
+            LlmApiMode.responses,
+            LlmApiMode.gemini,
+          ].contains(_apiMode));
 
   Future<Map<String, dynamic>> generateStructuredJson({
     required String systemPrompt,
@@ -118,10 +145,7 @@ class MiniMaxClient {
       throw MiniMaxException('未配置 $_providerLabel API Key，请先到“我的”页配置大模型。');
     }
 
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $_apiKey',
-    };
+    final headers = _headers;
     if (_provider == LlmProvider.minimax &&
         !_usesTokenPlan &&
         _groupId.isNotEmpty) {
@@ -140,12 +164,10 @@ class MiniMaxClient {
           .timeout(_timeout);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw MiniMaxException(
-          '$_providerLabel 请求失败（HTTP ${response.statusCode}）：${response.body}',
-        );
+        throw MiniMaxException(LlmRequestSupport.httpError(response, _apiKey));
       }
 
-      final decoded = jsonDecode(response.body);
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       _throwIfApiError(decoded);
       _throwIfOutputTruncated(decoded);
       final jsonContent = _extractModelContent(decoded);
@@ -172,10 +194,7 @@ class MiniMaxClient {
       throw const MiniMaxException('请输入聊天内容后再发送');
     }
 
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $_apiKey',
-    };
+    final headers = _headers;
     if (_provider == LlmProvider.minimax &&
         !_usesTokenPlan &&
         _groupId.isNotEmpty) {
@@ -183,7 +202,9 @@ class MiniMaxClient {
     }
 
     final body = _buildChatRequestBody(
-      systemPrompt: systemPrompt,
+      systemPrompt: _responseFormat == 'json'
+          ? '$systemPrompt\n请只返回有效 JSON 对象。'
+          : systemPrompt,
       messages: normalizedMessages,
     );
 
@@ -193,12 +214,10 @@ class MiniMaxClient {
           .timeout(_timeout);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw MiniMaxException(
-          '$_providerLabel 请求失败（HTTP ${response.statusCode}）：${response.body}',
-        );
+        throw MiniMaxException(LlmRequestSupport.httpError(response, _apiKey));
       }
 
-      final decoded = jsonDecode(response.body);
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       _throwIfApiError(decoded);
       _throwIfOutputTruncated(decoded);
       final content = _extractModelContent(decoded);
@@ -256,6 +275,14 @@ class MiniMaxClient {
     required String userPrompt,
     required Map<String, dynamic>? jsonSchema,
   }) {
+    final native = _nativeBody(
+      systemPrompt: '$systemPrompt\n请只返回有效 JSON 对象。',
+      messages: [
+        {'role': 'user', 'content': userPrompt},
+      ],
+      json: true,
+    );
+    if (native != null) return native;
     if (_usesOpenAiCompatible) {
       return _buildOpenAiCompatibleBody(
         systemPrompt: systemPrompt,
@@ -279,6 +306,12 @@ class MiniMaxClient {
     required String systemPrompt,
     required List<Map<String, String>> messages,
   }) {
+    final native = _nativeBody(
+      systemPrompt: systemPrompt,
+      messages: messages,
+      json: _responseFormat == 'json',
+    );
+    if (native != null) return native;
     if (_usesOpenAiCompatible) {
       return _buildOpenAiCompatibleChatBody(
         systemPrompt: systemPrompt,
@@ -304,7 +337,7 @@ class MiniMaxClient {
   }) {
     final body = <String, Object?>{
       'model': _model,
-      'temperature': 0.2,
+      'temperature': _temperature ?? 0.2,
       'max_completion_tokens': _maxCompletionTokens,
       'messages': [
         {'role': 'system', 'content': systemPrompt},
@@ -327,7 +360,7 @@ class MiniMaxClient {
   }) {
     return {
       'model': _model,
-      'temperature': 0.4,
+      'temperature': _temperature ?? 0.4,
       'max_completion_tokens': _maxCompletionTokens,
       'messages': _withSystemMessage(systemPrompt, messages),
     };
@@ -340,7 +373,7 @@ class MiniMaxClient {
     return {
       'model': _model,
       'anthropic_version': 'bedrock-2023-05-31',
-      'temperature': 0.2,
+      'temperature': _temperature ?? 0.2,
       'max_tokens': _maxCompletionTokens,
       'system': systemPrompt,
       'messages': [
@@ -356,7 +389,7 @@ class MiniMaxClient {
     return {
       'model': _model,
       'anthropic_version': 'bedrock-2023-05-31',
-      'temperature': 0.4,
+      'temperature': _temperature ?? 0.4,
       'max_tokens': _maxCompletionTokens,
       'system': systemPrompt,
       'messages': messages,
@@ -388,6 +421,7 @@ class MiniMaxClient {
       'temperature': _openAiCompatibleTemperature,
       'max_tokens': _maxCompletionTokens,
       'messages': _withSystemMessage(systemPrompt, messages),
+      if (_responseFormat == 'json') 'response_format': {'type': 'json_object'},
     };
   }
 
@@ -396,11 +430,93 @@ class MiniMaxClient {
         _model.trim().toLowerCase().startsWith('kimi-')) {
       return 1.0;
     }
-    return 0.2;
+    return _temperature ?? 0.2;
+  }
+
+  Map<String, Object?>? _nativeBody({
+    required String systemPrompt,
+    required List<Map<String, String>> messages,
+    required bool json,
+  }) {
+    if (_apiMode == LlmApiMode.anthropic) {
+      return {
+        'model': _model,
+        'max_tokens': _maxCompletionTokens,
+        'temperature': _temperature ?? 0.2,
+        if (systemPrompt.isNotEmpty) 'system': systemPrompt,
+        'messages': messages.where((m) => m['role'] != 'system').toList(),
+      };
+    }
+    if (_apiMode == LlmApiMode.responses) {
+      return {
+        'model': _model,
+        'max_output_tokens': _maxCompletionTokens,
+        'store': false,
+        'instructions': systemPrompt,
+        'input': messages,
+        if (json)
+          'text': {
+            'format': {'type': 'json_object'},
+          },
+      };
+    }
+    if (_apiMode == LlmApiMode.gemini) {
+      return {
+        if (systemPrompt.isNotEmpty)
+          'systemInstruction': {
+            'parts': [
+              {'text': systemPrompt},
+            ],
+          },
+        'contents': messages
+            .where((m) => m['role'] != 'system')
+            .map(
+              (m) => {
+                'role': m['role'] == 'assistant' ? 'model' : 'user',
+                'parts': [
+                  {'text': m['content']},
+                ],
+              },
+            )
+            .toList(),
+        'generationConfig': {
+          'temperature': _temperature ?? 0.2,
+          'maxOutputTokens': _maxCompletionTokens,
+          if (json) 'responseMimeType': 'application/json',
+        },
+      };
+    }
+    return null;
   }
 
   Object? _extractModelContent(Object? decoded) {
     if (decoded is Map<String, dynamic>) {
+      if (_apiMode == LlmApiMode.responses) {
+        final output = decoded['output'];
+        if (output is List) {
+          return output
+              .whereType<Map>()
+              .where((item) => item['type'] == 'message')
+              .expand((item) => item['content'] as List? ?? [])
+              .whereType<Map>()
+              .where((part) => part['type'] == 'output_text')
+              .map((part) => part['text'] ?? '')
+              .join('\n');
+        }
+        return decoded['output_text'];
+      }
+      if (_apiMode == LlmApiMode.gemini) {
+        final candidates = decoded['candidates'];
+        if (candidates is List && candidates.isNotEmpty) {
+          final parts = candidates.first['content']?['parts'] as List? ?? [];
+          return parts
+              .whereType<Map>()
+              .where((p) => p['thought'] != true)
+              .map((p) => p['text'] ?? '')
+              .join('\n');
+        }
+        throw const MiniMaxException('模型未返回内容，可能触发了安全限制');
+      }
       final topLevelContent = decoded['content'];
       if (topLevelContent != null) {
         if (topLevelContent is List) {
@@ -566,7 +682,7 @@ class MiniMaxClient {
       throw MiniMaxException(
         '$_providerLabel 请求失败'
         '${errorType == null || errorType.isEmpty ? '' : '（$errorType）'}：'
-        '${message.isEmpty ? '未返回错误详情' : message}',
+        '${message.isEmpty ? '未返回错误详情' : LlmRequestSupport.redact(message, _apiKey)}',
       );
     }
 
@@ -586,13 +702,23 @@ class MiniMaxClient {
             .trim();
     throw MiniMaxException(
       '$_providerLabel 请求失败（业务码 $statusCode）：'
-      '${statusMessage.isEmpty ? '未返回错误详情' : statusMessage}',
+      '${statusMessage.isEmpty ? '未返回错误详情' : LlmRequestSupport.redact(statusMessage, _apiKey)}',
     );
   }
 
   void _throwIfOutputTruncated(Object? decoded) {
     if (decoded is! Map<String, dynamic>) {
       return;
+    }
+
+    if (decoded['status'] == 'failed' || decoded['status'] == 'incomplete') {
+      throw const MiniMaxException('模型响应失败或输出未完成，请检查额度或提高最大 Tokens');
+    }
+    final candidates = decoded['candidates'];
+    if (candidates is List &&
+        candidates.isNotEmpty &&
+        candidates.first['finishReason'] == 'MAX_TOKENS') {
+      throw const MiniMaxException('模型输出被截断，请提高最大 Tokens');
     }
 
     final stopReason = decoded['stop_reason']?.toString().trim();

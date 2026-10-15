@@ -119,8 +119,9 @@ void main() {
   );
 
   group('schema', () {
-    test('v18 建立规范图谱表与索引', () async {
-      expect(AppDatabase.databaseVersion, 18);
+    test('当前 schema 建立规范图谱表与索引', () async {
+      // v18 引入规范图谱表；后续版本只做增量升级。
+      expect(AppDatabase.databaseVersion, greaterThanOrEqualTo(18));
       final tables = await db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table'",
       );

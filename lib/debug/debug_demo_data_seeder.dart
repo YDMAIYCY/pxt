@@ -16,6 +16,19 @@ class DebugDemoDataSeeder {
 
   final AppDatabase _database;
 
+  Future<int> seedIsolatedDemo() async {
+    if(!kDebugMode) throw StateError('演示数据仅限 Debug 环境');
+    await _database.ensureSchemaReady();
+    final db=await _database.database;
+    final existing=await db.query('users',columns:['id'],where:'username=?',whereArgs:['__eclaw_debug_demo__']);
+    final userId=existing.isNotEmpty ? existing.single['id'] as int : await db.insert('users',{
+      'username':'__eclaw_debug_demo__','password_hash':'disabled-debug-account','password_salt':'debug-only','is_active':0,'updated_at':DateTime.now().toUtc().toIso8601String(),
+      'created_at':DateTime.now().toUtc().toIso8601String(),
+    });
+    await seedForUser(userId);
+    return userId;
+  }
+
   Future<void> seedForUser(int userId) async {
     if (!kDebugMode) {
       return;
@@ -33,7 +46,7 @@ class DebugDemoDataSeeder {
         'user_id': userId,
         'name': '[演示] 高等数学知识库',
         'description':
-            '用于验证 GraphRAG、Adaptive KG、Next-Best-Action、QSClaw 问答、练习题、错题和 AI 面试的本地调试数据。',
+            '用于验证 GraphRAG、Adaptive KG、Next-Best-Action、EClaw 问答、练习题、错题和 AI 面试的本地调试数据。',
         'created_at': nowText,
         'updated_at': nowText,
       });
@@ -184,7 +197,7 @@ class DebugDemoDataSeeder {
 
       final sessionId = await txn.insert(AppDatabase.tableAiChatSessions, {
         'user_id': userId,
-        'title': '[演示] QSClaw 图谱问答',
+        'title': '[演示] EClaw 图谱问答',
         'last_message_preview': '为什么我总是错函数单调性？',
         'created_at': nowText,
         'updated_at': nowText,

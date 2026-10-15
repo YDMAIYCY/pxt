@@ -99,6 +99,8 @@ class DocumentIngestService {
         return DocumentBatchSourceType.multiImage;
       case BatchDocumentInputSource.pdf:
         return DocumentBatchSourceType.pdf;
+      case BatchDocumentInputSource.document:
+        return DocumentBatchSourceType.document;
     }
   }
 
@@ -108,6 +110,8 @@ class DocumentIngestService {
         return SourceDocumentSourceType.galleryImport;
       case BatchDocumentInputSource.pdf:
         return SourceDocumentSourceType.pdfPage;
+      case BatchDocumentInputSource.document:
+        return SourceDocumentSourceType.officePage;
     }
   }
 
@@ -140,9 +144,11 @@ class DocumentIngestService {
     final timestamp = _formatTimestamp(DateTime.now());
     switch (source) {
       case BatchDocumentInputSource.multiImage:
-        return '批量图片 $timestamp';
+        return '相册导入 $timestamp';
       case BatchDocumentInputSource.pdf:
         return 'PDF 资料 $timestamp';
+      case BatchDocumentInputSource.document:
+        return '文档资料 $timestamp';
     }
   }
 

@@ -3,7 +3,7 @@
 
 enum ImageInputSource { camera, gallery }
 
-enum BatchDocumentInputSource { multiImage, pdf }
+enum BatchDocumentInputSource { multiImage, pdf, document }
 
 // ========== 输入结果模型 ==========
 // 承载图片选取后写入应用私有目录的结果，供后续入库流程使用。

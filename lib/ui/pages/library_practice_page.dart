@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../../agent/eclaw_context.dart';
+import '../widgets/ask_eclaw_button.dart';
 import '../../database/app_database.dart';
 import '../../database/auth_repository.dart';
 import '../../database/import_record_repository.dart';
@@ -13,7 +15,7 @@ import '../../generator/library_practice_service.dart';
 import '../../generator/wrong_question_training_service.dart';
 import '../../database/ai_generation_repository.dart';
 import '../theme/app_theme.dart';
-import 'learning_workspace_page.dart';
+import 'document_detail_page.dart';
 import 'ocr_result_page.dart';
 import 'source_version_page.dart';
 
@@ -77,10 +79,8 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
     final db = await (widget.database ?? AppDatabase.instance).database;
     final concepts = await db.rawQuery(
       '''SELECT DISTINCT c.id, c.name
-      FROM knowledge_concepts c JOIN concept_documents cd ON cd.concept_id = c.id
-      JOIN source_documents d ON d.id = cd.document_id
-      JOIN document_library_links dl ON dl.document_id = d.id
-      WHERE c.user_id = ? AND dl.library_id = ?
+      FROM knowledge_concepts c JOIN source_documents d ON d.id=c.document_id
+      WHERE c.user_id = ? AND d.user_id=c.user_id AND d.library_id = ?
         ${_recordId == null ? '' : 'AND d.import_record_id = ?'}
       ORDER BY c.name''',
       [user.id, _libraryId, ?_recordId],
@@ -596,6 +596,9 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
     return Scaffold(
       appBar: AppBar(
         title: Text('练习 ${_index + 1}/${widget.questions.length}'),
+        actions:[AskEClawButton(database:widget.database,scope:EClawContext(
+          knowledgeBaseId:widget.scope.libraryId,importRecordId:widget.scope.recordId,
+          documentId:q.documentId))],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -691,9 +694,8 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
                     : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => LearningWorkspacePage(
+                          builder: (_) => DocumentDetailPage(
                             documentId: q.documentId,
-                            database: widget.database,
                           ),
                         ),
                       ),

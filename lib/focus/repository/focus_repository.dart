@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../database/app_database.dart';
 import '../models/pomodoro_task.dart';
 import '../models/pomodoro_record.dart';
@@ -81,17 +83,23 @@ class FocusRepository {
     required int userId,
     required String title,
     int estimatedPomodoros = 1,
+    String? operationKey,
   }) async {
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
-    final maxOrder = await db.rawQuery(
+    final id = await db.transaction((txn) async {
+      if(operationKey!=null) {
+        final receipts=await txn.query('agent_operation_receipts',where:'operation_key=? AND user_id=?',whereArgs:[operationKey,userId]);
+        if(receipts.isNotEmpty) return (jsonDecode(receipts.single['result_json'] as String) as Map)['taskId'] as int;
+      }
+    final maxOrder = await txn.rawQuery(
       'SELECT COALESCE(MAX(sort_order), -1) as max_order FROM ${AppDatabase.tablePomodoroTasks} WHERE user_id = ? AND is_archived = 0',
       [userId],
     );
     final sortOrder = ((maxOrder.first['max_order'] as int?) ?? -1) + 1;
 
-    final id = await db.insert(AppDatabase.tablePomodoroTasks, {
+    final taskId = await txn.insert(AppDatabase.tablePomodoroTasks, {
       'user_id': userId,
       'title': title.trim(),
       'estimated_pomodoros': estimatedPomodoros,
@@ -100,14 +108,11 @@ class FocusRepository {
       'created_at': now,
     });
 
-    return PomodoroTask(
-      id: id,
-      userId: userId,
-      title: title.trim(),
-      estimatedPomodoros: estimatedPomodoros,
-      sortOrder: sortOrder,
-      createdAt: DateTime.now(),
-    );
+      if(operationKey!=null) await txn.insert('agent_operation_receipts',{'operation_key':operationKey,'user_id':userId,'result_json':jsonEncode({'taskId':taskId})});
+      return taskId;
+    });
+    return PomodoroTask.fromMap((await db.query(AppDatabase.tablePomodoroTasks,
+      where:'id=? AND user_id=?',whereArgs:[id,userId])).single);
   }
 
   Future<List<PomodoroTask>> fetchTasks(int userId) async {

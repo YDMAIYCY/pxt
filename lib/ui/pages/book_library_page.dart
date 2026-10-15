@@ -6,12 +6,17 @@ import '../../database/knowledge_library_repository.dart';
 import '../../database/models/import_record.dart';
 import '../../database/models/knowledge_library_record.dart';
 import '../theme/app_theme.dart';
-import '../widgets/knowledge_book_cover.dart';
 import '../widgets/knowledge_components.dart';
 import '../widgets/knowledge_library_editor.dart';
 import 'knowledge_record_list_page.dart';
 import 'import_record_detail_page.dart';
 import 'knowledge_graph_page.dart';
+import 'feishu_import_page.dart';
+import 'feishu_library_detail_page.dart';
+import '../widgets/knowledge_book_cover.dart';
+import '../widgets/knowledge_add_sheet.dart';
+import '../../feishu/feishu_controller.dart';
+import 'feishu_job_page.dart';
 
 class BookLibraryPage extends StatefulWidget {
   const BookLibraryPage({
@@ -38,6 +43,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   _future;
   String _query = '';
   bool _manage = false;
+  bool _openingAdd = false;
+  String _sourceFilter = 'all';
   KnowledgeLibraryRepository get _libraries =>
       KnowledgeLibraryRepository(database: widget.database);
   ImportRecordRepository get _records =>
@@ -69,7 +76,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     if (user == null) throw StateError('请先登录');
     return (
       userId: user.id,
-      libraries: await _libraries.fetchLibraries(user.id),
+      libraries: await _libraries.fetchLibraries(
+        user.id,
+        source: _sourceFilter,
+      ),
       records: await _records.list(user.id),
     );
   }
@@ -108,8 +118,97 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            BookDetailPage(library: library, database: widget.database),
+        builder: (_) => library.isFeishu
+            ? FeishuLibraryDetailPage(
+                library: library,
+                database: widget.database,
+              )
+            : BookDetailPage(library: library, database: widget.database),
+      ),
+    );
+    if (mounted) _reload();
+  }
+
+  Future<void> _add(int userId) async {
+    if (_openingAdd) return;
+    _openingAdd = true;
+    try {
+      final type = await showKnowledgeAddSheet(context);
+      if (!mounted || type == null) return;
+      if (type == 'manual') {
+        await _edit(userId);
+      } else if (type == 'feishu') {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                FeishuImportPage(userId: userId, database: widget.database),
+          ),
+        );
+      } else {
+        final libraries = await _libraries.fetchLibraries(userId);
+        if (!mounted) return;
+        final choice = await showModalBottomSheet<Object>(
+          context: context,
+          showDragHandle: true,
+          builder: (sheet) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const ListTile(title: Text('选择本地资料保存位置')),
+                for (final library in libraries)
+                  ListTile(
+                    title: Text(library.name),
+                    onTap: () => Navigator.pop(sheet, library),
+                  ),
+                ListTile(
+                  title: const Text('创建新的知识库'),
+                  onTap: () => Navigator.pop(sheet, 'new'),
+                ),
+              ],
+            ),
+          ),
+        );
+        if (!mounted || choice == null) return;
+        final target = choice is KnowledgeLibraryRecord
+            ? choice
+            : await showKnowledgeLibraryEditor(
+                context,
+                userId: userId,
+                repository: _libraries,
+              );
+        if (target != null && mounted) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => BookDetailPage(
+                library: target,
+                database: widget.database,
+                autoImport: true,
+              ),
+            ),
+          );
+        }
+      }
+      if (mounted) {
+        _reload();
+        widget.onDataChanged?.call();
+      }
+    } finally {
+      _openingAdd = false;
+    }
+  }
+
+  Future<void> _jobs(int userId) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FeishuJobPage(
+          controller: FeishuController.forUser(
+            userId,
+            database: widget.database,
+          ),
+        ),
       ),
     );
     if (mounted) _reload();
@@ -119,10 +218,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => KnowledgeGraphPage(
-          userId: userId,
-          database: widget.database,
-        ),
+        builder: (_) =>
+            KnowledgeGraphPage(userId: userId, database: widget.database),
       ),
     );
     if (mounted) _reload();
@@ -225,7 +322,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: () => _edit(data.userId),
+                  onPressed: () => _add(data.userId),
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                   label: const Text('添加', style: TextStyle(fontSize: 13)),
                 ),
@@ -237,6 +334,32 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
                   ),
                 ),
               ],
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final filter in const [
+                  ('all', '全部'),
+                  ('feishu', '飞书同步'),
+                  ('local', '本地创建'),
+                ])
+                  ChoiceChip(
+                    label: Text(filter.$2),
+                    selected: _sourceFilter == filter.$1,
+                    showCheckmark: false,
+                    onSelected: (_) {
+                      _sourceFilter = filter.$1;
+                      _reload();
+                    },
+                  ),
+              ],
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => _jobs(data.userId),
+                child: const Text('导入任务'),
+              ),
             ),
             if (_manage)
               const Padding(
@@ -258,20 +381,20 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
               ),
             LayoutBuilder(
               builder: (context, constraints) {
-                final columns = constraints.maxWidth >= 380 ? 3 : 2;
+                const columns = 2;
                 final cells = [
                   ...books.map<Widget>(
                     (l) => KnowledgeBookCover(
                       title: l.name,
                       subtitle:
-                          '${data.records.where((r) => r.libraryId == l.id).length} 条记录',
+                          '${data.records.where((r) => r.libraryId == l.id).length} 条记录${l.isFeishu ? '\n${l.sourceLabel} · ${l.syncLabel}' : ''}',
                       theme: l.coverTheme,
                       color: l.coverColor,
                       onTap: () => _open(l),
                       onLongPress: () => _edit(data.userId, l),
                     ),
                   ),
-                  if (query.isEmpty) _AddBook(onTap: () => _edit(data.userId)),
+                  if (query.isEmpty) _AddBook(onTap: () => _add(data.userId)),
                 ];
                 final width =
                     (constraints.maxWidth - 14 * (columns - 1)) / columns;

@@ -3,6 +3,7 @@ import '../database/models/knowledge_library_record.dart';
 import '../database/models/source_document_record.dart';
 import '../database/source_document_repository.dart';
 import '../debug/debug_demo_data_seeder.dart';
+import 'package:flutter/foundation.dart';
 
 // ========== QSClaw Tool Registry ==========
 // Registers safe in-app capabilities that QSClaw can call from natural language.
@@ -75,6 +76,7 @@ class QsClawToolRegistry {
       ),
       QsClawTool(
         name: QsClawToolNames.moveDocumentToLibrary,
+        requiresConfirmation: true,
         description: 'Move imported documents into a knowledge library.',
         handler: (context) async {
           final library = context.objectArg<KnowledgeLibraryRecord>('library');
@@ -120,12 +122,14 @@ class QsClawToolRegistry {
       ),
       QsClawTool(
         name: QsClawToolNames.seedDebugDemoData,
+        requiresConfirmation: true,
         description: 'Seed local debug demo data for the current user.',
         handler: (context) async {
-          await demoSeeder.seedForUser(context.userId);
+          if (!kDebugMode) throw StateError('演示工具仅限 Debug 环境');
+          await demoSeeder.seedIsolatedDemo();
           return const QsClawToolResult(
             toolName: QsClawToolNames.seedDebugDemoData,
-            message: '已为当前调试账号植入演示数据。',
+            message: '已为隔离调试账号植入演示数据。',
           );
         },
       ),
@@ -140,11 +144,13 @@ class QsClawToolRegistry {
     String toolName, {
     required int userId,
     Map<String, Object?> args = const {},
+    bool confirmed = false,
   }) async {
     final tool = _tools[toolName];
     if (tool == null) {
-      throw StateError('QSClaw tool is not registered: $toolName');
+      throw StateError('EClaw 工具未注册：$toolName');
     }
+    if (tool.requiresConfirmation && !confirmed) throw StateError('此操作需要用户确认');
     return tool.handler(QsClawToolContext(userId: userId, args: args));
   }
 
@@ -189,11 +195,13 @@ class QsClawTool {
     required this.name,
     required this.description,
     required this.handler,
+    this.requiresConfirmation = false,
   });
 
   final String name;
   final String description;
   final QsClawToolHandler handler;
+  final bool requiresConfirmation;
 }
 
 class QsClawToolContext {
@@ -272,7 +280,7 @@ class QsClawNavigationTarget {
   static String labelOf(String target) {
     switch (target) {
       case aiChat:
-        return 'AI 伴学问答';
+        return 'EClaw';
       case knowledge:
         return '知识库';
       case practice:

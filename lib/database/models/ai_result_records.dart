@@ -103,6 +103,7 @@ class PracticeQuestionRecord {
     this.optionsJson,
     this.rubricJson,
     this.expectedKeywordsJson,
+    this.sourceVersionId,
   });
 
   final int id;
@@ -124,6 +125,7 @@ class PracticeQuestionRecord {
   final String? optionsJson;
   final String? rubricJson;
   final String? expectedKeywordsJson;
+  final int? sourceVersionId;
   final DateTime createdAt;
 
   bool get isPending => reviewStatus == PracticeQuestionReviewStatus.pending;
@@ -147,6 +149,7 @@ class PracticeQuestionRecord {
 
     return PracticeQuestionRecord(
       id: map['id'] as int,
+      sourceVersionId: _readNullableInt(map['source_version_id']),
       documentId: map['document_id'] as int,
       questionText: (map['question_text'] as String?)?.trim() ?? '',
       answerText: (map['answer_text'] as String?)?.trim(),

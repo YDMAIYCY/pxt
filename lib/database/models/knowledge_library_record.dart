@@ -12,6 +12,9 @@ class KnowledgeLibraryRecord {
     this.documentCount = 0,
     this.coverTheme = 'math',
     this.coverColor = 0xFF5B90FF,
+    this.sourceType = 'local',
+    this.syncStatus = 'pending',
+    this.syncedAt,
   });
 
   final int id;
@@ -23,6 +26,21 @@ class KnowledgeLibraryRecord {
   final int documentCount;
   final String coverTheme;
   final int coverColor;
+  final String sourceType, syncStatus;
+  final String? syncedAt;
+  bool get isFeishu => sourceType != 'local';
+  String get sourceLabel =>
+      {'folder': '飞书文件夹', 'wiki': '飞书知识空间', 'document': '飞书云文档'}[sourceType] ??
+      '本地创建';
+  String get syncLabel =>
+      {
+        'synced': '已同步',
+        'syncing': '同步中',
+        'pending': '待同步',
+        'failed': '同步失败',
+        'expired': '授权已失效',
+      }[syncStatus] ??
+      '待同步';
 
   factory KnowledgeLibraryRecord.fromMap(Map<String, Object?> map) {
     final createdAt = (map['created_at'] as String?) ?? '';
@@ -38,6 +56,9 @@ class KnowledgeLibraryRecord {
       documentCount: _readInt(map['document_count']),
       coverTheme: map['cover_theme'] as String? ?? 'math',
       coverColor: map['cover_color'] as int? ?? 0xFF5B90FF,
+      sourceType: map['source_type'] as String? ?? 'local',
+      syncStatus: map['sync_status'] as String? ?? 'pending',
+      syncedAt: map['synced_at'] as String?,
     );
   }
 

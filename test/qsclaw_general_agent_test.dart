@@ -75,9 +75,10 @@ void main() {
       final result = await service.runCommand(
         userId: 7,
         command: '\u690d\u5165\u6f14\u793a\u6570\u636e',
+        confirmed: true,
       );
 
-      expect(seeder.seededUserId, 7);
+      expect(seeder.seededUserId, 1000);
       expect(result.executedSteps.map((step) => step.toolName), [
         'seed_debug_demo_data',
       ]);
@@ -102,6 +103,7 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
     String? description,
     String coverTheme = 'math',
     int coverColor = 0xFF5B90FF,
+    String? operationKey,
   }) async {
     createdNames.add(name);
     final library = KnowledgeLibraryRecord(
@@ -119,6 +121,12 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
 
 class _FakeDebugDemoDataSeeder extends DebugDemoDataSeeder {
   int? seededUserId;
+
+  @override
+  Future<int> seedIsolatedDemo() async {
+    await seedForUser(1000);
+    return 1000;
+  }
 
   @override
   Future<void> seedForUser(int userId) async {

@@ -10,26 +10,33 @@ class PracticeScope {
     this.libraryId,
     this.recordId,
     this.conceptId,
+    this.documentId,
     this.wrongOnly = false,
   });
   final int userId;
   final int? libraryId;
   final int? recordId;
   final int? conceptId;
+  final int? documentId;
   final bool wrongOnly;
   String get ownershipClause =>
       '''d.user_id = ?
-    ${libraryId == null ? '' : '''AND EXISTS (SELECT 1 FROM document_library_links dl
-      WHERE dl.document_id = d.id AND dl.library_id = ?
-        AND dl.library_id IN (SELECT id FROM knowledge_libraries
-          WHERE user_id = d.user_id))'''}
+    ${libraryId == null ? '' : '''AND d.library_id = ? AND EXISTS (SELECT 1 FROM knowledge_libraries l
+      WHERE l.id=d.library_id AND l.user_id=d.user_id)'''}
     ${recordId == null ? '' : 'AND d.import_record_id = ?'}
     ${conceptId == null ? '' : '''AND EXISTS (SELECT 1 FROM question_concepts qc
-      WHERE qc.question_id = q.id AND qc.concept_id = ?)'''}''';
+          WHERE qc.question_id = q.id AND qc.concept_id = ?)'''}
+    ${documentId == null ? '' : 'AND d.id = ?'}''';
   String get clause =>
       '$ownershipClause '
       '${wrongOnly ? "AND q.wrong_count > 0 AND q.review_status != 'mastered'" : ''}';
-  List<Object?> get args => [userId, ?libraryId, ?recordId, ?conceptId];
+  List<Object?> get args => [
+    userId,
+    ?libraryId,
+    ?recordId,
+    ?conceptId,
+    ?documentId,
+  ];
 }
 
 class PracticeSubmission {
@@ -295,18 +302,32 @@ class PracticeSessionRepository {
       whereArgs: [userId, questionId],
       orderBy: 'created_at DESC, id DESC',
     );
-    final legacy = await db.query('learning_attempts',
+    final legacy = await db.query(
+      'learning_attempts',
       where: 'user_id = ? AND question_id = ? AND submission_id IS NULL',
-      whereArgs: [userId, questionId], orderBy: 'created_at DESC, id DESC');
+      whereArgs: [userId, questionId],
+      orderBy: 'created_at DESC, id DESC',
+    );
     final result = <Map<String, Object?>>[
       ...current,
-      ...legacy.map((r) => {
-        'id': r['id'], 'answer': r['answer'], 'created_at': r['created_at'],
-        'correct': null, 'revision': null, 'legacy': 1,
-        'question_snapshot': null, 'feedback': r['feedback'], 'score': r['score'],
-      }),
+      ...legacy.map(
+        (r) => {
+          'id': r['id'],
+          'answer': r['answer'],
+          'created_at': r['created_at'],
+          'correct': null,
+          'revision': null,
+          'legacy': 1,
+          'question_snapshot': null,
+          'feedback': r['feedback'],
+          'score': r['score'],
+        },
+      ),
     ];
-    result.sort((a,b) => (b['created_at'] as String).compareTo(a['created_at'] as String));
+    result.sort(
+      (a, b) =>
+          (b['created_at'] as String).compareTo(a['created_at'] as String),
+    );
     return result;
   }
 
@@ -316,9 +337,13 @@ class PracticeSessionRepository {
   }
 
   Future<void> _syncRelatedQuestions(
-    DatabaseExecutor db, int userId, int questionId, DateTime now,
+    DatabaseExecutor db,
+    int userId,
+    int questionId,
+    DateTime now,
   ) async {
-    final related = await db.rawQuery('''SELECT DISTINCT q.id FROM practice_questions q
+    final related = await db.rawQuery(
+      '''SELECT DISTINCT q.id FROM practice_questions q
       JOIN source_documents d ON d.id = q.document_id WHERE d.user_id = ? AND (
         q.id = ? OR q.parent_question_id = ? OR
         q.id = (SELECT parent_question_id FROM practice_questions WHERE id = ?) OR
@@ -326,7 +351,8 @@ class PracticeSessionRepository {
         EXISTS (SELECT 1 FROM question_concepts qc JOIN question_concepts target
           ON qc.concept_id = target.concept_id
           WHERE qc.question_id = q.id AND target.question_id = ?))''',
-      [userId, questionId, questionId, questionId, questionId, questionId]);
+      [userId, questionId, questionId, questionId, questionId, questionId],
+    );
     for (final row in related) {
       await _syncQuestion(db, userId, row['id'] as int, now);
     }
@@ -350,13 +376,24 @@ class PracticeSessionRepository {
       ORDER BY s.created_at, s.id''',
       [userId, questionId, questionId, questionId, questionId, questionId],
     );
-    final current = await db.query('practice_questions',
-      columns: ['next_review_at'], where: 'id = ?', whereArgs: [questionId]);
-    return _summarize(rows, nextReview: DateTime.tryParse(
-      current.firstOrNull?['next_review_at'] as String? ?? ''));
+    final current = await db.query(
+      'practice_questions',
+      columns: ['next_review_at'],
+      where: 'id = ?',
+      whereArgs: [questionId],
+    );
+    return _summarize(
+      rows,
+      nextReview: DateTime.tryParse(
+        current.firstOrNull?['next_review_at'] as String? ?? '',
+      ),
+    );
   }
 
-  MasteryEvidence _summarize(List<Map<String, Object?>> rows, {DateTime? nextReview}) {
+  MasteryEvidence _summarize(
+    List<Map<String, Object?>> rows, {
+    DateTime? nextReview,
+  }) {
     // Only evidence after the most recent mistake contributes to current mastery.
     var correct = <Map<String, Object?>>[];
     for (final row in rows) {
@@ -431,20 +468,24 @@ class PracticeSessionRepository {
       whereArgs: [questionId],
     );
     // One correct answer doesn't silently remove an unresolved knowledge error.
-    await db.rawUpdate('''UPDATE learning_errors SET resolved =
+    await db.rawUpdate(
+      '''UPDATE learning_errors SET resolved =
       CASE WHEN ? = 1 OR submission_id IN (
         SELECT id FROM practice_submissions WHERE revision > 0 AND correct = 1)
         THEN 1 ELSE 0 END WHERE user_id = ? AND question_id = ?''',
-      [e.mastered ? 1 : 0, userId, questionId]);
+      [e.mastered ? 1 : 0, userId, questionId],
+    );
     for (final c in await db.query(
       'question_concepts',
       where: 'question_id = ?',
       whereArgs: [questionId],
     )) {
-      final conceptRows = await db.rawQuery('''SELECT s.* FROM practice_submissions s
+      final conceptRows = await db.rawQuery(
+        '''SELECT s.* FROM practice_submissions s
         JOIN question_concepts qc ON qc.question_id = s.question_id
         WHERE s.user_id = ? AND qc.concept_id = ? ORDER BY s.created_at, s.id''',
-        [userId, c['concept_id']]);
+        [userId, c['concept_id']],
+      );
       final conceptEvidence = _summarize(conceptRows);
       await db.update(
         'knowledge_concepts',

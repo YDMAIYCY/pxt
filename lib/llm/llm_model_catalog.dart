@@ -3,6 +3,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../database/models/llm_provider_config.dart';
+import 'llm_request_support.dart';
+
 // ========== 模型目录 ==========
 // 这里集中放常见 OpenAI-compatible 服务商的模型预设与在线模型拉取逻辑。
 class LlmModelOption {
@@ -198,6 +201,76 @@ class LlmModelCatalog {
         ),
       ],
     ),
+    LlmProviderPreset(
+      provider: LlmProvider.opencodeGo,
+      label: 'OpenCode Go',
+      baseUrl: 'https://opencode.ai/inference/go/v1',
+      models: [
+        LlmModelOption(
+          id: 'step-5-preview-free',
+          label: 'Step 5 Preview',
+          description: '限时预览模型，实际可用性以接口和账户权限为准。',
+        ),
+        LlmModelOption(
+          id: 'glm-5.3-flash',
+          label: 'GLM 5.3 Flash',
+          description: '通用快速模型，使用对话协议。',
+        ),
+        LlmModelOption(
+          id: 'gpt-6-luna',
+          label: 'GPT 6 Luna',
+          description: '推理模型，使用 Responses 协议。',
+        ),
+        LlmModelOption(
+          id: 'claude-haiku-5-5',
+          label: 'Claude Haiku 5.5',
+          description: '使用 Anthropic Messages 协议。',
+        ),
+        LlmModelOption(
+          id: 'minimax-m2.7',
+          label: 'MiniMax M2.7',
+          description: '使用 Anthropic Messages 协议。',
+        ),
+        LlmModelOption(
+          id: 'gemini-4-argon-contributor',
+          label: 'Gemini 4 Argon',
+          description: '使用 Gemini 原生协议。',
+        ),
+      ],
+    ),
+    LlmProviderPreset(
+      provider: LlmProvider.claude,
+      label: 'Claude',
+      baseUrl: 'https://api.anthropic.com/v1',
+      models: [],
+      description: '刷新获取账号可用模型，或手动填写模型 ID。',
+    ),
+    LlmProviderPreset(
+      provider: LlmProvider.gemini,
+      label: 'Gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      models: [],
+      description: '刷新获取支持内容生成的模型，或手动填写模型 ID。',
+    ),
+    LlmProviderPreset(
+      provider: LlmProvider.siliconflow,
+      label: '硅基流动',
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      models: [
+        LlmModelOption(
+          id: 'deepseek-ai/DeepSeek-V4-Flash',
+          label: 'DeepSeek V4 Flash',
+          description: '通用文本模型，适合知识生成和问答。',
+        ),
+      ],
+    ),
+    LlmProviderPreset(
+      provider: LlmProvider.custom,
+      label: '自定义',
+      baseUrl: '',
+      models: [],
+      description: '支持 OpenAI-compatible 接口。',
+    ),
   ];
 
   static LlmProviderPreset? presetFor({
@@ -208,7 +281,10 @@ class LlmModelCatalog {
     final host = Uri.tryParse(baseUrl.trim())?.host.toLowerCase() ?? '';
 
     for (final preset in providerPresets) {
-      if (providerKey == preset.provider || _hostMatches(host, preset)) {
+      if (providerKey == preset.provider) return preset;
+    }
+    for (final preset in providerPresets) {
+      if (_hostMatches(host, preset)) {
         return preset;
       }
     }
@@ -257,7 +333,7 @@ class LlmModelCatalog {
     if (_endsWithSegments(segments, const ['chat', 'completions'])) {
       segments.removeLast();
       segments.removeLast();
-    } else if (_endsWithSegments(segments, const ['responses'])) {
+    } else if (const ['responses', 'messages'].contains(segments.last)) {
       segments.removeLast();
     }
 
@@ -271,6 +347,7 @@ class LlmModelCatalog {
   static Future<List<LlmModelOption>> fetchModels({
     required String baseUrl,
     required String apiKey,
+    String provider = LlmProvider.custom,
     http.Client? httpClient,
   }) async {
     final trimmedBaseUrl = baseUrl.trim();
@@ -286,34 +363,65 @@ class LlmModelCatalog {
     final shouldCloseClient = httpClient == null;
 
     try {
-      final response = await client
-          .get(
-            buildModelsEndpoint(trimmedBaseUrl),
-            headers: {'Authorization': 'Bearer $trimmedApiKey'},
-          )
-          .timeout(const Duration(seconds: 12));
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw LlmModelCatalogException(
-          '模型列表获取失败（HTTP ${response.statusCode}）：${response.body}',
-        );
-      }
-
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, Object?> || decoded['data'] is! List) {
-        throw const LlmModelCatalogException('模型列表返回格式不正确');
-      }
-
+      var endpoint = buildModelsEndpoint(trimmedBaseUrl);
       final models = <LlmModelOption>[];
-      for (final item in decoded['data'] as List<Object?>) {
-        final model = _parseRemoteModel(item);
-        if (model != null &&
-            !models.any(
-              (existing) => existing.id.toLowerCase() == model.id.toLowerCase(),
-            )) {
-          models.add(model);
+      do {
+        final response = await client
+            .get(
+              endpoint,
+              headers: LlmRequestSupport.headers(
+                provider: provider,
+                apiKey: trimmedApiKey,
+              ),
+            )
+            .timeout(const Duration(seconds: 12));
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw LlmModelCatalogException(
+            LlmRequestSupport.httpError(response, trimmedApiKey),
+          );
         }
-      }
+
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, Object?> ||
+            (decoded['data'] is! List && decoded['models'] is! List)) {
+          throw const LlmModelCatalogException('模型列表返回格式不正确');
+        }
+
+        for (final item
+            in (decoded['data'] ?? decoded['models']) as List<Object?>) {
+          if (provider == LlmProvider.gemini &&
+              item is Map &&
+              !(item['supportedGenerationMethods'] as List? ?? []).contains(
+                'generateContent',
+              )) {
+            continue;
+          }
+          final model = _parseRemoteModel(item);
+          if (model != null &&
+              !models.any(
+                (existing) =>
+                    existing.id.toLowerCase() == model.id.toLowerCase(),
+              )) {
+            models.add(model);
+          }
+        }
+        final pageToken = decoded['nextPageToken'] as String?;
+        final lastId = decoded['last_id'] as String?;
+        if (provider == LlmProvider.gemini &&
+            pageToken != null &&
+            pageToken.isNotEmpty) {
+          endpoint = endpoint.replace(
+            queryParameters: {'pageToken': pageToken},
+          );
+        } else if (provider == LlmProvider.claude &&
+            decoded['has_more'] == true &&
+            lastId != null) {
+          endpoint = endpoint.replace(queryParameters: {'after_id': lastId});
+        } else {
+          break;
+        }
+      } while (true);
 
       if (models.isEmpty) {
         throw const LlmModelCatalogException('没有从接口返回中读取到可用模型');
@@ -324,6 +432,8 @@ class LlmModelCatalog {
       throw const LlmModelCatalogException('模型列表获取超时，请稍后重试');
     } on FormatException {
       throw const LlmModelCatalogException('模型列表不是有效 JSON');
+    } on http.ClientException {
+      throw const LlmModelCatalogException('模型列表连接失败，请检查网络和接口地址；也可手动填写模型 ID');
     } finally {
       if (shouldCloseClient) {
         client.close();
@@ -340,7 +450,10 @@ class LlmModelCatalog {
       return null;
     }
 
-    final id = (item['id'] as String?)?.trim();
+    final id = ((item['id'] ?? item['name']) as String?)?.trim().replaceFirst(
+      RegExp(r'^models/'),
+      '',
+    );
     if (id == null || id.isEmpty) {
       return null;
     }
@@ -348,8 +461,13 @@ class LlmModelCatalog {
     final ownedBy = (item['owned_by'] as String?)?.trim() ?? '';
     return LlmModelOption(
       id: id,
-      label: id,
-      description: ownedBy.isEmpty ? '接口返回的可用模型。' : '接口返回：$ownedBy',
+      label: (item['displayName'] ?? item['display_name'] ?? id).toString(),
+      description:
+          (item['description'] ??
+                  (ownedBy.isEmpty
+                      ? '接口返回的模型；实际访问权限以连接测试为准。'
+                      : '接口返回：$ownedBy'))
+              .toString(),
     );
   }
 

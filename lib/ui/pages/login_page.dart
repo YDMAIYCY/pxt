@@ -171,7 +171,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      '欢迎登录拍学通',
+                      '欢迎登录智学帮',
                       textAlign: TextAlign.center,
                       style: AppTextStyles.h1(context).copyWith(
                         color: AppColors.textPrimary,

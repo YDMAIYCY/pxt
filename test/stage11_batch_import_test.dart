@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:pxt1/camera/document_input_contract.dart';
 import 'package:pxt1/database/document_batch_repository.dart';
@@ -96,6 +97,165 @@ void main() {
         '概率论讲义 第1页',
         '概率论讲义 第2页',
       ]);
+    });
+
+    for (final source in [
+      BatchDocumentInputSource.pdf,
+      BatchDocumentInputSource.document,
+    ]) {
+      test(
+        'unified document import stores $source and preserves original',
+        () async {
+          final directory = await Directory.systemTemp.createTemp(
+            'stage11-original-',
+          );
+          addTearDown(() => directory.delete(recursive: true));
+          final extension = source == BatchDocumentInputSource.pdf
+              ? 'pdf'
+              : 'pptx';
+          final original = await File(
+            p.join(directory.path, 'lecture.$extension'),
+          ).writeAsBytes([1, 2, 3]);
+          final stored = await original.copy(
+            p.join(directory.path, 'stored.$extension'),
+          );
+          final pages = <StoredDocumentPage>[];
+          for (final number in [1, 2]) {
+            final page = await File(
+              p.join(directory.path, 'page-$number.png'),
+            ).writeAsBytes([number]);
+            pages.add(
+              StoredDocumentPage(
+                savedPath: page.path,
+                originalName: 'page-$number',
+              ),
+            );
+          }
+          final repository = _RecordingDocumentBatchRepository();
+          final service = DocumentIngestService(
+            batchInputPort: _FakeBatchInputPort(
+              StoredBatchSelection(
+                source: source,
+                title: '课堂讲义',
+                originalFilePath: stored.path,
+                pages: pages,
+              ),
+            ),
+            documentBatchRepository: repository,
+          );
+
+          final batch = await service.importBatchFromInput(
+            userId: 7,
+            libraryId: 4,
+            source: BatchDocumentInputSource.document,
+          );
+
+          final isPdf = source == BatchDocumentInputSource.pdf;
+          expect(
+            batch?.sourceType,
+            isPdf
+                ? DocumentBatchSourceType.pdf
+                : DocumentBatchSourceType.document,
+          );
+          expect(
+            repository.lastPageSourceType,
+            isPdf
+                ? SourceDocumentSourceType.pdfPage
+                : SourceDocumentSourceType.officePage,
+          );
+          expect(repository.lastUserId, 7);
+          expect(repository.lastLibraryId, 4);
+          expect(batch?.originalFilePath, stored.path);
+          expect(repository.lastOriginalFilePath, stored.path);
+          expect(
+            repository.lastPages.map((page) => page.savedPath),
+            pages.map((page) => page.savedPath),
+          );
+          expect(repository.lastPages.map((page) => page.title), [
+            '课堂讲义 第1页',
+            '课堂讲义 第2页',
+          ]);
+          expect(repository.lastPages.map((page) => page.pageNumber), [1, 2]);
+          expect(batch?.pageCount, 2);
+          expect(await original.readAsBytes(), [1, 2, 3]);
+          expect(await stored.readAsBytes(), [1, 2, 3]);
+          for (var index = 0; index < pages.length; index++) {
+            expect(await File(pages[index].savedPath).readAsBytes(), [
+              index + 1,
+            ]);
+          }
+        },
+      );
+    }
+
+    test(
+      'failed Office batch removes stored files and preserves selected original',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'stage11-office-cleanup-',
+        );
+        addTearDown(() => directory.delete(recursive: true));
+        final original = await File(
+          p.join(directory.path, 'lecture.docx'),
+        ).writeAsBytes([5, 6]);
+        final stored = await original.copy(
+          p.join(directory.path, 'stored.docx'),
+        );
+        final page = await File(
+          p.join(directory.path, 'page.png'),
+        ).writeAsBytes([7]);
+        final service = DocumentIngestService(
+          batchInputPort: _FakeBatchInputPort(
+            StoredBatchSelection(
+              source: BatchDocumentInputSource.document,
+              title: '课堂讲义',
+              originalFilePath: stored.path,
+              pages: [
+                StoredDocumentPage(savedPath: page.path, originalName: 'page'),
+              ],
+            ),
+          ),
+          documentBatchRepository: _ThrowingDocumentBatchRepository(),
+        );
+
+        await expectLater(
+          service.importBatchFromInput(
+            userId: 7,
+            libraryId: 4,
+            source: BatchDocumentInputSource.document,
+          ),
+          throwsA(
+            isA<Exception>().having(
+              (error) => error.toString(),
+              'message',
+              contains('database write failed'),
+            ),
+          ),
+        );
+
+        expect(stored.existsSync(), isFalse);
+        expect(page.existsSync(), isFalse);
+        expect(await original.readAsBytes(), [5, 6]);
+      },
+    );
+
+    test('cancelled document import does not create a batch', () async {
+      final repository = _RecordingDocumentBatchRepository();
+      final service = DocumentIngestService(
+        batchInputPort: const _FakeBatchInputPort(null),
+        documentBatchRepository: repository,
+      );
+
+      expect(
+        await service.importBatchFromInput(
+          userId: 7,
+          libraryId: 4,
+          source: BatchDocumentInputSource.document,
+        ),
+        isNull,
+      );
+      expect(repository.lastUserId, isNull);
+      expect(repository.lastPages, isEmpty);
     });
 
     test(

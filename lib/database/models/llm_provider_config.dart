@@ -4,6 +4,12 @@ class LlmProvider {
   static const String minimax = 'minimax';
   static const String kimi = 'kimi';
   static const String custom = 'custom';
+  static const String openai = 'openai';
+  static const String deepseek = 'deepseek';
+  static const String opencodeGo = 'opencode_go';
+  static const String claude = 'claude';
+  static const String gemini = 'gemini';
+  static const String siliconflow = 'siliconflow';
 
   static String normalize(String? value) {
     final raw = (value ?? '').trim().toLowerCase();
@@ -16,6 +22,9 @@ class LlmProvider {
         return kimi;
       case minimax:
         return minimax;
+      case 'opencode-go':
+      case 'opencode':
+        return opencodeGo;
       default:
         return raw;
     }
@@ -28,10 +37,19 @@ class LlmApiMode {
   static const String tokenPlan = 'token_plan';
   static const String openPlatform = 'open_platform';
   static const String openAiCompatible = 'openai_compatible';
+  static const String anthropic = 'anthropic_messages';
+  static const String responses = 'responses';
+  static const String gemini = 'gemini';
+  static const String auto = 'auto';
 
   static String normalize(String? value, {String? provider}) {
     final raw = (value ?? '').trim().toLowerCase();
     switch (raw) {
+      case anthropic:
+      case responses:
+      case gemini:
+      case auto:
+        return raw;
       case tokenPlan:
       case 'token-plan':
       case 'anthropic':
@@ -65,6 +83,9 @@ class LlmProviderConfig {
     required this.maxTokens,
     required this.createdAt,
     required this.updatedAt,
+    this.displayName = '',
+    this.temperature,
+    this.responseFormat = 'auto',
   });
 
   final int? id;
@@ -77,6 +98,31 @@ class LlmProviderConfig {
   final int? maxTokens;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String displayName;
+  final double? temperature;
+  final String responseFormat;
+
+  String get effectiveApiMode {
+    if (provider == LlmProvider.claude) return LlmApiMode.anthropic;
+    if (provider == LlmProvider.gemini) return LlmApiMode.gemini;
+    if (provider == LlmProvider.opencodeGo && apiMode == LlmApiMode.auto) {
+      final id = model.toLowerCase();
+      if (id.startsWith('claude-') ||
+          id.startsWith('minimax-') ||
+          id.startsWith('qwen3.7-') ||
+          id.startsWith('qwen3.8-')) {
+        return LlmApiMode.anthropic;
+      }
+      if (id.startsWith('gpt-') ||
+          id.startsWith('grok-') ||
+          id.startsWith('muse-')) {
+        return LlmApiMode.responses;
+      }
+      if (id.startsWith('gemini-')) return LlmApiMode.gemini;
+      return LlmApiMode.openAiCompatible;
+    }
+    return apiMode;
+  }
 
   bool get isMiniMax => provider == LlmProvider.minimax;
 
@@ -85,7 +131,13 @@ class LlmProviderConfig {
   bool get usesTokenPlan => apiMode == LlmApiMode.tokenPlan;
 
   bool get usesOpenAiCompatible =>
-      !isMiniMax || isKimi || apiMode == LlmApiMode.openAiCompatible;
+      effectiveApiMode == LlmApiMode.openAiCompatible ||
+      (!isMiniMax &&
+          !const [
+            LlmApiMode.anthropic,
+            LlmApiMode.responses,
+            LlmApiMode.gemini,
+          ].contains(effectiveApiMode));
 
   bool get isConfigured {
     if (apiKey.trim().isEmpty) {
@@ -117,6 +169,11 @@ class LlmProviderConfig {
   }
 
   String get effectivePath {
+    if (effectiveApiMode == LlmApiMode.anthropic) return '/messages';
+    if (effectiveApiMode == LlmApiMode.responses) return '/responses';
+    if (effectiveApiMode == LlmApiMode.gemini) {
+      return '/models/${effectiveModel.replaceFirst(RegExp(r'^models/'), '')}:generateContent';
+    }
     if (usesOpenAiCompatible) {
       return '/chat/completions';
     }
@@ -159,6 +216,9 @@ class LlmProviderConfig {
     Object? maxTokens = _sentinel,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? displayName,
+    double? temperature,
+    String? responseFormat,
   }) {
     final nextProvider = provider == null
         ? this.provider
@@ -176,6 +236,9 @@ class LlmProviderConfig {
       maxTokens: maxTokens == _sentinel ? this.maxTokens : maxTokens as int?,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      displayName: displayName ?? this.displayName,
+      temperature: temperature ?? this.temperature,
+      responseFormat: responseFormat ?? this.responseFormat,
     );
   }
 
@@ -184,13 +247,22 @@ class LlmProviderConfig {
       'user_id': userId,
       'provider': provider,
       'api_mode': apiMode,
-      'api_key': apiKey.trim(),
+      'api_key': '',
       'base_url': _stripTrailingSlash(baseUrl.trim()),
       'model': model.trim(),
       'max_tokens': effectiveMaxTokens,
       'updated_at': updatedAt.toUtc().toIso8601String(),
     };
   }
+
+  Map<String, Object?> toSecureMap() => {
+    ...toDatabaseMap(),
+    'api_key': apiKey.trim(),
+    'created_at': createdAt.toUtc().toIso8601String(),
+    'display_name': displayName,
+    'temperature': temperature,
+    'response_format': responseFormat,
+  };
 
   factory LlmProviderConfig.emptyForUser(int userId) {
     final now = DateTime.now();
@@ -260,6 +332,9 @@ class LlmProviderConfig {
       maxTokens: map['max_tokens'] as int?,
       createdAt: DateTime.tryParse(rawCreatedAt)?.toLocal() ?? DateTime.now(),
       updatedAt: DateTime.tryParse(rawUpdatedAt)?.toLocal() ?? DateTime.now(),
+      displayName: map['display_name'] as String? ?? '',
+      temperature: (map['temperature'] as num?)?.toDouble(),
+      responseFormat: map['response_format'] as String? ?? 'auto',
     );
   }
 

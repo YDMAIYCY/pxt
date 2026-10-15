@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../common/source_document_file_store.dart';
 import 'app_database.dart';
+import 'import_record_repository.dart';
 import 'graph_repository.dart';
 import 'models/source_document_record.dart';
 
@@ -264,6 +265,12 @@ class SourceDocumentRepository {
     required int libraryId,
   }) async {
     await _database.ensureSchemaReady();
+    final records=ImportRecordRepository(database:_database);
+    final record=await records.forDocument(userId,documentId);
+    if(record!=null) {
+      await records.move(userId,record.id,libraryId);
+      return;
+    }
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
 

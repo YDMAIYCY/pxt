@@ -172,7 +172,7 @@ void main() {
     });
   });
 
-  testWidgets('Home current quick entries render without legacy AI entry', (
+  testWidgets('Home current quick entries render the new AI entry', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -189,9 +189,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('QSClaw'), findsOneWidget);
+    expect(find.text('EClaw'), findsOneWidget);
     expect(find.text('\u4e0b\u4e00\u6b65\u63a8\u8350'), findsOneWidget);
-    expect(find.textContaining('AI'), findsNothing);
+    // \u65e7\u7248 AI \u9762\u8bd5\u5165\u53e3\u7684\u5360\u4f4d\u6587\u6848\u5df2\u79fb\u9664\uff0c\u53ea\u4fdd\u7559\u65b0\u7684\u5feb\u6377\u5165\u53e3\u3002
+    expect(find.text('AI \u9762\u8bd5\u5b98'), findsNothing);
+    expect(find.text('AI \u9762\u8bd5'), findsOneWidget);
     expect(
       find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'),
       findsNothing,
@@ -215,12 +217,12 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('QSClaw'),
+      find.text('EClaw'),
       120,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('QSClaw'));
+    await tester.tap(find.text('EClaw'));
     await tester.pumpAndSettle();
 
     expect(find.text('qsclaw-chat'), findsOneWidget);

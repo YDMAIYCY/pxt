@@ -8,13 +8,15 @@ class DocumentBatchSourceType {
 
   static const String multiImage = 'multi_image';
   static const String pdf = 'pdf';
+  static const String document = 'document';
 
   static String labelOf(String value) {
     switch (value) {
       case multiImage:
-        return '\u591a\u56fe\u5bfc\u5165';
+        return '相册导入';
       case pdf:
-        return 'PDF \u5bfc\u5165';
+      case document:
+        return '文档导入';
       default:
         return '\u5b66\u4e60\u5305';
     }

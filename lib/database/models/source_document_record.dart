@@ -8,6 +8,8 @@ class SourceDocumentSourceType {
   static const String galleryImport = 'gallery_import';
   static const String pdfDocument = 'pdf_document';
   static const String pdfPage = 'pdf_page';
+  static const String officePage = 'office_page';
+  static const String feishuDocx = 'feishu_docx';
 }
 
 class SourceDocumentOcrStatus {
@@ -95,6 +97,8 @@ class SourceDocumentRecord {
 
   String get sourceTypeLabel {
     switch (sourceType) {
+      case SourceDocumentSourceType.feishuDocx:
+        return '飞书云文档';
       case SourceDocumentSourceType.cameraCapture:
         return '\u62cd\u7167';
       case SourceDocumentSourceType.galleryImport:
@@ -102,6 +106,8 @@ class SourceDocumentRecord {
       case SourceDocumentSourceType.pdfDocument:
       case SourceDocumentSourceType.pdfPage:
         return 'PDF';
+      case SourceDocumentSourceType.officePage:
+        return '文档';
       default:
         return '\u8d44\u6599';
     }

@@ -18,12 +18,17 @@ const int _maxPdfRenderLongestSide = 1600;
 const int _maxPdfRenderedPixels = 2200000;
 
 class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
-  ImageInputService({ImagePicker? picker, PdfPageRenderer? pdfPageRenderer})
-    : _picker = picker ?? ImagePicker(),
-      _pdfPageRenderer = pdfPageRenderer ?? const PdfPageRenderer();
+  ImageInputService({
+    ImagePicker? picker,
+    PdfPageRenderer? pdfPageRenderer,
+    OfficePageRenderer? officePageRenderer,
+  }) : _picker = picker ?? ImagePicker(),
+       _pdfPageRenderer = pdfPageRenderer ?? const PdfPageRenderer(),
+       _officePageRenderer = officePageRenderer ?? const OfficePageRenderer();
 
   final ImagePicker _picker;
   final PdfPageRenderer _pdfPageRenderer;
+  final OfficePageRenderer _officePageRenderer;
 
   @override
   Future<StoredImageSelection?> pickAndStoreImage({
@@ -63,7 +68,9 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
       case BatchDocumentInputSource.multiImage:
         return _pickAndStoreMultipleImages();
       case BatchDocumentInputSource.pdf:
-        return _pickAndRenderPdfPages();
+        return _pickAndRenderDocumentPages(pdfOnly: true);
+      case BatchDocumentInputSource.document:
+        return _pickAndRenderDocumentPages();
     }
   }
 
@@ -98,10 +105,14 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
     );
   }
 
-  Future<StoredBatchSelection?> _pickAndRenderPdfPages() async {
+  Future<StoredBatchSelection?> _pickAndRenderDocumentPages({
+    bool pdfOnly = false,
+  }) async {
     final picked = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['pdf'],
+      allowedExtensions: pdfOnly
+          ? const ['pdf']
+          : const ['pdf', 'doc', 'docx', 'ppt', 'pptx'],
       allowMultiple: false,
       withData: false,
     );
@@ -115,45 +126,57 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
     }
 
     final storageDirectory = await _ensureStorageDirectory();
-    final pdfCopyPath = await _copyIntoStorage(
+    final extension = p.extension(sourcePath).toLowerCase();
+    final isPdf = extension == '.pdf';
+    final documentCopyPath = await _copyIntoStorage(
       sourcePath: sourcePath,
       storageDirectory: storageDirectory,
-      prefix: 'source_pdf',
-      fallbackExtension: '.pdf',
+      prefix: 'source_document',
     );
-    final title = p.basenameWithoutExtension(sourcePath).trim();
+    final title = p.basenameWithoutExtension(picked.files.single.name).trim();
     final pages = <StoredDocumentPage>[];
 
     try {
-      final renderedPages = await _pdfPageRenderer.renderPdf(
-        pdfPath: pdfCopyPath,
-        outputDirectoryPath: storageDirectory.path,
-        outputPrefix: 'pdf_page_${DateTime.now().microsecondsSinceEpoch}',
-        maxPages: _maxPdfImportPages,
-        maxLongestSide: _maxPdfRenderLongestSide,
-        maxRenderedPixels: _maxPdfRenderedPixels,
-      );
+      final outputPrefix =
+          'document_page_${DateTime.now().microsecondsSinceEpoch}';
+      final renderedPages = isPdf
+          ? await _pdfPageRenderer.renderPdf(
+              pdfPath: documentCopyPath,
+              outputDirectoryPath: storageDirectory.path,
+              outputPrefix: outputPrefix,
+              maxPages: _maxPdfImportPages,
+              maxLongestSide: _maxPdfRenderLongestSide,
+              maxRenderedPixels: _maxPdfRenderedPixels,
+            )
+          : await _officePageRenderer.renderOffice(
+              documentPath: documentCopyPath,
+              outputDirectoryPath: storageDirectory.path,
+              outputPrefix: outputPrefix,
+              maxPages: _maxPdfImportPages,
+            );
       if (renderedPages.isEmpty) {
-        throw StateError('PDF 没有可导入的页面');
+        throw StateError('文档没有可导入的页面');
       }
 
       for (final page in renderedPages) {
         pages.add(
           StoredDocumentPage(
             savedPath: page.savedPath,
-            originalName: '${title.isEmpty ? 'PDF' : title}-${page.pageNumber}',
+            originalName: '${title.isEmpty ? '文档' : title}-${page.pageNumber}',
           ),
         );
       }
 
       return StoredBatchSelection(
-        source: BatchDocumentInputSource.pdf,
-        title: title.isEmpty ? 'PDF 资料' : title,
-        originalFilePath: pdfCopyPath,
+        source: isPdf
+            ? BatchDocumentInputSource.pdf
+            : BatchDocumentInputSource.document,
+        title: title.isEmpty ? '文档资料' : title,
+        originalFilePath: documentCopyPath,
         pages: pages,
       );
     } catch (_) {
-      await _deleteStoredPath(pdfCopyPath);
+      await _deleteStoredPath(documentCopyPath);
       for (final page in pages) {
         await _deleteStoredPath(page.savedPath);
       }
@@ -185,7 +208,7 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
       fallbackExtension: fallbackExtension,
     );
     final fileName =
-        '${prefix}_${DateTime.now().microsecondsSinceEpoch}$extension';
+        '${prefix}_${DateTime.now().microsecondsSinceEpoch}_${math.Random.secure().nextInt(1 << 32)}$extension';
     final savedPath = p.join(storageDirectory.path, fileName);
     await File(sourcePath).copy(savedPath);
     return savedPath;
@@ -204,7 +227,7 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
     final day = now.day.toString().padLeft(2, '0');
     final hour = now.hour.toString().padLeft(2, '0');
     final minute = now.minute.toString().padLeft(2, '0');
-    return '批量图片 $month-$day $hour:$minute';
+    return '相册导入 $month-$day $hour:$minute';
   }
 
   Future<void> _deleteStoredPath(String path) async {
@@ -264,6 +287,38 @@ class PdfPageRenderer {
       throw StateError('当前平台暂不支持 PDF 导入：$error');
     } on PlatformException catch (error) {
       throw StateError(error.message ?? 'PDF 渲染失败：${error.code}');
+    }
+  }
+}
+
+class OfficePageRenderer {
+  const OfficePageRenderer();
+
+  static const MethodChannel _channel = MethodChannel('pxt1/office_renderer');
+
+  Future<List<RenderedPdfPage>> renderOffice({
+    required String documentPath,
+    required String outputDirectoryPath,
+    required String outputPrefix,
+    required int maxPages,
+  }) async {
+    try {
+      final result = await _channel.invokeListMethod<Map<dynamic, dynamic>>(
+        'renderOffice',
+        <String, Object>{
+          'documentPath': documentPath,
+          'outputDirectoryPath': outputDirectoryPath,
+          'outputPrefix': outputPrefix,
+          'maxPages': maxPages,
+        },
+      );
+      return (result ?? const <Map<dynamic, dynamic>>[])
+          .map(RenderedPdfPage.fromPlatformMap)
+          .toList(growable: false);
+    } on MissingPluginException {
+      throw StateError('当前平台暂不支持 Word / PPT 文档导入');
+    } on PlatformException catch (error) {
+      throw StateError(error.message ?? '文档读取失败：${error.code}');
     }
   }
 }
