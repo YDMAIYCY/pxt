@@ -48,6 +48,18 @@ const chinese14mFiles = [
   ),
 ];
 
+/// Community mirror of the Hugging Face hub. Mainland China cannot reliably
+/// reach huggingface.co, so every file is retried here when the official host
+/// fails. Integrity is still checked against the pinned SHA-256, so a mirror
+/// cannot substitute different model bytes.
+const _mirrorHost = 'hf-mirror.com';
+const _hubHost = 'https://huggingface.co/';
+
+/// Mirror URL for a hub URL, or null when [url] does not point at the hub.
+String? _mirrorOf(String url) => url.startsWith(_hubHost)
+    ? 'https://$_mirrorHost/${url.substring(_hubHost.length)}'
+    : null;
+
 /// Explicit downloads only. The controller must display progress and cancel.
 class OfflineModelManager {
   OfflineModelManager({
@@ -152,7 +164,7 @@ class OfflineModelManager {
     Directory? stage;
     http.Client? client;
     final total = files.fold<int>(0, (n, f) => n + f.size);
-    var received = 0;
+    var completed = 0;
     try {
       callback?.call(0);
       stage = await root.createTemp('.partial-');
@@ -161,43 +173,16 @@ class OfflineModelManager {
       _client = client;
       for (final spec in files) {
         _check(generation);
-        final response = await _await(
-          client.send(http.Request('GET', Uri.parse(spec.url))),
+        await _fetchWithFallback(
+          spec: spec,
+          stage: stage,
+          client: client,
+          generation: generation,
+          completedBytes: completed,
+          totalBytes: total,
+          callback: callback,
         );
-        if (response.statusCode != 200) {
-          throw HttpException('模型下载 HTTP ${response.statusCode}');
-        }
-        final partial = File(p.join(stage.path, '${spec.name}.partial'));
-        final output = await partial.open(mode: FileMode.write);
-        final chunks = StreamIterator<List<int>>(response.stream);
-        var fileBytes = 0;
-        try {
-          while (await _await(chunks.moveNext())) {
-            _check(generation);
-            fileBytes += chunks.current.length;
-            if (fileBytes > spec.size) throw StateError('模型文件超出声明大小');
-            await output.writeFrom(chunks.current);
-            received += chunks.current.length;
-            // Reserve 100% for verified, atomically installed files.
-            progress.value = received / total * 0.99;
-            callback?.call(progress.value);
-          }
-          await output.flush();
-        } finally {
-          if (generation != _generation) client.close();
-          try {
-            await chunks.cancel().timeout(timeout);
-          } finally {
-            await output.close();
-          }
-        }
-        _check(generation);
-        if (fileBytes != spec.size ||
-            (await sha256.bind(partial.openRead()).first).toString() !=
-                spec.sha256) {
-          throw StateError('模型大小或 SHA-256 校验失败：${spec.name}');
-        }
-        await partial.rename(p.join(stage.path, spec.name));
+        completed += spec.size;
       }
       _check(generation);
       // Only incomplete installations may be removed; a valid one is reused.
@@ -226,6 +211,101 @@ class OfflineModelManager {
         downloading.value = false;
       }
     }
+  }
+
+  /// Tries the official Hugging Face host, then the mirror.
+  ///
+  /// Only transport-level failures fall back: a size or SHA-256 mismatch is
+  /// rethrown, because retrying another source would mask real corruption
+  /// rather than fix it.
+  Future<void> _fetchWithFallback({
+    required OfflineModelFile spec,
+    required Directory stage,
+    required http.Client client,
+    required int generation,
+    required int completedBytes,
+    required int totalBytes,
+    void Function(double)? callback,
+  }) async {
+    Object? lastError;
+    final mirror = _mirrorOf(spec.url);
+    for (final url in [spec.url, if (mirror != null) mirror]) {
+      _check(generation);
+      try {
+        await _fetchOne(
+          spec: spec,
+          url: url,
+          stage: stage,
+          client: client,
+          generation: generation,
+          completedBytes: completedBytes,
+          totalBytes: totalBytes,
+          callback: callback,
+        );
+        return;
+      } on VoiceCancelled {
+        rethrow;
+      } on StateError {
+        rethrow;
+      } on HttpException {
+        // The host answered. A mirror would not fix an HTTP-level rejection,
+        // and callers surface HTTP failures to the user as-is.
+        rethrow;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    // Preserve the original error type: callers distinguish timeouts from HTTP
+    // failures to decide whether a retry is worthwhile.
+    throw lastError!;
+  }
+
+  Future<void> _fetchOne({
+    required OfflineModelFile spec,
+    required String url,
+    required Directory stage,
+    required http.Client client,
+    required int generation,
+    required int completedBytes,
+    required int totalBytes,
+    void Function(double)? callback,
+  }) async {
+    final response = await _await(
+      client.send(http.Request('GET', Uri.parse(url))),
+    );
+    if (response.statusCode != 200) {
+      throw HttpException('模型下载 HTTP ${response.statusCode}（$url）');
+    }
+    final partial = File(p.join(stage.path, '${spec.name}.partial'));
+    final output = await partial.open(mode: FileMode.write);
+    final chunks = StreamIterator<List<int>>(response.stream);
+    var fileBytes = 0;
+    try {
+      while (await _await(chunks.moveNext())) {
+        _check(generation);
+        fileBytes += chunks.current.length;
+        if (fileBytes > spec.size) throw StateError('模型文件超出声明大小');
+        await output.writeFrom(chunks.current);
+        // Reserve 100% for verified, atomically installed files.
+        progress.value = (completedBytes + fileBytes) / totalBytes * 0.99;
+        callback?.call(progress.value);
+      }
+      await output.flush();
+    } finally {
+      if (generation != _generation) client.close();
+      try {
+        await chunks.cancel().timeout(timeout);
+      } finally {
+        await output.close();
+      }
+    }
+    _check(generation);
+    if (fileBytes != spec.size ||
+        (await sha256.bind(partial.openRead()).first).toString() !=
+            spec.sha256) {
+      throw StateError('模型大小或 SHA-256 校验失败：${spec.name}');
+    }
+    await partial.rename(p.join(stage.path, spec.name));
   }
 
   Future<void> _deleteOwned(Directory dir) async {

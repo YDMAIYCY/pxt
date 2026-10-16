@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "scripts": { "test": "node check.mjs" },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.10"
+  }
+}

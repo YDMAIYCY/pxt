@@ -19,7 +19,7 @@ class EClawPlanner {
       return false;
     }
     return RegExp(
-      '创建|新建|整理|移动|归类|生成|安排|规划|搜索|查找|找到|打开|进入|查询|分析错题|掌握得|掌握情况|面试报告|学习进度|演示数据|准备.*面试|开始.*专注',
+      '创建|新建|整理|移动|归类|生成|安排|规划|搜索|查找|找到|打开|进入|查询|查看|复习推荐|推荐.*复习|调整|改期|推迟|分析错题|掌握得|掌握情况|面试报告|学习进度|演示数据|准备.*面试|开始.*专注',
     ).hasMatch(text);
   }
 
@@ -46,6 +46,13 @@ class EClawPlanner {
     LlmProviderConfig? config,
     String? previousLibraryName,
   }) async {
+    if (RegExp('(安排|规划).*(今天|今日).*学习|(安排|规划).*学习.*(今天|今日)').hasMatch(command)) {
+      return _localPlan(
+        command,
+        context,
+        previousLibraryName: previousLibraryName,
+      );
+    }
     if (config?.isConfigured == true) {
       final output = await MiniMaxClient.fromConfig(config!).generateStructuredJson(
         systemPrompt:
@@ -58,7 +65,9 @@ class EClawPlanner {
 返回 {"steps":[{"tool":"工具名称","label":"简短动作","args":{}}]}。
 后续 args 可以用 @序号.字段 引用此前结果，序号从 0 开始，例如 @0.recordIds、@1.libraryId。
 整理流程应先搜索，再创建/复用知识库，再移动搜索结果，最后生成练习。
-学习规划应先读取学习状态和搜索资料，调用 prepare_learning_plan，准备练习，再使用该计划的 taskTitle 创建学习任务。
+学习规划必须先调用 query_today_tasks 和 get_review_recommendations 读取真实任务与推荐，再调用 prepare_learning_plan 提出安排。仅当用户明确要求生成新练习时才调用 create_practice_task。
+create_learning_task 必须使用提案的 taskTitle、documentId、dueAt，非全局范围不得创建未关联资料的任务。写入由执行器逐步确认。adjust_review_schedule 必须使用查询得到的真实 taskId 或 conceptId，dueAt 必须是确定的 ISO 8601 绝对时间，不得猜测对象或日期。
+导航学习任务用 target=tasks，导航知识点用 target=concept 并带真实 conceptId；query_knowledge_graph 返回的是图谱 node ID，不能当作 conceptId。
 无法执行的目标返回 {"steps":[],"reason":"原因"}。''',
       );
       final raw = output['steps'];
@@ -103,6 +112,24 @@ class EClawPlanner {
       add('seed_debug_demo_data', '创建隔离演示数据');
       return steps;
     }
+    if (RegExp('调整|改期|推迟').hasMatch(command) &&
+        RegExp('复习|任务').hasMatch(command)) {
+      final taskId = int.tryParse(
+        RegExp(r'任务\s*#?(\d+)').firstMatch(command)?.group(1) ?? '',
+      );
+      final date = RegExp(
+        r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?',
+      ).firstMatch(command)?.group(0);
+      if (taskId == null || date == null) {
+        throw StateError('请提供要调整的任务编号和具体日期时间，例如：将任务 1 的复习调整到 2026-10-16 09:00');
+      }
+      add('query_learning_tasks', '核对当前范围的学习任务');
+      add('adjust_review_schedule', '确认调整复习时间', {
+        'taskId': taskId,
+        'dueAt': date.replaceFirst(' ', 'T'),
+      });
+      return steps;
+    }
     if (RegExp('打开|进入|开始.*专注|准备.*面试').hasMatch(command)) {
       final target = command.contains('图谱')
           ? 'graph'
@@ -118,6 +145,8 @@ class EClawPlanner {
           ? 'practice'
           : command.contains('首页')
           ? 'home'
+          : RegExp('学习任务|今日任务|今天.*任务').hasMatch(command)
+          ? 'tasks'
           : 'knowledge';
       final topic = _topic(command);
       if (target == 'graph' &&
@@ -145,8 +174,17 @@ class EClawPlanner {
       add('query_wrong_questions', '查询错题');
       return steps;
     }
+    if (RegExp('复习推荐|推荐.*复习|复习什么').hasMatch(command)) {
+      add('get_review_recommendations', '读取真实复习推荐');
+      return steps;
+    }
     if (RegExp('查询|查看').hasMatch(command) && command.contains('任务')) {
-      add('query_learning_tasks', '查询学习任务');
+      add(
+        RegExp('今天|今日').hasMatch(command)
+            ? 'query_today_tasks'
+            : 'query_learning_tasks',
+        '查询学习任务',
+      );
       return steps;
     }
     if (RegExp('查询|查看').hasMatch(command) && command.contains('图谱')) {
@@ -189,6 +227,8 @@ class EClawPlanner {
       });
     }
     if (planning) {
+      add('query_today_tasks', '读取今日真实任务');
+      add('get_review_recommendations', '读取复习推荐及理由');
       add('get_learning_state', '读取学习情况');
       if (steps.where((s) => s.tool == 'search_documents').isEmpty) {
         add('search_documents', '检索复习资料', {'query': topic});
@@ -204,7 +244,7 @@ class EClawPlanner {
         'topic': topic,
       });
     }
-    if (practice || planning) {
+    if (practice) {
       final count =
           int.tryParse(
             RegExp(r'(\d+)\s*道').firstMatch(command)?.group(1) ?? '',
@@ -253,6 +293,8 @@ class EClawPlanner {
             ? '${topic.isEmpty ? '当前资料' : topic}复习：回顾资料、练习并整理错题'
             : '@$planIndex.taskTitle',
         'minutes': minutes,
+        if (planIndex >= 0) 'documentId': '@$planIndex.documentId',
+        if (planIndex >= 0) 'dueAt': '@$planIndex.dueAt',
       });
     }
     if (steps.isEmpty) {

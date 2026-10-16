@@ -13,7 +13,13 @@ Future<void> createImportRecordSchema(DatabaseExecutor db) async {
     UNIQUE(user_id, operation_id)
   )''');
   Future<void> column(String table, String name, String type) async {
+    // Skip a table that was never created: `PRAGMA table_info` returns no rows
+    // for it, which would otherwise be read as "column missing" and become an
+    // `ALTER TABLE` against a nonexistent table.
     final info = await db.rawQuery('PRAGMA table_info($table)');
+    if (info.isEmpty) {
+      return;
+    }
     if (!info.any((c) => c['name'] == name)) {
       await db.execute('ALTER TABLE $table ADD COLUMN $name $type');
     }

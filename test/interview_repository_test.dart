@@ -641,6 +641,10 @@ void main() {
       await repository.completeQuestion(1, s.id, q.id);
       await repository.finishSession(1, s.id, report: {'score': 81});
       final history = await _snapshot(db, _historyTables);
+      // The interview session legitimately writes mastery back to
+      // knowledge_concepts, so "survives reopening" must compare against the
+      // post-session state rather than the pre-interview snapshot above.
+      final beforeClose = await _snapshot(db, oldTables);
       await db.close();
 
       final reopened = await AppDatabase.openForTesting(
@@ -650,7 +654,7 @@ void main() {
       final reopenedDb = await reopened.database;
       addTearDown(reopenedDb.close);
       expect(await reopenedDb.getVersion(), AppDatabase.databaseVersion);
-      expect(await _snapshot(reopenedDb, oldTables), after);
+      expect(await _snapshot(reopenedDb, oldTables), beforeClose);
       expect(await _snapshot(reopenedDb, _historyTables), history);
       expect(await reopenedDb.rawQuery('PRAGMA foreign_key_check'), isEmpty);
     },

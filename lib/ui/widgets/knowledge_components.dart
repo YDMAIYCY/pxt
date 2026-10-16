@@ -93,7 +93,9 @@ class SourceThumbnail extends StatelessWidget {
         child: SizedBox(
           width: width,
           height: height,
-          child: source.sourceType == 'feishu_docx'
+          child: source.sourceType == 'community'
+              ? const Icon(Icons.forum_outlined, color: AppColors.primary)
+              : source.sourceType == 'feishu_docx'
               ? const Icon(Icons.description_outlined, color: AppColors.primary)
               : source.sourceType == 'pdf_document'
               ? const Icon(

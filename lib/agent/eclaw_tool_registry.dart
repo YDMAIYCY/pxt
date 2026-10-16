@@ -13,7 +13,7 @@ import '../database/practice_session_repository.dart';
 import '../database/source_document_repository.dart';
 import '../database/ocr_text_repository.dart';
 import '../debug/debug_demo_data_seeder.dart';
-import '../focus/repository/focus_repository.dart';
+import '../learning/learning_task_repository.dart';
 import '../generator/ai_generation_orchestrator.dart';
 import '../generator/library_practice_service.dart';
 import 'eclaw_context.dart';
@@ -148,6 +148,37 @@ class EClawToolRegistry {
     'recordId': 'integer',
     'documentId': 'integer',
   };
+
+  DateTime _dueAt(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null || !value.contains('T')) {
+      throw ArgumentError('dueAt 必须是包含日期和时间的 ISO 8601 时间');
+    }
+    return date;
+  }
+
+  Future<int> _conceptDocument(EClawToolCall call, EClawContext scope) async {
+    final db = await database.database;
+    final rows = await db.query(
+      'knowledge_concepts',
+      columns: ['document_id'],
+      where: 'id=? AND user_id=?',
+      whereArgs: [call.id('conceptId'), call.userId],
+    );
+    final ids = await LearningStateRepository(
+      database: database,
+    ).documentIds(call.userId, scope);
+    if (rows.isEmpty ||
+        rows.single['document_id'] == null ||
+        (ids != null && !ids.contains(rows.single['document_id']))) {
+      throw StateError('知识点不存在或不在当前范围');
+    }
+    final documentId = rows.single['document_id'] as int;
+    await KnowledgeContextRepository(
+      database: database,
+    ).validateScope(call.userId, EClawContext(documentId: documentId));
+    return documentId;
+  }
 
   void _registerBusinessTools() {
     final libraries = KnowledgeLibraryRepository(database: database);
@@ -429,8 +460,12 @@ class EClawToolRegistry {
             documentId: scope.documentId,
           );
           final weak = state['weakConcepts'] as List;
+          final recommendations = state['recommendations'] as List;
+          final tasks = state['tasks'] as List;
           if (hits.isEmpty &&
               weak.isEmpty &&
+              recommendations.isEmpty &&
+              tasks.isEmpty &&
               (state['wrongQuestions'] as List).isEmpty) {
             throw StateError('当前范围学习数据和复习证据不足，请选择有已解析资料的知识库');
           }
@@ -440,7 +475,9 @@ class EClawToolRegistry {
           }
           final review = (minutes * .30).round(),
               practice = (minutes * .45).round();
-          final names = weak.take(3).map((w) => w['name']).join('、');
+          final names = recommendations.isNotEmpty
+              ? recommendations.take(3).map((r) => r['name']).join('、')
+              : weak.take(3).map((w) => w['name']).join('、');
           final focus = names.isNotEmpty
               ? names
               : query.isNotEmpty
@@ -448,6 +485,14 @@ class EClawToolRegistry {
               : '当前知识库';
           final plan =
               '$review 分钟回顾 $focus，$practice 分钟练习，${minutes - review - practice} 分钟整理错题与回顾来源';
+          final documentId =
+              scope.documentId ??
+              recommendations.firstOrNull?['documentId'] as int? ??
+              weak.firstOrNull?['document_id'] as int? ??
+              hits.firstOrNull?.documentId ??
+              tasks.firstOrNull?['documentId'] as int?;
+          final now = DateTime.now();
+          if (documentId == null) throw StateError('当前记录没有来源资料，请选择有资料的范围后安排学习');
           return {
             'message': plan,
             'taskTitle': plan,
@@ -455,6 +500,19 @@ class EClawToolRegistry {
             'topic': focus,
             'citations': hits.map((h) => h.toJson()).toList(),
             'weakConcepts': weak,
+            'tasks': tasks,
+            'recommendations': recommendations,
+            'reason': recommendations.isEmpty
+                ? '根据当前范围已有资料与学习记录安排，未调用模型。'
+                : recommendations.first['reason'],
+            'documentId': documentId,
+            'dueAt': DateTime(
+              now.year,
+              now.month,
+              now.day,
+              23,
+              59,
+            ).toIso8601String(),
           };
         },
       ),
@@ -685,24 +743,58 @@ class EClawToolRegistry {
     register(
       EClawTool(
         name: 'create_learning_task',
-        description: '创建现有专注模块中的学习任务，用户确认后写入',
-        inputSchema: const {'title': 'string', 'minutes': 'integer'},
+        description: '在统一学习任务仓库创建任务；只能使用真实资料/知识点 ID，用户确认后写入',
+        inputSchema: const {
+          ..._scopeSchema,
+          'title': 'string',
+          'minutes': 'integer',
+          'conceptId': 'integer',
+          'dueAt': 'string',
+        },
         requiredFields: const ['title'],
         permissionLevel: ToolPermission.write,
         requiresConfirmation: true,
         execute: (c) async {
           final minutes = c.id('minutes') ?? 60;
           if (minutes > 480) throw ArgumentError('请将复习安排限制在 8 小时内');
-          final task = await FocusRepository(database: database).createTask(
+          final scope = _scope(c);
+          final learning = LearningStateRepository(database: database);
+          final ids = await learning.documentIds(c.userId, scope);
+          var documentId = scope.documentId;
+          final conceptId = c.id('conceptId');
+          if (conceptId != null) {
+            final conceptDocument = await _conceptDocument(c, scope);
+            if (documentId != null && documentId != conceptDocument) {
+              throw StateError('知识点与所选资料不一致');
+            }
+            documentId = conceptDocument;
+          }
+          documentId ??= ids?.length == 1 ? ids!.single : null;
+          if (ids != null &&
+              (documentId == null || !ids.contains(documentId))) {
+            throw StateError('请指定当前范围内的来源资料，再创建学习任务');
+          }
+          if (documentId != null) {
+            await contextRepo.validateScope(
+              c.userId,
+              EClawContext(documentId: documentId),
+            );
+          }
+          final task = await LearningTaskRepository(database: database).create(
             userId: c.userId,
             title: c.text('title'),
             estimatedPomodoros: (minutes / 25).ceil(),
+            documentId: documentId,
+            conceptId: conceptId,
+            dueAt: c.args.containsKey('dueAt') ? _dueAt(c.text('dueAt')) : null,
             operationKey: c.operationKey,
           );
           return {
             'message': '学习任务已创建：${task.title}（计划 $minutes 分钟）',
             'taskId': task.id,
-            'destination': 'focus',
+            'task': task.toJson(),
+            'destination': 'tasks',
+            ...scope.toJson(),
           };
         },
       ),
@@ -710,18 +802,152 @@ class EClawToolRegistry {
     register(
       EClawTool(
         name: 'query_learning_tasks',
-        description: '查询当前用户的专注学习任务',
+        description: '查询当前范围内统一学习任务仓库的未结束任务',
+        inputSchema: const {..._scopeSchema},
         execute: (c) async {
-          final tasks = await FocusRepository(
+          final scope = _scope(c);
+          final tasks = await LearningStateRepository(
             database: database,
-          ).fetchTasks(c.userId);
+          ).tasks(c.userId, scope);
           return {
             'message': tasks.isEmpty
                 ? '还没有学习任务。'
-                : tasks.map((t) => t.title).join('\n'),
-            'tasks': tasks.map((t) => {'id': t.id, 'title': t.title}).toList(),
-            'destination': 'focus',
+                : tasks.map((t) => t['title']).join('\n'),
+            'tasks': tasks,
+            'destination': 'tasks',
+            ...scope.toJson(),
           };
+        },
+      ),
+    );
+    register(
+      EClawTool(
+        name: 'query_today_tasks',
+        description: '读取当前范围真实今日学习任务、待练习/逾期/错题数量和进行中数量，不调用模型',
+        inputSchema: const {..._scopeSchema},
+        execute: (c) async {
+          final scope = _scope(c);
+          final data = await LearningStateRepository(
+            database: database,
+          ).dashboard(c.userId, scope);
+          final now = DateTime.now();
+          final tomorrow = DateTime(now.year, now.month, now.day + 1);
+          final today = (data['tasks'] as List)
+              .where(
+                (t) =>
+                    t['dueAt'] == null ||
+                    DateTime.parse(t['dueAt'] as String).isBefore(tomorrow),
+              )
+              .toList();
+          return {
+            'message':
+                '当前范围有 ${today.length} 项今日任务，'
+                '${data['pendingPractice']} 道待练习，${data['overduePractice']} 道逾期复习，'
+                '${data['wrongQuestions']} 道错题。',
+            ...data,
+            'tasks': today,
+            'inProgress': today
+                .where((t) => t['status'] == 'in_progress')
+                .length,
+            'destination': 'tasks',
+            ...scope.toJson(),
+          };
+        },
+      ),
+    );
+    register(
+      EClawTool(
+        name: 'get_review_recommendations',
+        description: '读取当前范围根据真实掌握度、错题和复习日期计算的推荐及理由，不调用模型',
+        inputSchema: const {..._scopeSchema},
+        execute: (c) async {
+          final scope = _scope(c);
+          final data = await LearningStateRepository(
+            database: database,
+          ).dashboard(c.userId, scope);
+          final recommendations = data['recommendations'] as List;
+          return {
+            'message': recommendations.isEmpty
+                ? '当前范围暂无有学习证据的复习推荐。'
+                : recommendations
+                      .map((r) => '${r['name']}：${r['reason']}')
+                      .join('\n'),
+            'recommendations': recommendations,
+            'destination': 'tasks',
+            ...scope.toJson(),
+          };
+        },
+      ),
+    );
+    register(
+      EClawTool(
+        name: 'adjust_review_schedule',
+        description:
+            '按真实 taskId 或 conceptId 调整复习日期（二选一），dueAt 为绝对时间；确认后写入，相同步骤不重复调整',
+        inputSchema: const {
+          ..._scopeSchema,
+          'taskId': 'integer',
+          'conceptId': 'integer',
+          'dueAt': 'string',
+        },
+        requiredFields: const ['dueAt'],
+        permissionLevel: ToolPermission.write,
+        requiresConfirmation: true,
+        execute: (c) async {
+          final scope = _scope(c);
+          if ((c.id('taskId') == null) == (c.id('conceptId') == null)) {
+            throw ArgumentError('taskId 和 conceptId 必须且只能提供一个');
+          }
+          Map<String, dynamic>? task;
+          if (c.id('conceptId') != null) {
+            await _conceptDocument(c, scope);
+          } else {
+            final tasks = await LearningStateRepository(
+              database: database,
+            ).tasks(c.userId, scope);
+            task = tasks.where((t) => t['id'] == c.id('taskId')).firstOrNull;
+            if (task == null) throw StateError('学习任务不存在、已结束或不在当前范围');
+          }
+          final dueAt = _dueAt(c.text('dueAt'));
+          final db = await database.database;
+          final receipts = await db.query(
+            'agent_operation_receipts',
+            where: 'operation_key=? AND user_id=?',
+            whereArgs: [c.operationKey, c.userId],
+          );
+          if (receipts.isNotEmpty) {
+            return Map<String, dynamic>.from(
+              jsonDecode(receipts.single['result_json'] as String) as Map,
+            );
+          }
+          final repository = LearningTaskRepository(database: database);
+          if (task == null) {
+            await repository.addConceptReview(
+              c.userId,
+              c.id('conceptId')!,
+              dueAt: dueAt,
+            );
+          } else {
+            await repository.setStatus(
+              c.userId,
+              c.id('taskId')!,
+              task['status'] as String,
+              dueAt: dueAt,
+            );
+          }
+          final result = <String, dynamic>{
+            'message': '已调整复习时间：${dueAt.toIso8601String()}',
+            if (task != null) 'taskId': task['id'],
+            if (c.id('conceptId') != null) 'conceptId': c.id('conceptId'),
+            'dueAt': dueAt.toIso8601String(),
+            'destination': 'tasks',
+            ...scope.toJson(),
+          };
+          await db.rawInsert(
+            'INSERT OR IGNORE INTO agent_operation_receipts(operation_key,user_id,result_json) VALUES(?,?,?)',
+            [c.operationKey, c.userId, jsonEncode(result)],
+          );
+          return result;
         },
       ),
     );
@@ -729,7 +955,12 @@ class EClawToolRegistry {
       EClawTool(
         name: 'navigate_to_page',
         description: '打开真实 App 页面；面试和专注在原页面开始',
-        inputSchema: const {..._scopeSchema, 'target': 'string'},
+        inputSchema: const {
+          ..._scopeSchema,
+          'target': 'string',
+          'conceptId': 'integer',
+          'taskId': 'integer',
+        },
         requiredFields: const ['target'],
         permissionLevel: ToolPermission.navigation,
         execute: (c) async {
@@ -744,13 +975,37 @@ class EClawToolRegistry {
             'interview_history',
             'focus',
             'home',
+            'tasks',
+            'concept',
           }.contains(c.text('target'))) {
             throw ArgumentError('未知页面');
+          }
+          if (c.text('target') == 'concept') {
+            if (c.id('conceptId') == null) {
+              throw ArgumentError('打开知识点需要 conceptId');
+            }
+            final documentId = await _conceptDocument(c, scope);
+            return {
+              'message': '已准备知识点入口。',
+              'destination': 'concept',
+              ...scope.toJson(),
+              'conceptId': c.id('conceptId'),
+              'documentId': documentId,
+            };
+          }
+          if (c.id('taskId') != null) {
+            final tasks = await LearningStateRepository(
+              database: database,
+            ).tasks(c.userId, scope);
+            if (!tasks.any((t) => t['id'] == c.id('taskId'))) {
+              throw StateError('任务不在当前范围');
+            }
           }
           return {
             'message': '已准备页面入口。',
             'destination': c.text('target'),
             ...scope.toJson(),
+            if (c.id('taskId') != null) 'taskId': c.id('taskId'),
           };
         },
       ),

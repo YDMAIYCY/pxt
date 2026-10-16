@@ -20,9 +20,10 @@ void main() {
   late AiChatRepository chats;
   setUp(() async {
     database = await AppDatabase.openForTesting(databaseFactoryFfi);
-    final user = await AuthRepository(
-      database: database,
-    ).register(username: 'eclaw-test', password: 'offline-test');
+    final auth = AuthRepository(database: database);
+    await auth.register(username: 'eclaw-test', password: 'offline-test');
+    final user = await auth.login(username: 'eclaw-test', password: 'offline-test');
+    expect(user.success, isTrue, reason: user.message);
     userId = user.userId!;
     libraryId = (await KnowledgeLibraryRepository(
       database: database,
@@ -178,9 +179,9 @@ void main() {
   test(
     'foreign library IDs are rejected rather than widening retrieval',
     () async {
-      final other = await AuthRepository(
-        database: database,
-      ).register(username: 'other', password: 'offline-test');
+      final auth = AuthRepository(database: database);
+      await auth.register(username: 'other', password: 'offline-test');
+      final other = await auth.login(username: 'other', password: 'offline-test');
       final foreign = (await KnowledgeLibraryRepository(
         database: database,
       ).fetchLibraries(other.userId!)).single.id;

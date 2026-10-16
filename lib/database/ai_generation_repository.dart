@@ -5,18 +5,16 @@ import 'models/ai_generation_task_record.dart';
 import 'models/ai_result_records.dart';
 import 'knowledge_graph_repository.dart';
 import '../review/review_schedule_policy.dart';
+import 'practice_session_repository.dart';
+import '../learning/learning_events.dart';
 
 class AiGenerationRepository {
   AiGenerationRepository({
     AppDatabase? database,
     KnowledgeGraphRepository? knowledgeGraphRepository,
-  }) : _database = database ?? AppDatabase.instance,
-       _knowledgeGraphRepository =
-           knowledgeGraphRepository ??
-           KnowledgeGraphRepository(database: database ?? AppDatabase.instance);
+  }) : _database = database ?? AppDatabase.instance;
 
   final AppDatabase _database;
-  final KnowledgeGraphRepository _knowledgeGraphRepository;
 
   Future<AiGenerationTaskRecord> markTaskRunning({
     required int documentId,
@@ -715,123 +713,40 @@ class AiGenerationRepository {
       where: 'id = ?',
       whereArgs: [questionId],
     );
+    LearningEvents.notify();
   }
 
   Future<void> markPracticeQuestionWrong({
     required int questionId,
     required String userAnswer,
-  }) async {
-    await _database.ensureSchemaReady();
-    final db = await _database.database;
-    final now = DateTime.now().toUtc();
-    final question = await _findPracticeQuestionById(questionId);
-    if (question == null) {
-      return;
-    }
-
-    final update = ReviewSchedulePolicy.forWrongAnswer(
-      question: question,
-      now: now,
-    );
-    await db.transaction((txn) async {
-      await txn.update(
-        AppDatabase.tablePracticeQuestions,
-        {
-          ..._scheduleUpdateMap(update),
-          'last_user_answer': userAnswer.trim(),
-          'last_reviewed_at': now.toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [questionId],
-      );
-
-      await txn.insert(AppDatabase.tableWrongQuestionExplanations, {
-        'practice_question_id': questionId,
-        'user_answer': userAnswer.trim(),
-        'correct_answer': question.answerText ?? '',
-        'explanation_text': question.analysisText ?? '',
-        'created_at': now.toIso8601String(),
-      });
-    });
-    await _knowledgeGraphRepository.updateMasteryFromPracticeQuestion(
-      questionId: questionId,
-      isCorrect: false,
-    );
-  }
+  }) => _savePracticeAnswer(questionId, userAnswer, false);
 
   Future<void> markPracticeQuestionCorrect({
     required int questionId,
     required String userAnswer,
-  }) async {
+  }) => _savePracticeAnswer(questionId, userAnswer, true);
+
+  // Legacy practice/wrong-question pages use the same evidence transaction as
+  // knowledge-library practice, so task and mastery state cannot diverge.
+  Future<void> _savePracticeAnswer(
+    int questionId,
+    String answer,
+    bool correct,
+  ) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
-    final question = await _findPracticeQuestionById(questionId);
-    if (question == null) {
-      return;
-    }
-
-    final now = DateTime.now().toUtc();
-    final update = ReviewSchedulePolicy.forCorrectAnswer(
-      question: question,
-      now: now,
+    final rows = await db.rawQuery(
+      '''SELECT d.user_id FROM practice_questions q
+      JOIN source_documents d ON d.id=q.document_id WHERE q.id=?''',
+      [questionId],
     );
-    await db.transaction((txn) async {
-      await txn.update(
-        AppDatabase.tablePracticeQuestions,
-        {
-          ..._scheduleUpdateMap(update),
-          'last_user_answer': userAnswer.trim(),
-          'last_reviewed_at': now.toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [questionId],
-      );
-
-      final parentId = question.parentQuestionId;
-      if (parentId == null ||
-          update.reviewStatus != PracticeQuestionReviewStatus.mastered) {
-        return;
-      }
-
-      final pendingSiblings = await txn.rawQuery(
-        '''
-        SELECT COUNT(*) AS count
-        FROM ${AppDatabase.tablePracticeQuestions}
-        WHERE parent_question_id = ?
-          AND review_status != ?
-        ''',
-        [parentId, PracticeQuestionReviewStatus.mastered],
-      );
-      if (_readInt(pendingSiblings.first['count']) > 0) {
-        return;
-      }
-
-      await txn.update(
-        AppDatabase.tablePracticeQuestions,
-        {
-          'review_status': PracticeQuestionReviewStatus.mastered,
-          'mastery_score': 100,
-          'correct_streak': 5,
-          'review_interval_days': 30,
-          'next_review_at': now.add(const Duration(days: 30)).toIso8601String(),
-          'last_reviewed_at': now.toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [parentId],
-      );
-      await txn.update(
-        AppDatabase.tableWrongQuestionTrainings,
-        {
-          'status': WrongQuestionTrainingStatus.completed,
-          'completed_at': now.toIso8601String(),
-        },
-        where: 'wrong_question_id = ?',
-        whereArgs: [parentId],
-      );
-    });
-    await _knowledgeGraphRepository.updateMasteryFromPracticeQuestion(
+    if (rows.isEmpty) return;
+    await PracticeSessionRepository(database: _database).submit(
+      scope: PracticeScope(userId: rows.single['user_id'] as int),
       questionId: questionId,
-      isCorrect: true,
+      requestId: 'legacy:$questionId:${DateTime.now().microsecondsSinceEpoch}',
+      answer: answer,
+      correct: correct,
     );
   }
 

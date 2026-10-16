@@ -1,12 +1,9 @@
+import 'support/empty_learning_task_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
-import 'package:pxt1/database/document_batch_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
-import 'package:pxt1/database/models/ai_result_records.dart';
-import 'package:pxt1/database/models/document_batch_record.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
 import 'package:pxt1/database/models/user_profile.dart';
@@ -19,10 +16,9 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
             authRepository: _FakeAuthRepository(),
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
             knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
             qsClawPageBuilder: () => const _MarkerPage('qsclaw-opened'),
           ),
@@ -44,10 +40,9 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
             authRepository: _FakeAuthRepository(),
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
             knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
           ),
         ),
@@ -69,10 +64,9 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
             authRepository: _FakeAuthRepository(),
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
             knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
           ),
         ),
@@ -81,15 +75,17 @@ void main() {
     await tester.pumpAndSettle();
 
     const labels = [
-      '\u5feb\u901f\u5165\u53e3',
+      '\u5f53\u524d\u4efb\u52a1',
+      '\u5b66\u4e60\u6982\u89c8',
+      '\u5feb\u6377\u64cd\u4f5c',
       '\u62cd\u7167\u8bc6\u522b',
       '\u5bfc\u5165\u8d44\u6599',
-      '\u6700\u8fd1\u5b66\u4e60\u5305',
-      '\u6700\u8fd1\u5904\u7406\u8d44\u6599',
-      '\u6700\u8fd1\u751f\u6210\u6210\u679c',
-      '\u5b66\u4e60\u7edf\u8ba1',
+      '\u4e3a\u4f60\u63a8\u8350',
+      '\u6211\u7684\u77e5\u8bc6\u5e93',
     ];
     for (final label in labels) {
+      await tester.scrollUntilVisible(find.text(label), 120);
+      await tester.pumpAndSettle();
       expect(find.text(label), findsOneWidget);
     }
 
@@ -139,44 +135,16 @@ class _FakeSourceDocumentRepository extends SourceDocumentRepository {
   }
 }
 
-class _FakeDocumentBatchRepository extends DocumentBatchRepository {
-  @override
-  Future<List<DocumentBatchRecord>> fetchRecentBatches({
-    required int userId,
-    int? libraryId,
-    int limit = 20,
-  }) async {
-    return const [];
-  }
-}
-
 class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
   @override
-  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId) async {
+  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId, {String source = 'all'}) async {
     return const [];
   }
-}
 
-class _FakeAiGenerationRepository extends AiGenerationRepository {
   @override
-  Future<List<GeneratedContentRecord>> fetchRecentGeneratedContents({
+  Future<List<KnowledgeLibraryStudySummary>> fetchStudySummaries({
     required int userId,
-    int? libraryId,
-    int limit = 12,
   }) async {
     return const [];
-  }
-
-  @override
-  Future<StudyOverviewStats> fetchStudyOverviewStats(int userId) async {
-    return const StudyOverviewStats(
-      documentCount: 0,
-      ocrSuccessCount: 0,
-      generatedResultCount: 0,
-      practiceQuestionCount: 0,
-      pendingPracticeCount: 0,
-      wrongQuestionCount: 0,
-      masteredQuestionCount: 0,
-    );
   }
 }

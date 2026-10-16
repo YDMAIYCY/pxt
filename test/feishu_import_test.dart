@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:path/path.dart' as path_util;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:pxt1/database/app_database.dart';
@@ -178,7 +179,7 @@ void main() {
         path: path,
       );
       final migratedDb = await migrated.database;
-      expect(await migratedDb.getVersion(), 22);
+      expect(await migratedDb.getVersion(), AppDatabase.databaseVersion);
       expect((await migratedDb.query('source_documents')).single['id'], 7);
       expect(
         (await migratedDb.query('knowledge_cards')).single['content'],
@@ -188,6 +189,9 @@ void main() {
       expect(await migratedDb.rawQuery('PRAGMA foreign_key_check'), isEmpty);
       await migratedDb.close();
       await databaseFactoryFfi.deleteDatabase(path);
+      for (final backup in directory.listSync().where((file) => file is File && path_util.basename(file.path).startsWith('${path_util.basename(path)}.before-community-') && file.path.endsWith('.bak'))) {
+        backup.deleteSync();
+      }
       directory.deleteSync();
     },
   );
@@ -251,7 +255,7 @@ void main() {
         path: path,
       );
       final next = await upgraded.database;
-      expect(await next.getVersion(), 22);
+      expect(await next.getVersion(), AppDatabase.databaseVersion);
       expect(
         (await next.query('feishu_documents')).single['source_id'],
         source['source_id'],
@@ -268,6 +272,9 @@ void main() {
       expect(await next.rawQuery('PRAGMA foreign_key_check'), isEmpty);
       await next.close();
       await databaseFactoryFfi.deleteDatabase(path);
+      for (final backup in directory.listSync().where((file) => file is File && path_util.basename(file.path).startsWith('${path_util.basename(path)}.before-community-') && file.path.endsWith('.bak'))) {
+        backup.deleteSync();
+      }
       directory.deleteSync();
     },
   );

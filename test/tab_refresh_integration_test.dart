@@ -1,3 +1,4 @@
+import 'support/empty_learning_task_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -15,6 +16,7 @@ import 'package:pxt1/database/models/llm_provider_config.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
 import 'package:pxt1/database/models/user_profile.dart';
 import 'package:pxt1/database/source_document_repository.dart';
+import 'package:pxt1/learning/learning_task_repository.dart';
 import 'package:pxt1/ui/pages/tabs/home_tab_page.dart';
 import 'package:pxt1/ui/pages/tabs/knowledge_tab_page.dart';
 import 'package:pxt1/ui/pages/tabs/profile_tab_page.dart';
@@ -25,39 +27,37 @@ void main() {
     testWidgets('HomeTabPage reloads when refreshVersion changes', (
       tester,
     ) async {
-      final sourceDocuments = _FakeSourceDocumentRepository();
+      final libraries = _FakeKnowledgeLibraryRepository();
 
       await tester.pumpWidget(
         _wrap(
           HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
             refreshVersion: 0,
             authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: sourceDocuments,
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
-            knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+            sourceDocumentRepository: _FakeSourceDocumentRepository(),
+            knowledgeLibraryRepository: libraries,
           ),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(sourceDocuments.recentCalls, 1);
+      expect(libraries.summaryCalls, 1);
 
       await tester.pumpWidget(
         _wrap(
           HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
             refreshVersion: 1,
             authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: sourceDocuments,
-            aiGenerationRepository: _FakeAiGenerationRepository(),
-            documentBatchRepository: _FakeDocumentBatchRepository(),
-            knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+            sourceDocumentRepository: _FakeSourceDocumentRepository(),
+            knowledgeLibraryRepository: libraries,
           ),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(sourceDocuments.recentCalls, 2);
+      expect(libraries.summaryCalls, 2);
     });
 
     testWidgets('KnowledgeTabPage reloads when refreshVersion changes', (
@@ -104,35 +104,37 @@ void main() {
     testWidgets('TasksTabPage reloads when refreshVersion changes', (
       tester,
     ) async {
-      final sourceDocuments = _FakeSourceDocumentRepository();
+      final tasks = _CountingLearningTaskRepository();
 
       await tester.pumpWidget(
         _wrap(
           TasksTabPage(
             refreshVersion: 0,
             authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: sourceDocuments,
+            sourceDocumentRepository: _FakeSourceDocumentRepository(),
             aiGenerationRepository: _FakeAiGenerationRepository(),
+            learningTaskRepository: tasks,
           ),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(sourceDocuments.allCalls, 1);
+      expect(tasks.dashboardCalls, 1);
 
       await tester.pumpWidget(
         _wrap(
           TasksTabPage(
             refreshVersion: 1,
             authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: sourceDocuments,
+            sourceDocumentRepository: _FakeSourceDocumentRepository(),
             aiGenerationRepository: _FakeAiGenerationRepository(),
+            learningTaskRepository: tasks,
           ),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(sourceDocuments.allCalls, 2);
+      expect(tasks.dashboardCalls, 2);
     });
 
     testWidgets('ProfileTabPage reloads when refreshVersion changes', (
@@ -178,11 +180,10 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
           refreshVersion: 0,
           authRepository: _FakeAuthRepository(),
           sourceDocumentRepository: _FakeSourceDocumentRepository(),
-          aiGenerationRepository: _FakeAiGenerationRepository(),
-          documentBatchRepository: _FakeDocumentBatchRepository(),
           knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
         ),
       ),
@@ -190,7 +191,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('EClaw'), findsOneWidget);
-    expect(find.text('\u4e0b\u4e00\u6b65\u63a8\u8350'), findsOneWidget);
+    expect(find.text('\u4e3a\u4f60\u63a8\u8350'), findsOneWidget);
     // \u65e7\u7248 AI \u9762\u8bd5\u5165\u53e3\u7684\u5360\u4f4d\u6587\u6848\u5df2\u79fb\u9664\uff0c\u53ea\u4fdd\u7559\u65b0\u7684\u5feb\u6377\u5165\u53e3\u3002
     expect(find.text('AI \u9762\u8bd5\u5b98'), findsNothing);
     expect(find.text('AI \u9762\u8bd5'), findsOneWidget);
@@ -204,11 +205,10 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         HomeTabPage(
+            learningTaskRepository: EmptyLearningTaskRepository(),
           refreshVersion: 0,
           authRepository: _FakeAuthRepository(),
           sourceDocumentRepository: _FakeSourceDocumentRepository(),
-          aiGenerationRepository: _FakeAiGenerationRepository(),
-          documentBatchRepository: _FakeDocumentBatchRepository(),
           knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
           qsClawPageBuilder: () => const _MarkerPage('qsclaw-chat'),
         ),
@@ -294,10 +294,24 @@ class _FakeAuthRepository extends AuthRepository {
   Future<UserProfile?> getCurrentUserProfile() async => _testUser;
 }
 
-class _FakeSourceDocumentRepository extends SourceDocumentRepository {
-  int recentCalls = 0;
-  int allCalls = 0;
+class _CountingLearningTaskRepository extends LearningTaskRepository {
+  int dashboardCalls = 0;
 
+  @override
+  Future<LearningDashboard> dashboard(int userId) async {
+    dashboardCalls++;
+    return const LearningDashboard(
+      tasks: [],
+      recommendations: [],
+      pendingPractice: 0,
+      overduePractice: 0,
+      wrongQuestions: 0,
+      inProgress: 0,
+    );
+  }
+}
+
+class _FakeSourceDocumentRepository extends SourceDocumentRepository {
   @override
   Future<List<SourceDocumentRecord>> fetchRecentSourceDocuments({
     required int userId,
@@ -305,7 +319,6 @@ class _FakeSourceDocumentRepository extends SourceDocumentRepository {
     bool includeBatchPages = true,
     int limit = 5,
   }) async {
-    recentCalls++;
     return const [];
   }
 
@@ -315,7 +328,6 @@ class _FakeSourceDocumentRepository extends SourceDocumentRepository {
     int? libraryId,
     int limit = 100,
   }) async {
-    allCalls++;
     return const [];
   }
 }
@@ -333,9 +345,10 @@ class _FakeDocumentBatchRepository extends DocumentBatchRepository {
 
 class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
   int fetchCalls = 0;
+  int summaryCalls = 0;
 
   @override
-  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId) async {
+  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId, {String source = 'all'}) async {
     fetchCalls++;
     return [
       KnowledgeLibraryRecord(
@@ -346,6 +359,14 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
         updatedAt: DateTime(2026, 5, 29),
       ),
     ];
+  }
+
+  @override
+  Future<List<KnowledgeLibraryStudySummary>> fetchStudySummaries({
+    required int userId,
+  }) async {
+    summaryCalls++;
+    return const [];
   }
 }
 

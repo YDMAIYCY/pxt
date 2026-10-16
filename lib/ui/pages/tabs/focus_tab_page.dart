@@ -7,61 +7,73 @@ import 'package:flutter/material.dart';
 import '../../../database/auth_repository.dart';
 import '../../../database/models/user_profile.dart';
 import '../../../focus/models/pomodoro_task.dart';
+import '../../../focus/models/pomodoro_record.dart';
 import '../../../focus/models/checkin_record.dart';
 import '../../../focus/repository/focus_repository.dart';
+import '../../../learning/learning_events.dart';
+import '../../../learning/learning_task_repository.dart';
 import '../../theme/app_theme.dart';
 
+const _focusBlue = Color(0xFF3068E9);
+const _focusBackground = Color(0xFFF7F9FC);
 const List<Color> _pieColors = [
+  Color(0xFF3068E9),
   Color(0xFF14B8A6),
-  Color(0xFF4FA3FF),
   Color(0xFF9B7BFF),
   Color(0xFFFF8A3D),
-  Color(0xFFF4A261),
   Color(0xFFEF4444),
   Color(0xFF2FBF71),
   Color(0xFFE879F9),
+  Color(0xFFF4A261),
 ];
 
 class FocusTabPage extends StatefulWidget {
   const FocusTabPage({
     this.authRepository,
     this.focusRepository,
+    this.learningTaskRepository,
     this.tabIndex,
     this.refreshListenable,
     this.activeTabListenable,
+    this.selectedTaskListenable,
+    this.initialTaskId,
     this.onDataChanged,
     super.key,
   });
 
   final AuthRepository? authRepository;
   final FocusRepository? focusRepository;
+  final LearningTaskRepository? learningTaskRepository;
   final int? tabIndex;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
+  final ValueListenable<int?>? selectedTaskListenable;
+  final int? initialTaskId;
   final VoidCallback? onDataChanged;
 
   @override
   State<FocusTabPage> createState() => _FocusTabPageState();
 }
 
-class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMixin {
+class _FocusTabPageState extends State<FocusTabPage>
+    with WidgetsBindingObserver {
   late final AuthRepository _authRepository;
   late final FocusRepository _focusRepository;
-
+  late final LearningTaskRepository _learningTasks;
   UserProfile? _user;
   FocusStats? _stats;
   List<PomodoroTask> _tasks = [];
-  List<TaskTimeStat> _todayStats = [];
-  List<TaskTimeStat> _weekStats = [];
-  List<TaskTimeStat> _monthStats = [];
-  bool _isLoading = true;
-  bool _reloadScheduled = false;
-
-  // Timer state
-  bool _isTimerRunning = false;
+  List<PomodoroRecord> _records = [];
+  PomodoroRecord? _activeRecord;
+  int? _selectedTaskId;
+  int? _requestedTaskId;
   int _secondsElapsed = 0;
-  int? _activeTaskId;
-  int? _activeRecordId;
+  int _period = 0;
+  bool _isLoading = true;
+  bool _loading = false;
+  bool _reloadPending = false;
+  bool _busy = false;
+  String? _error;
   Timer? _timer;
 
   @override
@@ -69,14 +81,25 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
     super.initState();
     _authRepository = widget.authRepository ?? AuthRepository();
     _focusRepository = widget.focusRepository ?? FocusRepository();
+    _learningTasks = widget.learningTaskRepository ?? LearningTaskRepository();
+    WidgetsBinding.instance.addObserver(this);
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
+    widget.selectedTaskListenable?.addListener(_handleSelectedTask);
+    LearningEvents.changed.addListener(_handleExternalRefresh);
+    _requestedTaskId =
+        widget.initialTaskId ?? widget.selectedTaskListenable?.value;
     _loadData();
   }
 
   @override
   void didUpdateWidget(covariant FocusTabPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTaskId != widget.initialTaskId &&
+        widget.initialTaskId != null) {
+      _requestedTaskId = widget.initialTaskId;
+      _handleExternalRefresh();
+    }
     if (oldWidget.refreshListenable != widget.refreshListenable) {
       oldWidget.refreshListenable?.removeListener(_handleExternalRefresh);
       widget.refreshListenable?.addListener(_handleExternalRefresh);
@@ -85,378 +108,903 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
       oldWidget.activeTabListenable?.removeListener(_handleExternalRefresh);
       widget.activeTabListenable?.addListener(_handleExternalRefresh);
     }
+    if (oldWidget.selectedTaskListenable != widget.selectedTaskListenable) {
+      oldWidget.selectedTaskListenable?.removeListener(_handleSelectedTask);
+      widget.selectedTaskListenable?.addListener(_handleSelectedTask);
+      _handleSelectedTask();
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     widget.refreshListenable?.removeListener(_handleExternalRefresh);
     widget.activeTabListenable?.removeListener(_handleExternalRefresh);
+    widget.selectedTaskListenable?.removeListener(_handleSelectedTask);
+    LearningEvents.changed.removeListener(_handleExternalRefresh);
     super.dispose();
   }
 
-  bool get _canHandleExternalRefresh {
-    final tabIndex = widget.tabIndex;
-    final activeTab = widget.activeTabListenable?.value;
-    return tabIndex == null || activeTab == null || activeTab == tabIndex;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _handleExternalRefresh();
   }
+
+  bool get _isVisible =>
+      widget.tabIndex == null ||
+      widget.activeTabListenable == null ||
+      widget.activeTabListenable!.value == widget.tabIndex;
 
   void _handleExternalRefresh() {
-    if (!_canHandleExternalRefresh) return;
-    _scheduleReload();
+    if (!_isVisible || !mounted) return;
+    if (_busy || _loading) {
+      _reloadPending = true;
+      return;
+    }
+    _loadData();
   }
 
-  void _scheduleReload() {
-    if (!mounted || _reloadScheduled) return;
-    _reloadScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _reloadScheduled = false;
-      _loadData();
-    });
+  void _handleSelectedTask() {
+    _requestedTaskId = widget.selectedTaskListenable?.value;
+    _handleExternalRefresh();
   }
 
   Future<void> _loadData() async {
+    if (_loading || _busy) {
+      _reloadPending = true;
+      return;
+    }
+    _loading = true;
     try {
       await _authRepository.ensureInitialized();
       await _focusRepository.ensureInitialized();
       final user = await _authRepository.getCurrentUserProfile();
-      if (user == null) return;
-
-      final stats = await _focusRepository.fetchStats(user.id);
+      if (user == null) throw StateError('请先登录后使用专注');
+      await _learningTasks.reconcile(user.id);
       final tasks = await _focusRepository.fetchTasks(user.id);
-
+      final stats = await _focusRepository.fetchStats(user.id);
+      final active = await _focusRepository.restoreActiveRecord(user.id);
       final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final weekStart = todayStart.subtract(Duration(days: now.weekday - 1));
-      final monthStart = DateTime(now.year, now.month, 1);
-
-      final todayStats = await _focusRepository.fetchTaskTimeStats(
+      final today = DateTime(now.year, now.month, now.day);
+      final week = today.subtract(Duration(days: now.weekday - 1));
+      final month = DateTime(now.year, now.month);
+      final records = await _focusRepository.fetchRecords(
         userId: user.id,
-        fromDate: todayStart,
+        fromDate: week.isBefore(month) ? week : month,
         toDate: now,
       );
-      final weekStats = await _focusRepository.fetchTaskTimeStats(
-        userId: user.id,
-        fromDate: weekStart,
-        toDate: now,
-      );
-      final monthStats = await _focusRepository.fetchTaskTimeStats(
-        userId: user.id,
-        fromDate: monthStart,
-        toDate: now,
-      );
-
       if (!mounted) return;
       setState(() {
         _user = user;
-        _stats = stats;
         _tasks = tasks;
-        _todayStats = todayStats;
-        _weekStats = weekStats;
-        _monthStats = monthStats;
+        _stats = stats;
+        _records = records.where((r) => r.completed).toList();
+        _activeRecord = active;
+        _error = null;
         _isLoading = false;
+        if (active != null) {
+          _selectedTaskId = active.taskId;
+        } else if (_requestedTaskId != null) {
+          if (tasks.any((t) => t.id == _requestedTaskId)) {
+            _selectedTaskId = _requestedTaskId;
+          } else {
+            _error = '所选任务不可用，请重新选择';
+          }
+          _requestedTaskId = null;
+        } else if (!tasks.any((t) => t.id == _selectedTaskId)) {
+          _selectedTaskId = null;
+        }
       });
+      _syncClock();
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = '加载失败：$e';
+        });
+      }
+    } finally {
+      _loading = false;
+      if (_reloadPending && mounted) {
+        _reloadPending = false;
+        _handleExternalRefresh();
+      }
     }
   }
 
   void _showMessage(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
-  // ========== Timer Logic ==========
-
-  void _startTimer(int taskId) {
+  Future<void> _save(Future<void> Function() action) async {
+    if (_busy || _loading || !mounted) return;
     setState(() {
-      _isTimerRunning = true;
-      _activeTaskId = taskId;
-      _secondsElapsed = 0;
+      _busy = true;
+      _error = null;
     });
-    _startActiveTimer();
-    _createTimerRecord(taskId);
-  }
-
-  void _pauseTimer() {
-    _timer?.cancel();
-    setState(() => _isTimerRunning = false);
-  }
-
-  void _resumeTimer() {
-    setState(() => _isTimerRunning = true);
-    _startActiveTimer();
-  }
-
-  void _stopTimer() {
-    _timer?.cancel();
-    final elapsed = _secondsElapsed;
-    if (_activeRecordId != null) {
-      _focusRepository.completeRecord(_activeRecordId!, elapsed);
-    }
-    _updateCheckinAfterFocus(elapsed);
-    setState(() {
-      _isTimerRunning = false;
-      _activeTaskId = null;
-      _activeRecordId = null;
-      _secondsElapsed = 0;
-    });
-  }
-
-  void _startActiveTimer() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() {
-        _secondsElapsed++;
-      });
-    });
-  }
-
-  Future<void> _updateCheckinAfterFocus(int elapsedSeconds) async {
-    if (_user == null || elapsedSeconds <= 0) return;
-    await _focusRepository.checkInToday(_user!.id);
-    final stats = await _focusRepository.fetchStats(_user!.id);
-    final seconds = stats.todaySeconds + elapsedSeconds;
-    final count = stats.todayPomodoros + 1;
-    await _focusRepository.updateCheckinStudyTime(_user!.id, seconds, count);
-    if (mounted) {
-      final newStats = await _focusRepository.fetchStats(_user!.id);
-      final newToday = await _focusRepository.fetchTaskTimeStats(
-        userId: _user!.id,
-        fromDate: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
-        toDate: DateTime.now(),
-      );
-      setState(() {
-        _stats = newStats;
-        _todayStats = newToday;
-      });
+    try {
+      await action();
       widget.onDataChanged?.call();
+    } catch (e) {
+      if (mounted) setState(() => _error = '保存失败：$e');
+      _showMessage('保存失败：$e');
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+        // Repository events emitted by this save are coalesced into one reload.
+        _reloadPending = false;
+        await _loadData();
+      }
     }
   }
 
-  Future<void> _createTimerRecord(int taskId) async {
-    if (_user == null) return;
-    final record = await _focusRepository.startRecord(
-      userId: _user!.id,
-      taskId: taskId,
-      pomodoroMode: '正向',
-    );
-    if (mounted) setState(() => _activeRecordId = record.id);
+  void _syncClock() {
+    _timer?.cancel();
+    void tick() {
+      if (!mounted) return;
+      final record = _activeRecord;
+      setState(
+        () => _secondsElapsed = record?.elapsedSecondsAt(DateTime.now()) ?? 0,
+      );
+      if (record != null &&
+          record.isRunning &&
+          record.targetSeconds > 0 &&
+          _secondsElapsed >= record.targetSeconds &&
+          !_busy &&
+          !_loading) {
+        _finishTimer();
+      }
+    }
+
+    tick();
+    if (_activeRecord?.isRunning == true) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) => tick());
+    }
+    // A restored timer may already have reached its target.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final record = _activeRecord;
+      if (mounted &&
+          !_busy &&
+          !_loading &&
+          record?.isRunning == true &&
+          record!.targetSeconds > 0 &&
+          record.elapsedSecondsAt(DateTime.now()) >= record.targetSeconds) {
+        _finishTimer();
+      }
+    });
   }
 
-  // ========== Task CRUD ==========
+  Future<void> _startTimer() async {
+    if (_user == null || _activeRecord != null) return;
+    if (_selectedTaskId == null) {
+      await _chooseTask();
+      return;
+    }
+    await _save(() async {
+      _activeRecord = await _focusRepository.startRecord(
+        userId: _user!.id,
+        taskId: _selectedTaskId!,
+        pomodoroMode: '正向',
+      );
+    });
+  }
 
-  Future<void> _addTask() async {
-    final controller = TextEditingController();
-    final title = await showDialog<String>(
+  Future<void> _pauseOrResume() async {
+    final record = _activeRecord;
+    if (record == null) return;
+    await _save(() async {
+      _activeRecord = record.isRunning
+          ? await _focusRepository.pauseRecord(record.id)
+          : await _focusRepository.resumeRecord(record.id);
+    });
+  }
+
+  Future<void> _finishTimer() async {
+    final record = _activeRecord;
+    if (record == null) return;
+    await _save(() async {
+      await _focusRepository.completeRecord(record.id, _secondsElapsed);
+      _activeRecord = null;
+    });
+  }
+
+  Future<void> _chooseTask() async {
+    if (_busy || _activeRecord != null) return;
+    final id = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * .6,
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  '选择专注任务',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Expanded(
+                child: _tasks.isEmpty
+                    ? const Center(child: Text('请先添加一个待办任务'))
+                    : ListView(
+                        children: _tasks
+                            .map(
+                              (t) => ListTile(
+                                title: Text(t.title),
+                                subtitle: Text(
+                                  '预估 ${t.estimatedPomodoros} 个番茄',
+                                ),
+                                trailing: t.id == _selectedTaskId
+                                    ? const Icon(Icons.check, color: _focusBlue)
+                                    : null,
+                                onTap: () => Navigator.pop(ctx, t.id),
+                              ),
+                            )
+                            .toList(),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (id != null && mounted && _activeRecord == null) {
+      setState(() => _selectedTaskId = id);
+    }
+  }
+
+  Future<void> _editTask([PomodoroTask? task]) async {
+    if (_busy || _user == null) return;
+    final title = TextEditingController(text: task?.title ?? '');
+    final estimate = TextEditingController(
+      text: '${task?.estimatedPomodoros ?? 1}',
+    );
+    final form = GlobalKey<FormState>();
+    final route = DialogRoute<(String, int)>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('新建待办'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: '输入任务名称'),
-          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        title: Text(task == null ? '新建待办' : '编辑待办'),
+        content: Form(
+          key: form,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: title,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: '任务名称'),
+                validator: (v) =>
+                    (v?.trim().isEmpty ?? true) ? '请输入任务名称' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: estimate,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: '预估番茄数（1–99）'),
+                validator: (v) {
+                  final n = int.tryParse(v ?? '');
+                  return n == null || n < 1 || n > 99 ? '请输入 1–99' : null;
+                },
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: const Text('创建'),
+            onPressed: () {
+              if (form.currentState!.validate()) {
+                Navigator.pop(ctx, (
+                  title.text.trim(),
+                  int.parse(estimate.text),
+                ));
+              }
+            },
+            child: const Text('保存'),
           ),
         ],
       ),
     );
-    if (title == null || title.isEmpty) return;
-    if (_user == null) return;
-    await _focusRepository.createTask(userId: _user!.id, title: title);
-    final tasks = await _focusRepository.fetchTasks(_user!.id);
-    if (mounted) setState(() => _tasks = tasks);
+    final result = await Navigator.of(context).push(route);
+    unawaited(
+      route.completed.then((_) {
+        title.dispose();
+        estimate.dispose();
+      }),
+    );
+    if (result == null || !mounted) return;
+    await _save(() async {
+      if (task == null) {
+        final created = await _focusRepository.createTask(
+          userId: _user!.id,
+          title: result.$1,
+          estimatedPomodoros: result.$2,
+        );
+        _selectedTaskId ??= created.id;
+      } else {
+        await _focusRepository.updateTask(
+          task.copyWith(title: result.$1, estimatedPomodoros: result.$2),
+        );
+      }
+    });
   }
 
   Future<void> _deleteTask(PomodoroTask task) async {
+    if (_activeRecord?.taskId == task.id) {
+      _showMessage('请先结束该任务的专注');
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('删除任务'),
-        content: Text('确定删除「${task.title}」吗？'),
+        content: Text('确定删除「${task.title}」吗？专注记录会保留。'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('取消'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            onPressed: () => Navigator.of(ctx).pop(true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: const Text('删除'),
           ),
         ],
       ),
     );
-    if (confirmed == true) {
-      await _focusRepository.deleteTask(task.id);
-      final tasks = await _focusRepository.fetchTasks(_user!.id);
-      if (mounted) setState(() => _tasks = tasks);
+    if (confirmed == true && mounted) {
+      await _save(
+        () => _focusRepository.deleteTask(task.id, userId: _user!.id),
+      );
     }
   }
 
-  // ========== Checkin ==========
-
   Future<void> _doCheckin() async {
-    if (_user == null) return;
-    if (_stats?.isCheckedInToday == true) {
-      _showMessage('今日已打卡！');
-      return;
-    }
-    final record = await _focusRepository.checkInToday(_user!.id);
-    if (record != null && mounted) {
-      final stats = await _focusRepository.fetchStats(_user!.id);
-      setState(() => _stats = stats);
-      _showMessage('打卡成功！');
-      widget.onDataChanged?.call();
-    }
+    if (_user == null || _stats?.isCheckedInToday == true) return;
+    await _save(() async {
+      await _focusRepository.checkInToday(_user!.id);
+    });
   }
 
   Future<void> _showCheckinCalendar() async {
-    if (_user == null) return;
-    final now = DateTime.now();
-    final records = await _focusRepository.fetchCheckins(
-      userId: _user!.id,
-      year: now.year,
-      month: now.month,
-    );
-    final totalPoints = await _focusRepository.getTotalPoints(_user!.id);
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _CheckinCalendarPage(
-          records: records,
-          currentMonth: now,
-          totalPoints: totalPoints,
-          focusRepository: _focusRepository,
-          userId: _user!.id,
+    if (_user == null || _busy) return;
+    try {
+      final now = DateTime.now();
+      final records = await _focusRepository.fetchCheckins(
+        userId: _user!.id,
+        year: now.year,
+        month: now.month,
+      );
+      final points = await _focusRepository.getTotalPoints(_user!.id);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => _CheckinCalendarPage(
+            records: records,
+            currentMonth: now,
+            totalPoints: points,
+            focusRepository: _focusRepository,
+            userId: _user!.id,
+          ),
         ),
-      ),
-    );
-    if (mounted) {
-      final stats = await _focusRepository.fetchStats(_user!.id);
-      setState(() => _stats = stats);
+      );
+      if (mounted) await _loadData();
+    } catch (e) {
+      _showMessage('日历加载失败：$e');
     }
   }
 
-  // ========== Build ==========
-
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: _focusBlue));
+    }
+    return Material(
+      color: _focusBackground,
+      child: RefreshIndicator(
+        onRefresh: _loadData,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '专注',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF17233B),
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        '把时间留给重要的事',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF8A94A6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '打卡日历',
+                  onPressed: _busy ? null : _showCheckinCalendar,
+                  icon: const Icon(
+                    Icons.calendar_month_outlined,
+                    color: _focusBlue,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _busy ? null : _loadData,
+                      child: const Text('重试'),
+                    ),
+                  ],
+                ),
+              ),
+            _buildCheckin(),
+            const SizedBox(height: 16),
+            _buildStats(),
+            const SizedBox(height: 20),
+            _buildTimer(),
+            const SizedBox(height: 20),
+            _buildTasks(),
+            const SizedBox(height: 20),
+            _buildRecords(),
+          ],
+        ),
+      ),
+    );
+  }
 
-    return RefreshIndicator(
-      onRefresh: () async => _loadData(),
-      child: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildCheckinBanner(),
-                  const SizedBox(height: 14),
-                  _buildTimerCard(),
-                  const SizedBox(height: 14),
-                  _buildTaskList(),
-                  const SizedBox(height: 14),
-                  _buildStatsSection(),
-                ],
+  Widget _card(Widget child) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFEDF0F6)),
+    ),
+    child: child,
+  );
+
+  Widget _buildCheckin() => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: _focusBlue,
+      borderRadius: BorderRadius.circular(18),
+    ),
+    child: Row(
+      children: [
+        const Icon(
+          Icons.local_fire_department_rounded,
+          color: Colors.white,
+          size: 30,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '专注打卡',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '已连续打卡 ${_stats?.currentStreak ?? 0} 天',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        TextButton(
+          style: TextButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: _focusBlue,
+          ),
+          onPressed: _busy || _stats?.isCheckedInToday == true
+              ? null
+              : _doCheckin,
+          child: Text(
+            _stats?.isCheckedInToday == true ? '已打卡' : '打卡',
+            style: const TextStyle(
+              color: _focusBlue,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildStats() {
+    final values = [
+      _formatSeconds(_stats?.todaySeconds ?? 0),
+      '${_stats?.todayPomodoros ?? 0}个',
+      '${_stats?.totalPoints ?? 0}',
+    ];
+    const labels = ['今日专注', '完成番茄', '累计积分'];
+    return Row(
+      children: List.generate(
+        3,
+        (i) => Expanded(
+          child: Container(
+            margin: EdgeInsets.only(right: i < 2 ? 8 : 0),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    values[i],
+                    style: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      color: _focusBlue,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  labels[i],
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF8A94A6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimer() {
+    final record = _activeRecord;
+    final task = _tasks.where((t) => t.id == _selectedTaskId).firstOrNull;
+    return _card(
+      Column(
+        children: [
+          const Text(
+            '专注时间',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+          ),
+          const SizedBox(height: 22),
+          Text(
+            record == null
+                ? '准备好开始了吗'
+                : record.isRunning
+                ? '正在专注'
+                : '已暂停',
+            style: const TextStyle(color: Color(0xFF8A94A6), fontSize: 13),
+          ),
+          const SizedBox(height: 10),
+          FittedBox(
+            child: Text(
+              _formatTimer(_secondsElapsed),
+              style: const TextStyle(
+                fontSize: 60,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF17233B),
               ),
             ),
           ),
+          const SizedBox(height: 10),
+          Text(
+            task?.title ?? record?.taskTitle ?? '选择一个学习任务',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF8A94A6)),
+          ),
+          const SizedBox(height: 20),
+          TextButton.icon(
+            onPressed: _busy || record != null ? null : _chooseTask,
+            icon: const Icon(Icons.assignment_outlined, size: 18),
+            label: const Text('选择任务'),
+            style: TextButton.styleFrom(foregroundColor: _focusBlue),
+          ),
+          const SizedBox(height: 10),
+          if (record == null)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: _focusBlue,
+                  padding: const EdgeInsets.all(16),
+                ),
+                onPressed: _busy || _user == null ? null : _startTimer,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('开始专注'),
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: _focusBlue),
+                    onPressed: _busy ? null : _pauseOrResume,
+                    icon: Icon(
+                      record.isRunning
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                    label: Text(record.isRunning ? '暂停' : '继续'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy ? null : _finishTimer,
+                    icon: const Icon(Icons.stop_rounded),
+                    label: const Text('结束'),
+                  ),
+                ),
+              ],
+            ),
+          if (_busy)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator(color: _focusBlue),
+            ),
         ],
       ),
     );
   }
 
-  // ========== Check-in Banner ==========
-
-  Widget _buildCheckinBanner() {
-    final stats = _stats;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFCCFBF1), Color(0xFFF0FDFA)],
+  Widget _buildTasks() => _card(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                '待办任务',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              tooltip: '新建任务',
+              onPressed: _busy ? null : () => _editTask(),
+              icon: const Icon(Icons.add, color: _focusBlue),
+            ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.primarySoft),
-      ),
-      child: Column(
+        if (_tasks.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Text(
+              '还没有待办，添加一个小目标吧',
+              style: TextStyle(color: Color(0xFF8A94A6)),
+            ),
+          ),
+        ..._tasks.map(
+          (task) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: '选择此任务',
+                  onPressed: _busy || _activeRecord != null
+                      ? null
+                      : () => setState(() => _selectedTaskId = task.id),
+                  icon: Icon(
+                    _selectedTaskId == task.id
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: _focusBlue,
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.title,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '预估 ${task.estimatedPomodoros} 个番茄 · 已专注 ${_formatSeconds(task.focusedSeconds)}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF8A94A6),
+                        ),
+                      ),
+                      if ((task.documentTitle ?? '').isNotEmpty)
+                        Text(
+                          task.documentTitle!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF8A94A6),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  enabled: !_busy,
+                  tooltip: '管理任务',
+                  onSelected: (value) =>
+                      value == 'edit' ? _editTask(task) : _deleteTask(task),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('编辑')),
+                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildRecords() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final from = switch (_period) {
+      1 => today.subtract(Duration(days: now.weekday - 1)),
+      2 => DateTime(now.year, now.month),
+      _ => today,
+    };
+    final periodSeconds = switch (_period) {
+      1 => _stats?.weekSeconds ?? 0,
+      2 => _stats?.monthSeconds ?? 0,
+      _ => _stats?.todaySeconds ?? 0,
+    };
+    // Aggregate by task so the pie shows how the period's time was distributed.
+    final secondsByTask = <int, int>{};
+    final titleByTask = <int, String>{};
+    for (final r in _records) {
+      final seconds = r.secondsInRange(from, now);
+      if (seconds <= 0) continue;
+      secondsByTask[r.taskId] = (secondsByTask[r.taskId] ?? 0) + seconds;
+      titleByTask[r.taskId] = r.taskTitle;
+    }
+    final slices =
+        secondsByTask.entries
+            .map((e) => _PieSlice(titleByTask[e.key] ?? '', e.value))
+            .toList()
+          ..sort((a, b) => b.seconds.compareTo(a.seconds));
+    final sliceTotal = slices.fold<int>(0, (sum, s) => sum + s.seconds);
+    return _card(
+      Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            '专注记录',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 16),
           Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
+            children: List.generate(
+              3,
+              (i) => Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: ChoiceChip(
+                    label: Center(child: Text(const ['今日', '本周', '本月'][i])),
+                    selected: _period == i,
+                    showCheckmark: false,
+                    selectedColor: const Color(0xFFEAF0FF),
+                    labelStyle: TextStyle(
+                      color: _period == i
+                          ? _focusBlue
+                          : const Color(0xFF8A94A6),
+                    ),
+                    onSelected: (_) => setState(() => _period = i),
+                  ),
                 ),
-                child: const Icon(Icons.local_fire_department_rounded, color: AppColors.accentOrange, size: 26),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '共 ${_formatSeconds(periodSeconds)}',
+            style: const TextStyle(color: _focusBlue),
+          ),
+          if (slices.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: Text(
+                  '暂无专注记录',
+                  style: TextStyle(color: Color(0xFF8A94A6)),
+                ),
+              ),
+            )
+          else ...[
+            const SizedBox(height: 16),
+            Center(child: _FocusPieChart(slices: slices)),
+            const SizedBox(height: 18),
+            ...slices.indexed.map(
+              (entry) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
                   children: [
-                    Text('专注打卡', style: AppTextStyles.h2(context)),
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: _pieColors[entry.$1 % _pieColors.length],
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        entry.$2.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _formatSeconds(entry.$2.seconds),
+                      style: const TextStyle(
+                        color: _focusBlue,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 46,
+                      child: Text(
+                        '${(entry.$2.seconds / sliceTotal * 100).round()}%',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF8A94A6),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              if (stats?.isCheckedInToday == true)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text('已打卡', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.w700, fontSize: 12)),
-                )
-              else
-                _SmallChip(
-                  label: '打卡',
-                  icon: Icons.check_rounded,
-                  color: AppColors.primary,
-                  onTap: _doCheckin,
-                ),
-              const SizedBox(width: 6),
-              _SmallChip(
-                label: '日历',
-                icon: Icons.calendar_month_rounded,
-                color: AppColors.secondaryBlue,
-                onTap: _showCheckinCalendar,
-              ),
-            ],
-          ),
-          if (stats != null) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _MiniStatBadge(icon: Icons.timer_rounded, label: '今日', value: _formatSeconds(stats.todaySeconds)),
-                _MiniStatBadge(icon: Icons.track_changes_rounded, label: '番茄', value: '${stats.todayPomodoros}个'),
-                _MiniStatBadge(icon: Icons.stars_rounded, label: '积分', value: '${stats.totalPoints}'),
-              ],
             ),
           ],
         ],
@@ -464,516 +1012,69 @@ class _FocusTabPageState extends State<FocusTabPage> with TickerProviderStateMix
     );
   }
 
-  // ========== Timer Card ==========
-
-  Widget _buildTimerCard() {
-    final isRunning = _isTimerRunning;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        boxShadow: AppShadows.cardSoftList,
-      ),
-      child: Column(
-        children: [
-          // Timer display
-          SizedBox(
-            width: 200,
-            height: 200,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 200,
-                  height: 200,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.primarySoft.withValues(alpha: 0.3),
-                  ),
-                ),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_activeTaskId != null)
-                      Text(
-                        _tasks.where((t) => t.id == _activeTaskId).map((t) => t.title).firstOrNull ?? '专注',
-                        style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
-                      )
-                    else
-                      Text(
-                        '专注',
-                        style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatTimer(_secondsElapsed),
-                      style: AppTextStyles.display(context).copyWith(fontSize: 42, fontWeight: FontWeight.w800),
-                    ),
-                    if (isRunning)
-                      Text(
-                        '计时中',
-                        style: AppTextStyles.caption(context).copyWith(color: AppColors.primary),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Timer controls
-          if (_activeTaskId != null || isRunning)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (isRunning) ...[
-                  _TimerButton(
-                    icon: Icons.pause_rounded,
-                    label: '暂停',
-                    onTap: _pauseTimer,
-                  ),
-                  const SizedBox(width: 16),
-                  _TimerButton(
-                    icon: Icons.stop_rounded,
-                    label: '结束',
-                    color: AppColors.error,
-                    onTap: _stopTimer,
-                  ),
-                ] else if (_activeTaskId != null) ...[
-                  _TimerButton(
-                    icon: Icons.play_arrow_rounded,
-                    label: '继续',
-                    onTap: _resumeTimer,
-                  ),
-                  const SizedBox(width: 16),
-                  _TimerButton(
-                    icon: Icons.stop_rounded,
-                    label: '结束',
-                    color: AppColors.error,
-                    onTap: _stopTimer,
-                  ),
-                ],
-              ],
-            )
-          else
-            Text(
-              '点击下方任务开始计时',
-              style: AppTextStyles.caption(context),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ========== Task List ==========
-
-  Widget _buildTaskList() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        boxShadow: AppShadows.cardSoftList,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text('待办列表', style: AppTextStyles.h3(context)),
-              const Spacer(),
-              IconButton(
-                onPressed: _addTask,
-                icon: const Icon(Icons.add_rounded, color: AppColors.primary),
-                tooltip: '新建任务',
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_tasks.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(AppRadii.input),
-              ),
-              child: const Text('还没有待办项，点击右上角 + 创建', textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
-            )
-          else
-            ..._tasks.map((task) => _TaskTile(
-              task: task,
-              isActive: _activeTaskId == task.id && _isTimerRunning,
-              onStart: () => _startTimer(task.id),
-              onDelete: () => _deleteTask(task),
-              timerRunning: _isTimerRunning,
-            )),
-        ],
-      ),
-    );
-  }
-
-  // ========== Stats Section ==========
-
-  Widget _buildStatsSection() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        boxShadow: AppShadows.cardSoftList,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('时间统计', style: AppTextStyles.h3(context)),
-          const SizedBox(height: 12),
-          DefaultTabController(
-            length: 3,
-            child: Column(
-              children: [
-                TabBar(
-                  labelColor: AppColors.primary,
-                  unselectedLabelColor: AppColors.textSecondary,
-                  indicatorColor: AppColors.primary,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                  tabs: const [
-                    Tab(text: '今日'),
-                    Tab(text: '本周'),
-                    Tab(text: '本月'),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 260,
-                  child: TabBarView(
-                    children: [
-                      _PieChartView(data: _todayStats, emptyText: '今日暂无专注记录'),
-                      _PieChartView(data: _weekStats, emptyText: '本周暂无专注记录'),
-                      _PieChartView(data: _monthStats, emptyText: '本月暂无专注记录'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatTimer(int totalSeconds) {
-    final m = totalSeconds ~/ 60;
-    final s = totalSeconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
-
-  String _formatSeconds(int totalSeconds) {
-    final h = totalSeconds ~/ 3600;
-    final m = (totalSeconds % 3600) ~/ 60;
-    if (h > 0) return '${h}h${m}m';
-    return '$m分钟';
+  String _formatTimer(int seconds) =>
+      '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
+  String _formatSeconds(int seconds) {
+    if (seconds >= 3600) return '${seconds ~/ 3600}h${seconds % 3600 ~/ 60}m';
+    if (seconds < 60 && seconds > 0) return '$seconds秒';
+    return '${seconds ~/ 60}分钟';
   }
 }
 
-// ========== Mini Widgets ==========
+// ========== Focus Records Pie Chart ==========
 
-class _SmallChip extends StatelessWidget {
-  const _SmallChip({required this.label, required this.icon, required this.color, this.onTap});
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback? onTap;
+class _PieSlice {
+  const _PieSlice(this.title, this.seconds);
+  final String title;
+  final int seconds;
+}
+
+class _FocusPieChart extends StatelessWidget {
+  const _FocusPieChart({required this.slices});
+
+  final List<_PieSlice> slices;
 
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 14, color: color),
-              const SizedBox(width: 4),
-              Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+    width: 168,
+    height: 168,
+    child: CustomPaint(painter: _FocusPiePainter(slices)),
+  );
 }
 
-class _MiniStatBadge extends StatelessWidget {
-  const _MiniStatBadge({required this.icon, required this.label, required this.value});
-  final IconData icon;
-  final String label;
-  final String value;
+class _FocusPiePainter extends CustomPainter {
+  _FocusPiePainter(this.slices);
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: AppColors.textSecondary),
-          const SizedBox(width: 4),
-          Text('$label ', style: AppTextStyles.caption(context)),
-          Text(value, style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _TimerButton extends StatelessWidget {
-  const _TimerButton({required this.icon, required this.label, this.color = AppColors.primary, required this.onTap});
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 14)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TaskTile extends StatelessWidget {
-  const _TaskTile({required this.task, required this.isActive, required this.onStart, required this.onDelete, required this.timerRunning});
-  final PomodoroTask task;
-  final bool isActive;
-  final bool timerRunning;
-  final VoidCallback onStart;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: timerRunning ? null : onStart,
-          borderRadius: BorderRadius.circular(16),
-          child: Ink(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-            decoration: BoxDecoration(
-              color: isActive ? AppColors.primarySoft : AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isActive ? AppColors.primary : AppColors.border),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: isActive ? AppColors.primary : AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    isActive ? Icons.timer_rounded : Icons.play_arrow_rounded,
-                    color: isActive ? Colors.white : AppColors.primary,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(task.title, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text('预估 ${task.estimatedPomodoros} 个番茄', style: AppTextStyles.caption(context)),
-                    ],
-                  ),
-                ),
-                if (isActive)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Text('进行中', style: TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w700, fontSize: 11)),
-                  ),
-                if (!timerRunning)
-                  IconButton(
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                    color: AppColors.textTertiary,
-                    tooltip: '删除任务',
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ========== Pie Chart ==========
-
-class _PieChartView extends StatelessWidget {
-  const _PieChartView({required this.data, required this.emptyText});
-  final List<TaskTimeStat> data;
-  final String emptyText;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = data.fold<int>(0, (sum, item) => sum + item.totalSeconds);
-    if (total == 0 || data.isEmpty) {
-      return Center(
-        child: Text(emptyText, style: AppTextStyles.bodySmall(context)),
-      );
-    }
-
-    return Row(
-      children: [
-        // Chart
-        SizedBox(
-          width: 150,
-          height: 150,
-          child: CustomPaint(
-            painter: _PieChartPainter(data: data, totalSeconds: total, colors: _pieColors),
-            size: const Size(150, 150),
-          ),
-        ),
-        const SizedBox(width: 20),
-        // Legend
-        Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: data.take(6).toList().asMap().entries.map((entry) {
-              final color = _pieColors[entry.key % _pieColors.length];
-              final item = entry.value;
-              final pct = total > 0 ? (item.totalSeconds / total * 100).toStringAsFixed(0) : '0';
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        item.taskTitle,
-                        style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w600),
-                        maxLines: 3,
-                        softWrap: true,
-                      ),
-                    ),
-                    Text(
-                      '$pct%',
-                      style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w800, color: AppColors.textPrimary),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PieChartPainter extends CustomPainter {
-  _PieChartPainter({required this.data, required this.totalSeconds, required this.colors});
-  final List<TaskTimeStat> data;
-  final int totalSeconds;
-  final List<Color> colors;
+  final List<_PieSlice> slices;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final center = rect.center;
-    final radius = math.min(size.width, size.height) / 2 - 8;
-
-    double startAngle = -math.pi / 2;
-    for (int i = 0; i < data.length; i++) {
-      final sweepAngle = (data[i].totalSeconds / totalSeconds) * 2 * math.pi;
-      final paint = Paint()
-        ..color = colors[i % colors.length]
-        ..style = PaintingStyle.fill;
-
-      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), startAngle, sweepAngle, true, paint);
-      startAngle += sweepAngle;
-    }
-
-    // Center hole
-    final holePaint = Paint()..color = Colors.white;
-    canvas.drawCircle(center, radius * 0.55, holePaint);
-
-    // Total text
-    final tp = TextPainter(
-      text: TextSpan(
-        text: _formatTotal(totalSeconds),
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
-      ),
-      textDirection: TextDirection.ltr,
+    final total = slices.fold<int>(0, (sum, s) => sum + s.seconds);
+    if (total <= 0) return;
+    final circle = Rect.fromCircle(
+      center: Offset(size.width / 2, size.height / 2),
+      radius: size.shortestSide / 2,
     );
-    tp.layout();
-    tp.paint(canvas, Offset(center.dx - tp.width / 2, center.dy - tp.height / 2));
-  }
-
-  String _formatTotal(int seconds) {
-    final h = seconds ~/ 3600;
-    final m = (seconds % 3600) ~/ 60;
-    if (h > 0) return '${h}h${m}m';
-    return '$m分';
+    final separator = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.white;
+    // Start at 12 o'clock so the largest slice reads clockwise from the top.
+    var start = -math.pi / 2;
+    for (var i = 0; i < slices.length; i++) {
+      final sweep = slices[i].seconds / total * 2 * math.pi;
+      final fill = Paint()
+        ..style = PaintingStyle.fill
+        ..color = _pieColors[i % _pieColors.length];
+      canvas.drawArc(circle, start, sweep, true, fill);
+      canvas.drawArc(circle, start, sweep, true, separator);
+      start += sweep;
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _PieChartPainter old) => old.data != data || old.totalSeconds != totalSeconds;
+  bool shouldRepaint(covariant _FocusPiePainter oldDelegate) =>
+      oldDelegate.slices != slices;
 }
 
 // ========== Checkin Calendar Page ==========
@@ -1071,14 +1172,19 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
   }
 
   Future<void> _makeupCheckin(DateTime date) async {
-    final success = await widget.focusRepository.makeupCheckin(widget.userId, date);
+    final success = await widget.focusRepository.makeupCheckin(
+      widget.userId,
+      date,
+    );
     if (!mounted) return;
     if (success) {
       await _loadMonth();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已补签 ${date.month}/${date.day}！消耗 ${FocusPoints.makeupCost} 积分'),
+          content: Text(
+            '已补签 ${date.month}/${date.day}！消耗 ${FocusPoints.makeupCost} 积分',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1095,10 +1201,19 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
   @override
   Widget build(BuildContext context) {
     final recordMap = {for (final r in _records) r.dateKey: r};
-    final daysInMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
-    final firstWeekday = DateTime(_currentMonth.year, _currentMonth.month, 1).weekday;
+    final daysInMonth = DateTime(
+      _currentMonth.year,
+      _currentMonth.month + 1,
+      0,
+    ).day;
+    final firstWeekday = DateTime(
+      _currentMonth.year,
+      _currentMonth.month,
+      1,
+    ).weekday;
     final now = DateTime.now();
-    final todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final todayKey =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
     const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
 
@@ -1126,17 +1241,31 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.stars_rounded, color: AppColors.secondaryPurple, size: 24),
+                const Icon(
+                  Icons.stars_rounded,
+                  color: AppColors.secondaryPurple,
+                  size: 24,
+                ),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('当前积分', style: AppTextStyles.caption(context)),
-                    Text('$_totalPoints ⭐', style: AppTextStyles.h2(context).copyWith(color: AppColors.secondaryPurple)),
+                    Text(
+                      '$_totalPoints ⭐',
+                      style: AppTextStyles.h2(
+                        context,
+                      ).copyWith(color: AppColors.secondaryPurple),
+                    ),
                   ],
                 ),
                 const Spacer(),
-                Text('补签消耗 ${FocusPoints.makeupCost} 分', style: AppTextStyles.caption(context).copyWith(color: AppColors.textTertiary)),
+                Text(
+                  '补签消耗 ${FocusPoints.makeupCost} 分',
+                  style: AppTextStyles.caption(
+                    context,
+                  ).copyWith(color: AppColors.textTertiary),
+                ),
               ],
             ),
           ),
@@ -1146,7 +1275,10 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              IconButton(onPressed: _previousMonth, icon: const Icon(Icons.chevron_left_rounded)),
+              IconButton(
+                onPressed: _previousMonth,
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
               Text(
                 '${_currentMonth.year}年${_currentMonth.month}月',
                 style: AppTextStyles.h3(context),
@@ -1172,7 +1304,12 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
                       return SizedBox(
                         width: cellWidth,
                         child: Center(
-                          child: Text(w, style: AppTextStyles.caption(context).copyWith(fontWeight: FontWeight.w700)),
+                          child: Text(
+                            w,
+                            style: AppTextStyles.caption(
+                              context,
+                            ).copyWith(fontWeight: FontWeight.w700),
+                          ),
                         ),
                       );
                     }).toList(),
@@ -1181,84 +1318,140 @@ class _CalendarMonthViewState extends State<_CalendarMonthView> {
 
                   // Calendar grid
                   if (_isLoading)
-                    const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
                   else
-                    Builder(builder: (context) {
-                      final cells = <Widget>[];
-                      for (int i = 1; i < firstWeekday; i++) {
-                        cells.add(const SizedBox());
-                      }
-                      for (int day = 1; day <= daysInMonth; day++) {
-                        final date = DateTime(_currentMonth.year, _currentMonth.month, day);
-                        final key = '${_currentMonth.year}-${_currentMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
-                        final record = recordMap[key];
-                        final isToday = key == todayKey;
-                        final isPast = date.isBefore(DateTime(now.year, now.month, now.day));
-                        final canMakeup = isPast && record == null && date.isAfter(now.subtract(const Duration(days: 30)));
+                    Builder(
+                      builder: (context) {
+                        final cells = <Widget>[];
+                        for (int i = 1; i < firstWeekday; i++) {
+                          cells.add(const SizedBox());
+                        }
+                        for (int day = 1; day <= daysInMonth; day++) {
+                          final date = DateTime(
+                            _currentMonth.year,
+                            _currentMonth.month,
+                            day,
+                          );
+                          final key =
+                              '${_currentMonth.year}-${_currentMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+                          final record = recordMap[key];
+                          final isToday = key == todayKey;
+                          final isPast = date.isBefore(
+                            DateTime(now.year, now.month, now.day),
+                          );
+                          final canMakeup =
+                              isPast &&
+                              record == null &&
+                              date.isAfter(
+                                now.subtract(const Duration(days: 30)),
+                              );
 
-                        cells.add(
-                          GestureDetector(
-                            onLongPress: canMakeup ? () => _makeupCheckin(date) : null,
-                            child: Container(
-                              margin: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: record != null
-                                    ? (record.isMakeup ? AppColors.secondaryPurple.withValues(alpha: 0.2) : AppColors.primarySoft)
-                                    : (isToday ? AppColors.primaryLight : AppColors.surfaceAlt),
-                                borderRadius: BorderRadius.circular(12),
-                                border: isToday ? Border.all(color: AppColors.primary, width: 1.5) : null,
-                              ),
-                              child: AspectRatio(
-                                aspectRatio: 1,
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      '$day',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
-                                        color: record != null ? AppColors.primaryDark : (isToday ? AppColors.primary : AppColors.textPrimary),
-                                      ),
-                                    ),
-                                    if (record != null)
+                          cells.add(
+                            GestureDetector(
+                              onLongPress: canMakeup
+                                  ? () => _makeupCheckin(date)
+                                  : null,
+                              child: Container(
+                                margin: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: record != null
+                                      ? (record.isMakeup
+                                            ? AppColors.secondaryPurple
+                                                  .withValues(alpha: 0.2)
+                                            : AppColors.primarySoft)
+                                      : (isToday
+                                            ? AppColors.primaryLight
+                                            : AppColors.surfaceAlt),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: isToday
+                                      ? Border.all(
+                                          color: AppColors.primary,
+                                          width: 1.5,
+                                        )
+                                      : null,
+                                ),
+                                child: AspectRatio(
+                                  aspectRatio: 1,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
                                       Text(
-                                        record.isMakeup ? '补' : '✓',
+                                        '$day',
                                         style: TextStyle(
-                                          fontSize: 9,
-                                          color: record.isMakeup ? AppColors.secondaryPurple : AppColors.success,
-                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          fontWeight: isToday
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                          color: record != null
+                                              ? AppColors.primaryDark
+                                              : (isToday
+                                                    ? AppColors.primary
+                                                    : AppColors.textPrimary),
                                         ),
                                       ),
-                                    if (canMakeup && record == null)
-                                      const Text('·', style: TextStyle(fontSize: 9, color: AppColors.textTertiary)),
-                                  ],
+                                      if (record != null)
+                                        Text(
+                                          record.isMakeup ? '补' : '✓',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            color: record.isMakeup
+                                                ? AppColors.secondaryPurple
+                                                : AppColors.success,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      if (canMakeup && record == null)
+                                        const Text(
+                                          '·',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            color: AppColors.textTertiary,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      }
+                          );
+                        }
 
-                      return Column(
-                        children: [
-                          for (int row = 0; row < (cells.length / 7).ceil(); row++)
-                            Row(
-                              children: List.generate(7, (col) {
-                                final idx = row * 7 + col;
-                                return Expanded(child: idx < cells.length ? cells[idx] : const SizedBox());
-                              }),
-                            ),
-                        ],
-                      );
-                    }),
+                        return Column(
+                          children: [
+                            for (
+                              int row = 0;
+                              row < (cells.length / 7).ceil();
+                              row++
+                            )
+                              Row(
+                                children: List.generate(7, (col) {
+                                  final idx = row * 7 + col;
+                                  return Expanded(
+                                    child: idx < cells.length
+                                        ? cells[idx]
+                                        : const SizedBox(),
+                                  );
+                                }),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
                 ],
               );
             },
           ),
 
           const SizedBox(height: 16),
-          Text('长按灰色日期可以补签（消耗 ${FocusPoints.makeupCost} 积分，仅限过去30天）', style: AppTextStyles.caption(context)),
+          Text(
+            '长按灰色日期可以补签（消耗 ${FocusPoints.makeupCost} 积分，仅限过去30天）',
+            style: AppTextStyles.caption(context),
+          ),
         ],
       ),
     );

@@ -58,7 +58,11 @@ class CheckinRecord {
     DateTime date;
     try {
       final parts = dateStr.split('-');
-      date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+      date = DateTime(
+        int.parse(parts[0]),
+        int.parse(parts[1]),
+        int.parse(parts[2]),
+      );
     } catch (_) {
       date = DateTime.now();
     }
@@ -71,8 +75,8 @@ class CheckinRecord {
       pomodoroCount: (map['pomodoro_count'] as int?) ?? 0,
       pointsEarned: (map['points_earned'] as int?) ?? 0,
       isMakeup: (map['is_makeup'] as int?) == 1,
-      createdAt: DateTime.tryParse((map['created_at'] as String?) ?? '')
-              ?.toLocal() ??
+      createdAt:
+          DateTime.tryParse((map['created_at'] as String?) ?? '')?.toLocal() ??
           DateTime.now(),
     );
   }

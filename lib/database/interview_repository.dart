@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../interview/interview_models.dart';
 import 'app_database.dart';
+import '../learning/learning_events.dart';
 
 class InterviewRepository {
   InterviewRepository({AppDatabase? database, Directory? appDocumentsDirectory})
@@ -290,7 +291,7 @@ class InterviewRepository {
       throw ArgumentError('Invalid interview score or total');
     }
     final db = await _database.database;
-    return db.transaction((txn) async {
+    final result = await db.transaction((txn) async {
       await _writable(txn: txn, userId: userId, sessionId: e.sessionId);
       final q = await _question(txn, e.sessionId, e.questionId);
       final turn = await txn.query(
@@ -332,6 +333,52 @@ class InterviewRepository {
       }
       final values = e.toMap()..remove('id');
       final id = await txn.insert('interview_evaluations', values);
+      // Keep the real interview score and its source. A generated question alone
+      // is never learning evidence, and an interview score does not certify mastery.
+      final concepts = q.knowledgePointId == null
+          ? <Map<String, Object?>>[]
+          : await txn.rawQuery(
+              '''SELECT c.* FROM knowledge_concepts c JOIN source_documents d ON d.id=c.document_id
+        WHERE c.id=? AND c.user_id=? AND d.user_id=? AND d.id=?''',
+              [q.knowledgePointId, userId, userId, q.sourcePageId],
+            );
+      if (concepts.isNotEmpty) {
+        final evidence = {
+          'user_id': userId,
+          'document_id': q.sourcePageId,
+          'concept_id': q.knowledgePointId,
+          'interview_evaluation_id': id,
+          'origin': 'interview',
+          'prompt': q.questionText,
+          'answer': turn.single['text'],
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        };
+        await txn.insert('learning_attempts', {
+          ...evidence,
+          'score': e.totalScore,
+          'feedback': [...e.weaknesses, ...e.suggestions].join('；'),
+        });
+        if (e.totalScore < 60) {
+          await txn.insert('learning_errors', {
+            ...evidence,
+            'correction': e.suggestions.join('；'),
+          });
+        }
+        final old = concepts.single['mastery_score'] as int;
+        final mastery = old == 100 && e.totalScore >= 80
+            ? 100
+            : ((old * 2 + e.totalScore) / 3).round().clamp(0, 90);
+        await txn.update(
+          'knowledge_concepts',
+          {
+            'mastery_score': mastery,
+            'weakness_score': 100 - mastery,
+            'updated_at': evidence['created_at'],
+          },
+          where: 'id=? AND user_id=?',
+          whereArgs: [q.knowledgePointId, userId],
+        );
+      }
       return InterviewEvaluation.fromMap(
         (await txn.query(
           'interview_evaluations',
@@ -340,6 +387,8 @@ class InterviewRepository {
         )).single,
       );
     });
+    LearningEvents.notify();
+    return result;
   }
 
   Future<List<InterviewEvaluation>> evaluations(

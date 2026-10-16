@@ -3,6 +3,8 @@ import 'package:sqflite/sqflite.dart';
 import 'app_database.dart';
 import 'import_record_repository.dart';
 import 'models/ai_result_records.dart';
+import '../learning/learning_task_repository.dart';
+import '../learning/learning_events.dart';
 
 class PracticeScope {
   const PracticeScope({
@@ -140,7 +142,7 @@ class PracticeSessionRepository {
     final source = await ImportRecordRepository(
       database: _database,
     ).sourceSnapshot(scope.userId, owned.single['document_id'] as int);
-    return db.transaction((txn) async {
+    final result = await db.transaction((txn) async {
       final existing = await txn.query(
         'practice_submissions',
         where: 'user_id = ? AND request_id = ?',
@@ -204,6 +206,7 @@ class PracticeSessionRepository {
         }
       }
       await _syncRelatedQuestions(txn, scope.userId, questionId, time);
+      await recordLearningTaskAnswer(txn, scope.userId, questionId, time);
       return PracticeSubmission.fromMap(
         (await txn.query(
           'practice_submissions',
@@ -212,6 +215,8 @@ class PracticeSessionRepository {
         )).single,
       );
     });
+    LearningEvents.notify();
+    return result;
   }
 
   Future<PracticeSubmission> regrade(
@@ -223,7 +228,7 @@ class PracticeSessionRepository {
   }) async {
     if (reason.trim().isEmpty) throw ArgumentError('请填写纠正原因');
     final db = await _database.database;
-    return db.transaction((txn) async {
+    final result = await db.transaction((txn) async {
       final rows = await txn.query(
         'practice_submissions',
         where: 'id = ? AND user_id = ?',
@@ -292,6 +297,8 @@ class PracticeSessionRepository {
         )).single,
       );
     });
+    LearningEvents.notify();
+    return result;
   }
 
   Future<List<Map<String, Object?>>> history(int userId, int questionId) async {
@@ -475,6 +482,14 @@ class PracticeSessionRepository {
         THEN 1 ELSE 0 END WHERE user_id = ? AND question_id = ?''',
       [e.mastered ? 1 : 0, userId, questionId],
     );
+    if (e.mastered) {
+      await db.update(
+        'wrong_question_trainings',
+        {'status': 'completed', 'completed_at': now.toIso8601String()},
+        where: 'wrong_question_id=?',
+        whereArgs: [questionId],
+      );
+    }
     for (final c in await db.query(
       'question_concepts',
       where: 'question_id = ?',

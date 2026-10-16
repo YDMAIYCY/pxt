@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../../common/app_assets.dart';
 import '../../../common/profile_image_store.dart';
@@ -18,6 +19,14 @@ import '../llm_config_edit_page.dart';
 import '../login_page.dart';
 import 'knowledge_tab_page.dart';
 import 'tasks_tab_page.dart';
+import '../../../community/cloud_backend.dart';
+import '../../../community/community_repository.dart';
+import '../../../focus/repository/focus_repository.dart';
+import '../community/community_page.dart';
+import '../community/community_widgets.dart';
+import '../community/social_pages.dart';
+import '../community/account_security_page.dart';
+import 'focus_tab_page.dart';
 
 export '../llm_config_edit_page.dart' show LlmConfigEditPage;
 
@@ -64,6 +73,13 @@ const List<_AvatarPreset> _avatarPresets = [
 
 const List<_BackgroundPreset> _backgroundPresets = [
   _BackgroundPreset(
+    id: ProfilePresetIds.backgroundLake,
+    label: '晴空湖畔',
+    imageAsset: 'assets/images/profile_lake.svg',
+    gradientColors: [Color(0xFFB5DCFF), Color(0xFFF2F9FF)],
+    overlayOpacity: 0.36,
+  ),
+  _BackgroundPreset(
     id: ProfilePresetIds.backgroundAurora,
     label: '头图',
     imageAsset: 'assets/images/3.png',
@@ -96,6 +112,7 @@ class ProfileTabPage extends StatefulWidget {
     this.sourceDocumentRepository,
     this.llmConfigRepository,
     this.aiGenerationRepository,
+    this.focusRepository,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
@@ -109,6 +126,7 @@ class ProfileTabPage extends StatefulWidget {
   final SourceDocumentRepository? sourceDocumentRepository;
   final LlmConfigRepository? llmConfigRepository;
   final AiGenerationRepository? aiGenerationRepository;
+  final FocusRepository? focusRepository;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
@@ -131,6 +149,12 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   UserProfile? _profile;
   LlmProviderConfig? _llmConfig;
   StudyOverviewStats? _studyStats;
+  FocusStats? _focusStats;
+  int? _learningStreak;
+  Json? _cloudProfile;
+  Json? _cloudStats;
+  String? _cloudStatus;
+  int? _unread;
   late int _handledRefreshVersion;
   bool _reloadScheduled = false;
   bool _isLoading = true;
@@ -150,6 +174,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
     _loadProfile();
+    CloudBackend.instance.addListener(_handleExternalRefresh);
   }
 
   @override
@@ -171,6 +196,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
 
   @override
   void dispose() {
+    CloudBackend.instance.removeListener(_handleExternalRefresh);
     widget.refreshListenable?.removeListener(_handleExternalRefresh);
     widget.activeTabListenable?.removeListener(_handleExternalRefresh);
     super.dispose();
@@ -216,11 +242,121 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
         _studyStats = studyStats;
         _isLoading = false;
       });
+      if (currentProfile != null) {
+        _loadFocusStats(currentProfile.id);
+        _loadCloudProfile();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _isLoading = false);
       _showMessage('加载资料失败：$error');
     }
+  }
+
+  Future<void> _loadFocusStats(int userId) async {
+    try {
+      final stats = await (widget.focusRepository ?? FocusRepository())
+          .fetchStats(userId);
+      if (mounted && _profile?.id == userId) {
+        setState(() => _focusStats = stats);
+      }
+      final streak = await (widget.focusRepository ?? FocusRepository())
+          .fetchLearningStreak(userId);
+      if (mounted && _profile?.id == userId) {
+        setState(() => _learningStreak = streak);
+      }
+    } catch (_) {
+      /* Local statistics failure does not hide profile settings. */
+    }
+  }
+
+  Future<void> _loadCloudProfile() async {
+    if (!CloudBackend.instance.configured) return;
+    try {
+      final repo = CommunityRepository();
+      await repo.identity.requireLinked();
+      final profile = await repo.profile(repo.uid);
+      final stats = await repo.stats(repo.uid);
+      final unread = await repo.unreadCount();
+      if (mounted) {
+        setState(() {
+          _cloudProfile = profile;
+          _cloudStats = stats;
+          _unread = unread;
+          _cloudStatus = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _cloudProfile = null;
+          _cloudStats = null;
+          _unread = null;
+          _cloudStatus = cloudError(error);
+        });
+      }
+    }
+  }
+
+  Future<void> _syncPublicProfile(
+    UserProfile profile,
+    UserProfile? previous,
+  ) async {
+    if (!CloudBackend.instance.signedIn) return;
+    final repo = CommunityRepository();
+    await repo.identity.requireLinked();
+    final remote = _cloudProfile ?? await repo.profile(repo.uid);
+    String? avatar = remote['avatar_path'] as String?,
+        background = remote['background_path'] as String?;
+    final avatarChanged =
+        profile.avatarImagePath != previous?.avatarImagePath ||
+        profile.avatarStyle != previous?.avatarStyle;
+    final backgroundChanged =
+        profile.backgroundImagePath != previous?.backgroundImagePath ||
+        profile.backgroundStyle != previous?.backgroundStyle;
+    if (avatarChanged && profile.avatarImagePath == null) avatar = null;
+    if (backgroundChanged && profile.backgroundImagePath == null) {
+      background = null;
+    }
+    if (avatarChanged && profile.avatarImagePath != null) {
+      avatar = await repo.upload(
+        'profile-images',
+        await File(profile.avatarImagePath!).readAsBytes(),
+        profile.avatarImagePath!.split('.').last,
+      );
+    }
+    if (backgroundChanged && profile.backgroundImagePath != null) {
+      background = await repo.upload(
+        'profile-images',
+        await File(profile.backgroundImagePath!).readAsBytes(),
+        profile.backgroundImagePath!.split('.').last,
+      );
+    }
+    await repo.saveProfile(
+      nickname: profile.primaryName,
+      bio: profile.bio,
+      avatar: avatar,
+      background: background,
+      setImages: avatarChanged || backgroundChanged,
+    );
+    await _loadCloudProfile();
+  }
+
+  Future<void> _openFocus() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('专注学习')),
+          body: FocusTabPage(onDataChanged: widget.onDataChanged),
+        ),
+      ),
+    );
+    if (mounted) await _loadProfile();
+  }
+
+  Future<void> _openSocial(Widget page) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    if (mounted) await _loadCloudProfile();
   }
 
   Future<bool> _saveProfile(
@@ -229,10 +365,16 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   }) async {
     setState(() => _isSaving = true);
     try {
+      final previous = _profile;
       final savedProfile = await _authRepository.saveUserProfile(profile);
       if (!mounted) return false;
       setState(() => _profile = savedProfile);
       _showMessage(successMessage);
+      try {
+        await _syncPublicProfile(savedProfile, previous);
+      } catch (error) {
+        if (mounted) _showMessage('本地资料已保存，公开资料同步失败：${cloudError(error)}');
+      }
       return true;
     } catch (error) {
       if (!mounted) return false;
@@ -545,12 +687,10 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   Future<void> _showAccountInfo() async {
     final profile = _profile;
     if (profile == null) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => _AccountInfoSheet(profile: profile),
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AccountSecurityPage(profile: profile)),
     );
+    if (mounted) await _loadCloudProfile();
   }
 
   Future<void> _logout() async {
@@ -623,7 +763,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('Knowledge')),
+          appBar: AppBar(title: const Text('我的知识资产')),
           body: KnowledgeTabPage(onDataChanged: widget.onDataChanged),
         ),
       ),
@@ -670,8 +810,9 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildHeroHeader(context, profile),
-                      Transform.translate(
-                        offset: const Offset(0, -28),
+                      _buildProfileStats(),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: _buildSettingsSection(context),
                       ),
                     ],
@@ -693,114 +834,228 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   }
 
   Widget _buildHeroHeader(BuildContext context, UserProfile profile) {
-    final backgroundPreset = _backgroundPresetFor(profile.backgroundStyle);
-    final textTheme = Theme.of(context).textTheme;
-    final genderIcon = profile.gender == '男生'
-        ? Icons.male_rounded
-        : profile.gender == '女生'
-        ? Icons.female_rounded
-        : Icons.shield_outlined;
-    final ageLabel = profile.age == null ? '年龄未设置' : '${profile.age} 岁';
-
     return SizedBox(
-      height: 420,
+      height: 180,
       child: Stack(
         fit: StackFit.expand,
         children: [
           _BackgroundPreview(
-            preset: backgroundPreset,
+            preset: _backgroundPresetFor(profile.backgroundStyle),
             backgroundImagePath: profile.backgroundImagePath,
           ),
+          if (profile.backgroundImagePath == null &&
+              _cloudProfile?['background_path'] != null)
+            CommunityImage(
+              path: _cloudProfile!['background_path'] as String,
+              bucket: 'profile-images',
+              height: 180,
+            ),
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                stops: const [0, 0.35, 1],
+                stops: const [0, 0.6, 1],
                 colors: [
                   Colors.black.withValues(alpha: 0.10),
-                  Colors.black.withValues(alpha: 0.22),
-                  Colors.black.withValues(alpha: 0.60),
+                  Colors.black.withValues(alpha: 0.16),
+                  Colors.black.withValues(alpha: 0.40),
                 ],
               ),
             ),
           ),
-          Positioned(
-            right: 18,
-            top: 16,
-            child: _HeaderIconButton(
-              icon: Icons.more_horiz_rounded,
-              tooltip: '个人信息设置',
-              onTap: _showProfileMoreActions,
-            ),
-          ),
-          Positioned(
-            left: 18,
-            right: 18,
-            bottom: 40,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Row(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    _AvatarView(profile: profile, size: 96),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Text(
-                                  profile.primaryName,
-                                  style: textTheme.headlineMedium?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w900,
-                                    height: 1.05,
-                                  ),
-                                ),
-                                _MetaChip(
-                                  icon: genderIcon,
-                                  label: profile.gender,
-                                ),
-                                _MetaChip(
-                                  icon: Icons.cake_rounded,
-                                  label: ageLabel,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '账号 ID: ${profile.username}',
-                              style: textTheme.bodyMedium?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.82),
-                                fontWeight: FontWeight.w500,
-                              ),
+                GestureDetector(
+                  onTap: _showAvatarActions,
+                  child:
+                      profile.avatarImagePath == null &&
+                          _cloudProfile?['avatar_path'] != null
+                      ? CommunityAvatar(profile: _cloudProfile!, size: 80)
+                      : _AvatarView(profile: profile, size: 80),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        profile.username.startsWith('cloud_')
+                            ? (_cloudProfile?['nickname'] as String? ??
+                                  profile.primaryName)
+                            : profile.primaryName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: Color(0x73000000),
+                              blurRadius: 10,
+                              offset: Offset(0, 1),
                             ),
                           ],
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        'ID：${_cloudProfile?['public_id'] ?? (profile.username.startsWith('cloud_') ? '暂不可用' : profile.username)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xD9FFFFFF),
+                          shadows: [
+                            Shadow(
+                              color: Color(0x66000000),
+                              blurRadius: 8,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        profile.bio,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xEBFFFFFF),
+                          height: 1.5,
+                          fontSize: 12,
+                          shadows: [
+                            Shadow(
+                              color: Color(0x66000000),
+                              blurRadius: 8,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: '个人信息设置',
+                      onPressed: _showProfileMoreActions,
+                      icon: const Icon(
+                        Icons.more_horiz,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: Color(0x73000000),
+                            blurRadius: 8,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _editProfile,
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.white.withValues(alpha: .22),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: .5),
+                        ),
+                        shape: const StadiumBorder(),
+                      ),
+                      child: const Text(
+                        '编辑资料',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  profile.bio,
-                  style: textTheme.bodyLarge?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.96),
-                    height: 1.55,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileStats() {
+    final values = [
+      (
+        Icons.local_fire_department_rounded,
+        const Color(0xFFFF8556),
+        _learningStreak?.toString() ?? '—',
+        '连续学习（天）',
+      ),
+      (
+        Icons.schedule_rounded,
+        const Color(0xFF51A5FF),
+        _focusStats == null
+            ? '—'
+            : (_focusStats!.todaySeconds / 3600).toStringAsFixed(1),
+        '今日时长（时）',
+      ),
+      (
+        Icons.forum_rounded,
+        const Color(0xFF21BF94),
+        _cloudStats?['answers']?.toString() ?? '—',
+        '社区回答（个）',
+      ),
+      (
+        Icons.people_rounded,
+        const Color(0xFF9573FF),
+        _cloudStats?['friends']?.toString() ?? '—',
+        '好友数（人）',
+      ),
+    ];
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 16),
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < values.length; i++) ...[
+            if (i > 0)
+              Container(height: 56, width: 1, color: const Color(0xFFEDF2FC)),
+            Expanded(
+              child: Column(
+                children: [
+                  Icon(values[i].$1, color: values[i].$2, size: 25),
+                  const SizedBox(height: 7),
+                  Text(
+                    values[i].$3,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF101C36),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    values[i].$4,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF8090A8),
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -829,22 +1084,60 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('我的学习资产', style: AppTextStyles.h2(context)),
+          Text('我的学习空间', style: AppTextStyles.h2(context)),
           const SizedBox(height: 6),
           Text(
-            '资料、错题和模型配置集中在这里；个人资料从右上角三个点进入。',
+            '管理学习资料、社交互动与个性化设置，让学习更高效。',
             style: AppTextStyles.bodySmall(context),
           ),
           const SizedBox(height: 16),
+          if (_cloudStatus != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                _cloudStatus!,
+                style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
+              ),
+            ),
+          _SettingTile(
+            icon: Icons.menu_book_rounded,
+            title: '我的知识资产',
+            subtitle: '学习资料、知识卡片与学习成果',
+            onTap: _openKnowledgeEntry,
+          ),
           _SettingTile(
             icon: Icons.collections_bookmark_rounded,
+            color: const Color(0xFFFFB827),
             title: '收藏',
             subtitle: stats == null ? '待同步' : '知识卡片、错题和 AI 学习成果集中查看',
             onTap: _openFavoritesEntry,
           ),
           _SettingTile(
+            icon: Icons.people_rounded,
+            color: const Color(0xFF20BF91),
+            title: '好友与聊天',
+            subtitle: '管理好友、查看申请与私聊',
+            onTap: () => _openSocial(const FriendsChatPage()),
+          ),
+          _SettingTile(
+            icon: Icons.notifications_rounded,
+            color: const Color(0xFFFF4380),
+            title: '学习消息',
+            subtitle: _unread == null ? '社区回复、采纳与好友通知' : '$_unread 条未读消息',
+            onTap: () => _openSocial(const LearningNotificationsPage()),
+          ),
+          _SettingTile(
+            icon: Icons.adjust_rounded,
+            color: const Color(0xFF8D68FF),
+            title: '专注学习',
+            subtitle: _focusStats == null
+                ? '查看专注记录与统计'
+                : '今日 ${(_focusStats!.todaySeconds / 60).toStringAsFixed(0)} 分钟 · 查看专注详情',
+            onTap: _openFocus,
+          ),
+          _SettingTile(
             icon: Icons.auto_awesome_rounded,
-            title: 'AI 大模型配置',
+            title: 'AI 模型配置',
             subtitle: _llmConfig?.isConfigured == true
                 ? '${_llmConfig!.provider.toUpperCase()} / ${_llmConfig!.effectiveModel}'
                 : '填写 API Key、Base URL 和模型 ID',
@@ -852,8 +1145,9 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           ),
           _SettingTile(
             icon: Icons.info_outline_rounded,
-            title: '账号信息',
-            subtitle: '查看账号名和最近登录时间',
+            color: const Color(0xFF73829A),
+            title: '账号与安全',
+            subtitle: '账号信息、登录邮箱与隐私设置',
             onTap: _showAccountInfo,
           ),
           const SizedBox(height: 8),
@@ -942,7 +1236,19 @@ class _FavoritesPageState extends State<FavoritesPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('我的收藏')),
+      appBar: AppBar(
+        title: const Text('我的收藏'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const CommunityPage(bookmarks: true),
+              ),
+            ),
+            child: const Text('社区收藏'),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: FutureBuilder<List<FavoriteCategorySummary>>(
@@ -1555,12 +1861,15 @@ class _BackgroundPreview extends StatelessWidget {
                   : const SizedBox.shrink(),
             )
           else if (hasPresetImage)
-            Image.asset(
-              preset.imageAsset!,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  const SizedBox.shrink(),
-            )
+            if (preset.imageAsset!.endsWith('.svg'))
+              SvgPicture.asset(preset.imageAsset!, fit: BoxFit.cover)
+            else
+              Image.asset(
+                preset.imageAsset!,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              )
           else
             const SizedBox.shrink(),
           DecoratedBox(
@@ -1583,89 +1892,16 @@ class _BackgroundPreview extends StatelessWidget {
   }
 }
 
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Colors.white),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeaderIconButton extends StatelessWidget {
-  const _HeaderIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
-          child: Ink(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.24),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Icon(icon, size: 18, color: Colors.white),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ========== Settings section ==========
 class _SettingTile extends StatelessWidget {
   const _SettingTile({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.color = AppColors.primary,
   });
   final IconData icon;
+  final Color color;
   final String title, subtitle;
   final VoidCallback onTap;
 
@@ -1681,9 +1917,8 @@ class _SettingTile extends StatelessWidget {
           child: Ink(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
             decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
+              color: const Color(0xFFF5F8FC),
               borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               children: [
@@ -1691,10 +1926,10 @@ class _SettingTile extends StatelessWidget {
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: AppColors.primarySoft,
+                    color: color.withValues(alpha: .08),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(icon, color: AppColors.primary, size: 20),
+                  child: Icon(icon, color: color, size: 23),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1713,7 +1948,7 @@ class _SettingTile extends StatelessWidget {
                         subtitle,
                         style: AppTextStyles.caption(
                           context,
-                        ).copyWith(fontWeight: FontWeight.w600),
+                        ).copyWith(fontWeight: FontWeight.w400),
                       ),
                     ],
                   ),
@@ -2261,92 +2496,6 @@ class _BackgroundPickerSheet extends StatelessWidget {
               }),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AccountInfoSheet extends StatelessWidget {
-  const _AccountInfoSheet({required this.profile});
-  final UserProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final lastLoginText = profile.lastLoginAt == null
-        ? '暂无记录'
-        : '${profile.lastLoginAt!.year}-${profile.lastLoginAt!.month.toString().padLeft(2, '0')}-${profile.lastLoginAt!.day.toString().padLeft(2, '0')} '
-              '${profile.lastLoginAt!.hour.toString().padLeft(2, '0')}:${profile.lastLoginAt!.minute.toString().padLeft(2, '0')}';
-
-    return _SheetContainer(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: AppColors.border,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text('账号信息', style: AppTextStyles.h2(context)),
-              const SizedBox(height: 16),
-              _InfoRow(label: '昵称', value: profile.primaryName),
-              _InfoRow(label: '账号', value: profile.username),
-              _InfoRow(label: '性别', value: profile.gender),
-              _InfoRow(
-                label: '年龄',
-                value: profile.age == null ? '未设置' : '${profile.age} 岁',
-              ),
-              _InfoRow(label: '最近登录', value: lastLoginText),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
-  final String label, value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 74,
-              child: Text(label, style: AppTextStyles.bodySmall(context)),
-            ),
-            Expanded(
-              child: Text(
-                value,
-                textAlign: TextAlign.right,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

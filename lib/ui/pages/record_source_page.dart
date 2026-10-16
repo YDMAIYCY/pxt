@@ -55,6 +55,12 @@ class _RecordSourcePageState extends State<RecordSourcePage> {
   @override
   Widget build(BuildContext context) {
     final source = _pages[_index];
+    if (source.sourceType == 'community') {
+      return Scaffold(appBar: AppBar(title: const Text('社区收藏原文')), body: FutureBuilder(
+        future: OcrTextRepository(database: widget.database).getByDocumentId(source.id),
+        builder: (context, snapshot) => SingleChildScrollView(padding: const EdgeInsets.all(20), child: SelectableText(snapshot.hasError ? '读取失败，请返回重试' : snapshot.data?.effectiveText ?? '正在读取…', style: AppTextStyles.body(context))),
+      ));
+    }
     if (source.sourceType == 'feishu_docx') {
       return FeishuSourceView(source: source, database: widget.database);
     }

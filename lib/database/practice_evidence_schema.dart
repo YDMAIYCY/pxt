@@ -17,15 +17,17 @@ Future<void> createPracticeEvidenceSchema(DatabaseExecutor db) async {
     previous_correct INTEGER NOT NULL, correct INTEGER NOT NULL,
     reason TEXT NOT NULL, created_at TEXT NOT NULL
   )''');
+  // A missing table means the evidence layer was never introduced; there is no
+  // column to add, and altering a nonexistent table would abort the upgrade.
   final columns = await db.rawQuery('PRAGMA table_info(learning_attempts)');
-  if (!columns.any((c) => c['name'] == 'submission_id')) {
+  if (columns.isNotEmpty && !columns.any((c) => c['name'] == 'submission_id')) {
     await db.execute(
       'ALTER TABLE learning_attempts ADD COLUMN submission_id '
       'INTEGER REFERENCES practice_submissions(id) ON DELETE CASCADE',
     );
   }
   final errors = await db.rawQuery('PRAGMA table_info(learning_errors)');
-  if (!errors.any((c) => c['name'] == 'submission_id')) {
+  if (errors.isNotEmpty && !errors.any((c) => c['name'] == 'submission_id')) {
     await db.execute(
       'ALTER TABLE learning_errors ADD COLUMN submission_id '
       'INTEGER REFERENCES practice_submissions(id) ON DELETE CASCADE',

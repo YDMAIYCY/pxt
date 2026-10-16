@@ -32,19 +32,20 @@ http.Response jsonResponse(Object data) => http.Response(
 );
 
 void main() {
-  test('catalog contains exactly the nine requested providers', () {
+  test('catalog contains exactly the supported providers', () {
     expect(LlmModelCatalog.providerPresets.map((p) => p.provider).toSet(), {
       'openai',
       'deepseek',
       'kimi',
       'minimax',
+      'zhipu',
       'opencode_go',
       'claude',
       'gemini',
       'siliconflow',
       'custom',
     });
-    expect(LlmModelCatalog.providerPresets, hasLength(9));
+    expect(LlmModelCatalog.providerPresets, hasLength(10));
   });
 
   for (final provider in [

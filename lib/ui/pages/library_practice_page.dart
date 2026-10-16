@@ -14,6 +14,7 @@ import '../../database/practice_session_repository.dart';
 import '../../generator/library_practice_service.dart';
 import '../../generator/wrong_question_training_service.dart';
 import '../../database/ai_generation_repository.dart';
+import '../../learning/learning_events.dart';
 import '../theme/app_theme.dart';
 import 'document_detail_page.dart';
 import 'ocr_result_page.dart';
@@ -23,6 +24,10 @@ class LibraryPracticePage extends StatefulWidget {
   const LibraryPracticePage({
     this.libraryId,
     this.recordId,
+    this.initialConceptId,
+    this.initialQuestionId,
+    this.documentId,
+    this.questionIds,
     this.database,
     this.embedded = false,
     this.wrongOnly = false,
@@ -30,6 +35,10 @@ class LibraryPracticePage extends StatefulWidget {
   });
   final int? libraryId;
   final int? recordId;
+  final int? initialConceptId;
+  final int? initialQuestionId;
+  final int? documentId;
+  final List<int>? questionIds;
   final AppDatabase? database;
   final bool embedded;
   final bool wrongOnly;
@@ -47,16 +56,41 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
   bool _busy = false;
   int _count = 5;
   String _difficulty = '基础理解';
+  bool get _scopeLocked =>
+      widget.recordId != null ||
+      widget.documentId != null ||
+      widget.initialConceptId != null ||
+      widget.initialQuestionId != null ||
+      widget.questionIds != null;
+  List<int>? get _questionIds =>
+      widget.questionIds ??
+      (widget.initialQuestionId == null ? null : [widget.initialQuestionId!]);
   @override
   void initState() {
     super.initState();
     _libraryId = widget.libraryId;
     _recordId = widget.recordId;
+    _conceptId = widget.initialConceptId;
     _wrongOnly = widget.wrongOnly;
     _future = _load();
+    LearningEvents.changed.addListener(_learningChanged);
+  }
+
+  @override
+  void dispose() {
+    LearningEvents.changed.removeListener(_learningChanged);
+    super.dispose();
+  }
+
+  void _learningChanged() {
+    if (mounted) _refresh();
   }
 
   Future<_PracticeData> _load() async {
+    if (widget.initialQuestionId != null && widget.questionIds != null &&
+        !widget.questionIds!.contains(widget.initialQuestionId)) {
+      throw StateError('起始题目不在指定题目列表中');
+    }
     final user = await AuthRepository(
       database: widget.database,
     ).getCurrentUserProfile();
@@ -64,8 +98,41 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
     final libraries = await KnowledgeLibraryRepository(
       database: widget.database,
     ).fetchLibraries(user.id);
-    _libraryId ??= libraries.firstOrNull?.id;
-    if (_libraryId == null) throw StateError('请先创建知识库');
+    final db = await (widget.database ?? AppDatabase.instance).database;
+    if (_scopeLocked) {
+      final ids = _questionIds;
+      final documents = await db.rawQuery(
+        '''SELECT DISTINCT d.id, d.library_id, d.import_record_id
+        FROM source_documents d WHERE d.user_id = ?
+        ${widget.documentId == null ? '' : 'AND d.id = ?'}
+        ${widget.recordId == null ? '' : 'AND d.import_record_id = ?'}
+        ${widget.initialConceptId == null ? '' : 'AND EXISTS (SELECT 1 FROM knowledge_concepts c WHERE c.id = ? AND c.user_id = d.user_id AND c.document_id = d.id)'}
+        ${ids == null
+            ? ''
+            : ids.isEmpty
+            ? 'AND 0'
+            : 'AND EXISTS (SELECT 1 FROM practice_questions q WHERE q.document_id = d.id AND q.id IN (${List.filled(ids.length, '?').join(',')}))'}''',
+        [
+          user.id,
+          ?widget.documentId,
+          ?widget.recordId,
+          ?widget.initialConceptId,
+          if (ids != null) ...ids,
+        ],
+      );
+      if (documents.isEmpty) throw StateError('所选练习来源不存在或无权访问');
+      final libraryIds = documents.map((d) => d['library_id']).toSet();
+      if (widget.libraryId != null &&
+          libraryIds.any((id) => id != widget.libraryId)) {
+        throw StateError('所选练习不在指定知识库');
+      }
+      _libraryId =
+          widget.libraryId ??
+          (libraryIds.length == 1 ? libraryIds.single as int? : null);
+    } else {
+      _libraryId ??= libraries.firstOrNull?.id;
+      if (_libraryId == null) throw StateError('请先创建知识库');
+    }
     final records = await ImportRecordRepository(
       database: widget.database,
     ).list(user.id, libraryId: _libraryId);
@@ -74,20 +141,40 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
       libraryId: _libraryId,
       recordId: _recordId,
       conceptId: _conceptId,
+      documentId: widget.documentId,
       wrongOnly: _wrongOnly,
     );
-    final db = await (widget.database ?? AppDatabase.instance).database;
     final concepts = await db.rawQuery(
       '''SELECT DISTINCT c.id, c.name
       FROM knowledge_concepts c JOIN source_documents d ON d.id=c.document_id
-      WHERE c.user_id = ? AND d.user_id=c.user_id AND d.library_id = ?
+      WHERE c.user_id = ? AND d.user_id=c.user_id
+        ${_libraryId == null ? '' : 'AND d.library_id = ?'}
         ${_recordId == null ? '' : 'AND d.import_record_id = ?'}
+        ${widget.documentId == null ? '' : 'AND d.id = ?'}
       ORDER BY c.name''',
-      [user.id, _libraryId, ?_recordId],
+      [user.id, ?_libraryId, ?_recordId, ?widget.documentId],
     );
-    final questions = await PracticeSessionRepository(
-      database: widget.database,
-    ).questions(scope, dueOnly: _dueOnly);
+    final questions = await PracticeSessionRepository(database: widget.database)
+        .questions(
+          scope,
+          dueOnly: _dueOnly,
+          questionIds: _questionIds,
+          limit: _questionIds?.length ?? 500,
+        );
+    if (_questionIds != null) {
+      if (questions.length != _questionIds!.toSet().length) {
+        throw StateError('部分指定题目已删除或不在当前范围');
+      }
+      final order = <int>{
+        ?widget.initialQuestionId,
+        ..._questionIds!,
+      }.toList();
+      questions.sort(
+        (a, b) => order
+            .indexOf(a.question.id)
+            .compareTo(order.indexOf(b.question.id)),
+      );
+    }
     return _PracticeData(scope, libraries, records, concepts, questions);
   }
 
@@ -108,6 +195,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
         libraryId: _libraryId,
         recordId: _recordId,
         conceptId: _conceptId,
+        documentId: widget.documentId,
       );
       final ids = await LibraryPracticeService(
         database: widget.database,
@@ -157,15 +245,18 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
             const Text('选择范围 → 作答 → 回看来源 → 变式 → 间隔复习。'),
             const SizedBox(height: 20),
             DropdownButtonFormField<int>(
-              initialValue: _libraryId,
+              initialValue: _libraryId ?? -1,
               isExpanded: true,
               decoration: const InputDecoration(labelText: '知识库'),
-              items: data.libraries
-                  .map(
-                    (l) => DropdownMenuItem(value: l.id, child: Text(l.name)),
-                  )
-                  .toList(),
-              onChanged: widget.recordId != null || _busy
+              items: [
+                if (_libraryId == null)
+                  const DropdownMenuItem(value: -1, child: Text('所选题目的知识库')),
+                ...data.libraries
+                    .map(
+                      (l) => DropdownMenuItem(value: l.id, child: Text(l.name)),
+                    ),
+              ],
+              onChanged: _scopeLocked || _busy
                   ? null
                   : (id) {
                       _libraryId = id;
@@ -186,7 +277,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
                   (r) => DropdownMenuItem(value: r.id, child: Text(r.title)),
                 ),
               ],
-              onChanged: widget.recordId != null || _busy
+              onChanged: _scopeLocked || _busy
                   ? null
                   : (id) {
                       _recordId = id == -1 ? null : id;
@@ -209,7 +300,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
                   ),
                 ),
               ],
-              onChanged: _busy
+              onChanged: _scopeLocked || _busy
                   ? null
                   : (id) {
                       _conceptId = id == -1 ? null : id;
@@ -220,7 +311,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
               contentPadding: EdgeInsets.zero,
               title: const Text('只练错题和薄弱题'),
               value: _wrongOnly,
-              onChanged: _busy
+              onChanged: _questionIds != null || _busy
                   ? null
                   : (v) {
                       _wrongOnly = v;
@@ -231,7 +322,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
               contentPadding: EdgeInsets.zero,
               title: const Text('只看已到复习时间'),
               value: _dueOnly,
-              onChanged: _busy
+              onChanged: _questionIds != null || _busy
                   ? null
                   : (v) {
                       _dueOnly = v;

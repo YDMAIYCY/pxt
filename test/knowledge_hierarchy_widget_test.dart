@@ -71,6 +71,11 @@ void main() {
       await pump(tester, BookLibraryPage(database: app));
       await tester.tap(find.text('添加'));
       await tester.pumpAndSettle();
+      // 添加 now opens the import-source sheet first; manual creation is one option.
+      await tester.tap(find.text('手动创建知识库'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('继续'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.widgetWithText(TextField, '知识库名称'), '自定义课程');
       await tester.tap(find.text('网络节点'));
       await tester.pumpAndSettle();

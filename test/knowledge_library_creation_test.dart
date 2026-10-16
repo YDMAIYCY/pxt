@@ -133,7 +133,10 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
   ];
 
   @override
-  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId) async {
+  Future<List<KnowledgeLibraryRecord>> fetchLibraries(
+    int userId, {
+    String source = 'all',
+  }) async {
     return List<KnowledgeLibraryRecord>.of(_libraries);
   }
 

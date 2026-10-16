@@ -33,6 +33,13 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Local cloud configuration and live-test credentials
+/config/supabase.local.json
+/config/community-test.local.json
+/assets/config/supabase.public.json
+/supabase/.temp/
+/tools/community-db-check/node_modules/
+
 # Symbolication related
 app.*.symbols
 

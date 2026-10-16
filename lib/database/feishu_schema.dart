@@ -22,9 +22,17 @@ Future<void> createFeishuSchema(DatabaseExecutor db) async {
 
 Future<void> upgradeFeishuToV22(DatabaseExecutor db) async {
   final columns = await db.rawQuery('PRAGMA table_info(feishu_documents)');
-  if (!columns.any((c) => c['name'] == 'library_id')) {
+  if (columns.isNotEmpty && !columns.any((c) => c['name'] == 'library_id')) {
+    // A legacy database may predate import_records, so the backfill must not
+    // require a column that was never created.
+    final sourceColumns = await db.rawQuery(
+      'PRAGMA table_info(source_documents)',
+    );
+    final hasImportRecord = sourceColumns.any(
+      (c) => c['name'] == 'import_record_id',
+    );
     final unfiled = await db.rawQuery(
-      '''SELECT s.id,s.user_id,s.import_record_id
+      '''SELECT s.id,s.user_id${hasImportRecord ? ',s.import_record_id' : ''}
       FROM source_documents s JOIN feishu_documents f ON f.source_id=s.id
       WHERE s.library_id IS NULL''',
     );
@@ -89,7 +97,8 @@ Future<void> upgradeFeishuToV22(DatabaseExecutor db) async {
   final sourceColumns = await db.rawQuery(
     'PRAGMA table_info(feishu_containers)',
   );
-  if (!sourceColumns.any((c) => c['name'] == 'sync_mode')) {
+  if (sourceColumns.isNotEmpty &&
+      !sourceColumns.any((c) => c['name'] == 'sync_mode')) {
     await db.execute(
       'ALTER TABLE feishu_containers RENAME TO feishu_containers_v21',
     );

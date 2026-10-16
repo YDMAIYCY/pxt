@@ -174,6 +174,64 @@ class LlmModelCatalog {
       ],
     ),
     LlmProviderPreset(
+      provider: LlmProvider.zhipu,
+      label: '智谱 GLM',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      description: '国内直连的 GLM 系列。注意免费体验包通常只覆盖指定模型，选错模型会报 429。',
+      models: [
+        LlmModelOption(
+          id: 'glm-5.3-flash',
+          label: 'GLM-5.3 Flash',
+          description: 'GLM-5.3 快速版，智谱免费体验包默认覆盖此模型。',
+        ),
+        LlmModelOption(
+          id: 'glm-4.6',
+          label: 'GLM-4.6',
+          description: '旗舰模型，适合复杂推理和长文本处理。',
+        ),
+        LlmModelOption(
+          id: 'glm-4.5',
+          label: 'GLM-4.5',
+          description: '通用主力模型，兼顾推理与生成。',
+        ),
+        LlmModelOption(
+          id: 'glm-4.5-air',
+          label: 'GLM-4.5 Air',
+          description: '轻量版本，速度更快、成本更低。',
+        ),
+        LlmModelOption(
+          id: 'glm-4.5-flash',
+          label: 'GLM-4.5 Flash',
+          description: '快速版，适合批量任务。是否有免费额度取决于账户套餐。',
+        ),
+        LlmModelOption(
+          id: 'glm-4-plus',
+          label: 'GLM-4 Plus',
+          description: 'GLM-4 系列高性能版本。',
+        ),
+        LlmModelOption(
+          id: 'glm-4-air',
+          label: 'GLM-4 Air',
+          description: '高性价比版本，适合批量生成。',
+        ),
+        LlmModelOption(
+          id: 'glm-4-flash',
+          label: 'GLM-4 Flash',
+          description: '轻量快速版，适合摘要和分类。是否有免费额度取决于账户套餐。',
+        ),
+        LlmModelOption(
+          id: 'glm-4-long',
+          label: 'GLM-4 Long',
+          description: '长上下文版本，适合超长讲义。',
+        ),
+        LlmModelOption(
+          id: 'glm-4v-plus',
+          label: 'GLM-4V Plus',
+          description: '视觉理解模型，适合图片题目识别。',
+        ),
+      ],
+    ),
+    LlmProviderPreset(
       provider: 'openai',
       label: 'OpenAI',
       baseUrl: 'https://api.openai.com/v1',
@@ -481,6 +539,10 @@ class LlmModelCatalog {
         return host.contains('minimax') || host.contains('minimaxi');
       case 'openai':
         return host.contains('openai.com');
+      case 'zhipu':
+        return host.contains('bigmodel.cn') ||
+            host.contains('zhipu') ||
+            host.endsWith('z.ai');
       default:
         return false;
     }
@@ -496,6 +558,10 @@ class LlmModelCatalog {
         return 'minimax';
       case 'chatgpt':
         return 'openai';
+      case 'zhipuai':
+      case 'glm':
+      case 'bigmodel':
+        return 'zhipu';
       default:
         return normalized;
     }

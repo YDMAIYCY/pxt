@@ -12,6 +12,10 @@ import '../../database/llm_config_repository.dart';
 import '../../database/models/ai_chat_records.dart';
 import '../../database/models/knowledge_context_source.dart';
 import '../../database/practice_session_repository.dart';
+import '../../database/ai_generation_repository.dart';
+import '../../database/source_document_repository.dart';
+import '../../focus/repository/focus_repository.dart';
+import '../../learning/learning_task_repository.dart';
 import '../../generator/ai_chat_service.dart';
 import '../widgets/eclaw_chat_widgets.dart';
 import 'document_detail_page.dart';
@@ -23,6 +27,8 @@ import 'library_practice_page.dart';
 import 'record_source_page.dart';
 import 'tabs/focus_tab_page.dart';
 import 'tabs/knowledge_tab_page.dart';
+import 'tabs/tasks_tab_page.dart';
+import 'learning_concept_page.dart';
 
 class AiChatPage extends StatefulWidget {
   const AiChatPage({
@@ -435,7 +441,57 @@ class _AiChatPageState extends State<AiChatPage> {
         case 'focus':
           page = Scaffold(
             appBar: AppBar(title: const Text('专注与学习任务')),
-            body: FocusTabPage(authRepository: _chat.auth),
+            body: FocusTabPage(
+              authRepository: _chat.auth,
+              focusRepository: FocusRepository(database: _chat.database),
+              learningTaskRepository: LearningTaskRepository(
+                database: _chat.database,
+              ),
+              initialTaskId: result['taskId'] as int?,
+            ),
+          );
+        case 'tasks':
+          page = Scaffold(
+            appBar: AppBar(title: const Text('学习任务')),
+            body: TasksTabPage(
+              authRepository: _chat.auth,
+              learningTaskRepository: LearningTaskRepository(
+                database: _chat.database,
+              ),
+              sourceDocumentRepository: SourceDocumentRepository(
+                database: _chat.database,
+              ),
+              aiGenerationRepository: AiGenerationRepository(
+                database: _chat.database,
+              ),
+              onStartFocus: (taskId) async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      appBar: AppBar(title: const Text('专注')),
+                      body: FocusTabPage(
+                        authRepository: _chat.auth,
+                        focusRepository: FocusRepository(
+                          database: _chat.database,
+                        ),
+                        learningTaskRepository: LearningTaskRepository(
+                          database: _chat.database,
+                        ),
+                        initialTaskId: taskId,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        case 'concept':
+          final conceptId = result['conceptId'] as int?;
+          if (conceptId == null) throw StateError('缺少知识点，请重新选择');
+          page = LearningConceptPage(
+            conceptId: conceptId,
+            database: _chat.database,
           );
         case 'source':
           page = record != null

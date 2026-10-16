@@ -22,6 +22,9 @@ import 'record_results_page.dart';
 import 'record_source_page.dart';
 import '../../agent/eclaw_context.dart';
 import 'ai_chat_page.dart';
+import '../../community/knowledge_community_bridge.dart';
+import 'community/publish_question_page.dart';
+import 'community/question_detail_page.dart';
 
 class ImportRecordDetailPage extends StatefulWidget {
   const ImportRecordDetailPage({
@@ -450,6 +453,14 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                       ),
                       const Spacer(),
                       IconButton(
+                        tooltip: '引用知识卡片到社区',
+                        icon: const Icon(Icons.forum_outlined),
+                        onPressed: _busy ? null : () async {
+                          await Navigator.push(context, MaterialPageRoute(builder: (_) => const PublishQuestionPage()));
+                          if (mounted) await _refresh();
+                        },
+                      ),
+                      IconButton(
                         tooltip: '问 EClaw',
                         onPressed: _busy ? null : () => Navigator.push(context,
                           MaterialPageRoute(builder: (_) => AiChatPage(database: widget.database,
@@ -554,6 +565,13 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                   KnowledgeSearchField(
                     hint: '搜索本次记录生成内容…',
                     onChanged: (v) => setState(() => _query = v),
+                  ),
+                  FutureBuilder(
+                    future: KnowledgeCommunityBridge(database: widget.database).linksForRecord(widget.userId, widget.recordId),
+                    builder: (context, links) => Column(children: [
+                      for (final link in links.data ?? <Map<String, Object?>>[])
+                        ListTile(leading: const Icon(Icons.link, color: AppColors.primary), title: const Text('查看关联的社区问题'), subtitle: const Text('登录后查看社区原文'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => QuestionDetailPage(questionId: link['question_id'] as String)))),
+                    ]),
                   ),
                   if (_query.trim().isNotEmpty)
                     Padding(

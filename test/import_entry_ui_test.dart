@@ -1,3 +1,4 @@
+import 'support/empty_learning_task_repository.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -5,12 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pxt1/camera/document_input_contract.dart';
-import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
-import 'package:pxt1/database/document_batch_repository.dart';
-import 'package:pxt1/database/knowledge_graph_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
-import 'package:pxt1/database/models/ai_result_records.dart';
 import 'package:pxt1/database/models/document_batch_record.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
@@ -33,11 +30,9 @@ void main() {
           MaterialApp(
             home: Scaffold(
               body: HomeTabPage(
+                learningTaskRepository: EmptyLearningTaskRepository(),
                 authRepository: _Auth(),
                 sourceDocumentRepository: _Documents(),
-                documentBatchRepository: _Batches(),
-                aiGenerationRepository: _Ai(),
-                knowledgeGraphRepository: _Graph(),
                 knowledgeLibraryRepository: _Libraries(),
                 documentIngestService: ingest,
               ),
@@ -144,15 +139,6 @@ class _Documents extends SourceDocumentRepository {
   }) async => [];
 }
 
-class _Batches extends DocumentBatchRepository {
-  @override
-  Future<List<DocumentBatchRecord>> fetchRecentBatches({
-    required int userId,
-    int? libraryId,
-    int limit = 20,
-  }) async => [];
-}
-
 class _Libraries extends KnowledgeLibraryRepository {
   @override
   Future<List<KnowledgeLibraryRecord>> fetchLibraries(
@@ -167,33 +153,9 @@ class _Libraries extends KnowledgeLibraryRepository {
       updatedAt: DateTime(2026),
     ),
   ];
-}
 
-class _Graph extends KnowledgeGraphRepository {
   @override
-  Future<List<KnowledgeNextBestAction>> fetchNextBestActions({
+  Future<List<KnowledgeLibraryStudySummary>> fetchStudySummaries({
     required int userId,
-    int? libraryId,
-    int limit = 3,
-  }) async => [];
-}
-
-class _Ai extends AiGenerationRepository {
-  @override
-  Future<List<GeneratedContentRecord>> fetchRecentGeneratedContents({
-    required int userId,
-    int? libraryId,
-    int limit = 12,
-  }) async => [];
-  @override
-  Future<StudyOverviewStats> fetchStudyOverviewStats(int userId) async =>
-      const StudyOverviewStats(
-        documentCount: 0,
-        ocrSuccessCount: 0,
-        generatedResultCount: 0,
-        practiceQuestionCount: 0,
-        pendingPracticeCount: 0,
-        wrongQuestionCount: 0,
-        masteredQuestionCount: 0,
-      );
+  }) async => const [];
 }

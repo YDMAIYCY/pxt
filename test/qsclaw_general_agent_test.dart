@@ -92,7 +92,10 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
   final createdNames = <String>[];
 
   @override
-  Future<List<KnowledgeLibraryRecord>> fetchLibraries(int userId) async {
+  Future<List<KnowledgeLibraryRecord>> fetchLibraries(
+    int userId, {
+    String source = 'all',
+  }) async {
     return libraries;
   }
 

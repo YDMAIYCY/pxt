@@ -103,7 +103,9 @@ class LocalChineseVoiceSpeaker implements VoiceSpeaker {
           installed &&
           (Platform.isAndroid ? local : network != true && network != 'true');
     });
-    if (available.isEmpty) throw StateError('未安装离线普通话 TTS 语音，请在系统设置安装');
+    if (available.isEmpty) {
+      throw StateError('未找到可用的中文离线语音，请在系统设置的“文字转语音输出”中选择中文引擎');
+    }
     final voice = available.first;
     await _tts.setVoice({
       'name': voice['name'].toString(),

@@ -118,6 +118,38 @@ void main() {
     );
 
     test(
+      'unreachable hub host falls back to the mirror',
+      () async {
+        final requested = <String>[];
+        models = OfflineModelManager(
+          documentsDirectory: temp,
+          files: [
+            OfflineModelFile(
+              'model.onnx',
+              payload.length,
+              sha256.convert(payload).toString(),
+              'https://huggingface.co/owner/repo/resolve/rev/model.onnx',
+            ),
+          ],
+          clientFactory: () => MockClient((request) async {
+            requested.add(request.url.toString());
+            if (request.url.host == 'huggingface.co') {
+              // What mainland China sees: the hub is unreachable at transport level.
+              throw const SocketException('hub unreachable');
+            }
+            return http.Response.bytes(payload, 200);
+          }),
+        );
+        await models.ensure();
+        expect(models.ready, isTrue);
+        expect(requested, [
+          'https://huggingface.co/owner/repo/resolve/rev/model.onnx',
+          'https://hf-mirror.com/owner/repo/resolve/rev/model.onnx',
+        ]);
+      },
+    );
+
+    test(
       'cancel pending HTTP never produces ready or fake completion',
       () async {
         final response = Completer<http.Response>();

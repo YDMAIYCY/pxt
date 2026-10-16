@@ -441,6 +441,8 @@ class EClawTaskCard extends StatelessWidget {
     'practice' => '去练习',
     'graph' => '打开图谱',
     'focus' => '查看学习任务',
+    'tasks' => '查看任务中心',
+    'concept' => '查看知识点',
     'source' => '查看资料',
     'wrong' => '查看错题',
     'interview' => '准备面试',

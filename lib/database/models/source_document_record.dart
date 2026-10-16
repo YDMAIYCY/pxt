@@ -97,6 +97,8 @@ class SourceDocumentRecord {
 
   String get sourceTypeLabel {
     switch (sourceType) {
+      case 'community':
+        return '社区文字';
       case SourceDocumentSourceType.feishuDocx:
         return '飞书云文档';
       case SourceDocumentSourceType.cameraCapture:

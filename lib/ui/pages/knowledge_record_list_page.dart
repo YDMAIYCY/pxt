@@ -10,6 +10,7 @@ import '../../database/models/import_record.dart';
 import '../../database/models/knowledge_library_record.dart';
 import '../../database/source_document_repository.dart';
 import '../../pipeline/document_ingest_service.dart';
+import '../../learning/learning_events.dart';
 import '../theme/app_theme.dart';
 import '../widgets/knowledge_book_cover.dart';
 import '../widgets/knowledge_components.dart';
@@ -17,6 +18,7 @@ import '../widgets/knowledge_library_editor.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'import_record_detail_page.dart';
 import 'knowledge_graph_page.dart';
+import 'learning_concept_page.dart';
 
 class BookDetailPage extends StatefulWidget {
   const BookDetailPage({required this.library, this.database, this.autoImport = false, super.key});
@@ -30,6 +32,7 @@ class BookDetailPage extends StatefulWidget {
 class _BookDetailPageState extends State<BookDetailPage> {
   late KnowledgeLibraryRecord _library = widget.library;
   late Future<List<ImportRecord>> _future;
+  List<Map<String, Object?>> _concepts = [];
   String _query = '';
   String? _source;
   bool _oldest = false, _importing = false;
@@ -39,11 +42,31 @@ class _BookDetailPageState extends State<BookDetailPage> {
   void initState() {
     super.initState();
     _future = _load();
+    LearningEvents.changed.addListener(_learningChanged);
     if (widget.autoImport) WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _import(); });
   }
 
-  Future<List<ImportRecord>> _load() =>
-      _records.list(_library.userId, libraryId: _library.id, query: _query);
+  @override
+  void dispose() {
+    LearningEvents.changed.removeListener(_learningChanged);
+    super.dispose();
+  }
+
+  void _learningChanged() {
+    if (mounted) setState(() => _future = _load());
+  }
+
+  Future<List<ImportRecord>> _load() async {
+    final records = await _records.list(
+        _library.userId, libraryId: _library.id, query: _query);
+    final db = await (widget.database ?? AppDatabase.instance).database;
+    _concepts = await db.rawQuery('''SELECT c.id, c.name, c.mastery_score,
+      d.import_record_id FROM knowledge_concepts c
+      JOIN source_documents d ON d.id=c.document_id AND d.user_id=c.user_id
+      WHERE c.user_id=? AND d.library_id=? ORDER BY c.name, c.id''',
+      [_library.userId, _library.id]);
+    return records;
+  }
   Future<void> _refresh() async {
     setState(() {
       _future = _load();
@@ -407,7 +430,29 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   ...records.map(
                     (r) => Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: ImportRecordTile(record: r, onTap: () => _open(r)),
+                      child: Column(children: [
+                        ImportRecordTile(record: r, onTap: () => _open(r)),
+                        if (_concepts.any((c) => c['import_record_id'] == r.id))
+                          ExpansionTile(
+                            title: const Text('本次记录的知识点'),
+                            children: _concepts
+                                .where((c) => c['import_record_id'] == r.id)
+                                .map((c) => ListTile(
+                                  title: Text(c['name'] as String),
+                                  subtitle: Text('掌握 ${c['mastery_score']} / 100'),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () async {
+                                    await Navigator.push(context, MaterialPageRoute(
+                                      builder: (_) => LearningConceptPage(
+                                        conceptId: c['id'] as int,
+                                        database: widget.database,
+                                      ),
+                                    ));
+                                    if (mounted) await _refresh();
+                                  },
+                                )).toList(),
+                          ),
+                      ]),
                     ),
                   ),
                 ],

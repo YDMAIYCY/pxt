@@ -11,12 +11,13 @@ class ProfilePresetIds {
   static const String avatarLogo = 'avatar_logo';
 
   static const String backgroundAurora = 'background_aurora';
+  static const String backgroundLake = 'background_lake';
   static const String backgroundCosmos = 'background_cosmos';
   static const String backgroundMist = 'background_mist';
   static const String backgroundSunrise = 'background_sunrise';
 
   static const String defaultAvatarStyle = avatarSky;
-  static const String defaultBackgroundStyle = backgroundAurora;
+  static const String defaultBackgroundStyle = backgroundLake;
 }
 
 // ========== 用户资料模型 ==========

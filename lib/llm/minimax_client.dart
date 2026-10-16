@@ -117,6 +117,8 @@ class MiniMaxClient {
         return 'Kimi';
       case LlmProvider.minimax:
         return 'MiniMax';
+      case LlmProvider.zhipu:
+        return '智谱 GLM';
       case LlmProvider.custom:
         return '自定义模型';
       default:

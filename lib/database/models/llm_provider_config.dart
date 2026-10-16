@@ -10,6 +10,7 @@ class LlmProvider {
   static const String claude = 'claude';
   static const String gemini = 'gemini';
   static const String siliconflow = 'siliconflow';
+  static const String zhipu = 'zhipu';
 
   static String normalize(String? value) {
     final raw = (value ?? '').trim().toLowerCase();
@@ -25,6 +26,11 @@ class LlmProvider {
       case 'opencode-go':
       case 'opencode':
         return opencodeGo;
+      case zhipu:
+      case 'zhipuai':
+      case 'glm':
+      case 'bigmodel':
+        return zhipu;
       default:
         return raw;
     }

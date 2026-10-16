@@ -32,22 +32,20 @@ void main() {
       final graphSource = File(
         'lib/database/knowledge_graph_repository.dart',
       ).readAsStringSync();
-      final generationSource = File(
-        'lib/database/ai_generation_repository.dart',
-      ).readAsStringSync();
-      final homeSource = File(
-        'lib/ui/pages/tabs/home_tab_page.dart',
+      final practiceSource = File(
+        'lib/database/practice_session_repository.dart',
       ).readAsStringSync();
 
-      expect(
-        graphSource,
-        contains('Future<void> updateMasteryFromPracticeQuestion'),
-      );
+      // Next-best-action suggestions are still derived by the graph repository.
       expect(graphSource, contains('Future<List<KnowledgeNextBestAction>>'));
       expect(graphSource, contains('prerequisite'));
-      expect(generationSource, contains('isCorrect: false'));
-      expect(generationSource, contains('isCorrect: true'));
-      expect(homeSource, contains('_NextBestActionSection'));
+
+      // Mastery is updated from practice outcomes by the evidence-based
+      // summariser in the practice session repository. The behaviour itself is
+      // exercised end-to-end in learning_task_repository_test.dart.
+      expect(practiceSource, contains('class MasteryEvidence'));
+      expect(practiceSource, contains("'mastery_score'"));
+      expect(practiceSource, contains("'weakness_score'"));
     });
 
     test(
@@ -80,8 +78,8 @@ void main() {
         );
 
         expect(reply, 'grounded reply');
-        expect(client.systemPrompt, contains('只根据【本地知识库资料】回答'));
-        expect(client.messages.single['content'], contains('资料 1'));
+        expect(client.systemPrompt, contains('根据用户提供的真实知识库证据回答'));
+        expect(client.messages.single['content'], contains('"citation":1'));
         expect(client.messages.single['content'], contains('高数讲义第3页'));
         expect(client.messages.single['content'], contains('函数单调性怎么判断？'));
       },

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'package:pxt1/agent/qsclaw_agent_service.dart';
 import 'package:pxt1/database/ai_chat_repository.dart';
+import 'package:pxt1/database/app_database.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/knowledge_context_repository.dart';
 import 'package:pxt1/database/llm_config_repository.dart';
@@ -14,92 +15,152 @@ import 'package:pxt1/generator/ai_chat_service.dart';
 import 'package:pxt1/ui/pages/ai_chat_page.dart';
 
 void main() {
-  testWidgets('QSClaw creates, renames, switches, and deletes chats', (
+  TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  late AppDatabase app;
+  late Database db;
+
+  setUp(() async {
+    app = await AppDatabase.openForTesting(databaseFactoryFfi);
+    db = await app.database;
+    // EClaw resolves its knowledge scope, session ownership and agent tasks
+    // through real repositories, so the signed-in user has to exist.
+    await db.insert('users', {
+      'id': _testUser.id,
+      'username': 'tester',
+      'password_hash': 'x',
+      'password_salt': 'x',
+      'created_at': '2026-05-29T08:00:00.000Z',
+      'updated_at': '2026-05-29T08:00:00.000Z',
+    });
+  });
+
+  tearDown(() async => db.close());
+
+  testWidgets('EClaw creates, renames, switches, and deletes chats', (
     tester,
   ) async {
-    final repository = _FakeAiChatRepository();
+    final chats = AiChatRepository(database: app);
+    // testWidgets runs the body in a fake-async zone, so real SQLite I/O only
+    // progresses inside runAsync.
+    final seededId = await tester.runAsync(() async {
+      final seeded = await chats.createSession(
+        userId: _testUser.id,
+        title: '函数复习',
+      );
+      await chats.appendMessage(
+        sessionId: seeded.id,
+        role: AiChatMessageRole.assistant,
+        content: '先看定义',
+      );
+      return seeded.id;
+    });
 
     await tester.pumpWidget(
       MaterialApp(
         home: AiChatPage(
-          authRepository: _FakeAuthRepository(),
-          llmConfigRepository: _FakeLlmConfigRepository(),
-          aiChatRepository: repository,
-          knowledgeContextRepository: _FakeKnowledgeContextRepository(),
+          database: app,
+          authRepository: _FakeAuthRepository(app),
+          llmConfigRepository: _FakeLlmConfigRepository(_testConfig, app),
+          aiChatRepository: chats,
+          knowledgeContextRepository: _FakeKnowledgeContextRepository(app),
           aiChatService: _FakeAiChatService(),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.text('EClaw'), findsOneWidget);
-    expect(find.text('先看定义'), findsOneWidget);
+    expect(find.textContaining('先看定义'), findsOneWidget);
 
     await tester.tap(find.byTooltip('对话菜单'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.text('新建对话'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     expect(find.text('EClaw'), findsWidgets);
 
     await tester.enterText(find.byType(TextField), '导数是什么');
     await tester.tap(find.byTooltip('发送'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     expect(find.textContaining('这是 AI 回复'), findsOneWidget);
 
     await tester.tap(find.byTooltip('对话菜单'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.text('重命名对话'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.enterText(find.byType(TextField).last, '导数冲刺');
     await tester.tap(find.widgetWithText(FilledButton, '保存'));
-    await tester.pumpAndSettle();
-    expect(
-      repository.sessions.any((session) => session.title == '导数冲刺'),
-      isTrue,
+    await _settle(tester);
+    final titlesAfterRename = await tester.runAsync(
+      () async => (await db.query('ai_chat_sessions')).map(
+        (row) => row['title'],
+      ),
     );
+    expect(titlesAfterRename, contains('导数冲刺'));
 
     await tester.tap(find.byTooltip('历史对话'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.text('函数复习').last);
-    await tester.pumpAndSettle();
-    expect(find.text('先看定义'), findsOneWidget);
+    await _settle(tester);
+    expect(find.textContaining('先看定义'), findsOneWidget);
 
     await tester.tap(find.byTooltip('对话菜单'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.text('删除对话'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.widgetWithText(FilledButton, '删除'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
-    expect(repository.deletedSessionIds, contains(1));
+    final remaining = await tester.runAsync(() => db.query('ai_chat_sessions'));
     expect(
-      repository.sessions.any((session) => session.title == '导数冲刺'),
-      isTrue,
+      remaining!.map((row) => row['id']),
+      isNot(contains(seededId)),
+      reason: '删除的是当前打开的会话',
+    );
+    expect(
+      remaining.map((row) => row['title']),
+      contains('导数冲刺'),
     );
   });
 
-  testWidgets('QSClaw command returns an execution report', (tester) async {
+  testWidgets('EClaw gates a debug write behind explicit confirmation', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: AiChatPage(
-          authRepository: _FakeAuthRepository(),
-          llmConfigRepository: _FakeLlmConfigRepository(),
-          aiChatRepository: _FakeAiChatRepository.empty(),
-          knowledgeContextRepository: _FakeKnowledgeContextRepository(),
+          database: app,
+          authRepository: _FakeAuthRepository(app),
+          // An unconfigured provider keeps task planning local and
+          // deterministic instead of calling the model.
+          llmConfigRepository: _FakeLlmConfigRepository(null, app),
+          aiChatRepository: AiChatRepository(database: app),
+          knowledgeContextRepository: _FakeKnowledgeContextRepository(app),
           aiChatService: _FakeAiChatService(),
-          qsClawAgentService: _FakeQsClawAgentService(),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await tester.enterText(find.byType(TextField), '植入演示数据');
     await tester.tap(find.byTooltip('发送'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
-    expect(find.textContaining('已完成'), findsOneWidget);
-    expect(find.textContaining('已为当前调试账号植入演示数据'), findsOneWidget);
+    // Seeding demo data writes to the database, so the executor has to stop and
+    // ask before running the tool.
+    expect(find.textContaining('请确认操作'), findsOneWidget);
   });
+}
+
+/// Real SQLite FFI work runs outside fake widget time, so `pumpAndSettle` can
+/// never observe the page settling. Pump with real async gaps instead.
+Future<void> _settle(WidgetTester tester) async {
+  for (var i = 0; i < 30; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+  }
 }
 
 const _testUser = UserProfile(
@@ -125,7 +186,11 @@ final _testConfig = LlmProviderConfig(
   updatedAt: DateTime.utc(2026, 5, 29),
 );
 
+// The fakes still inherit real ownership/scope checks, so they are given the
+// test database rather than falling through to the uninitialised global one.
 class _FakeAuthRepository extends AuthRepository {
+  _FakeAuthRepository(AppDatabase database) : super(database: database);
+
   @override
   Future<void> ensureInitialized() async {}
 
@@ -134,8 +199,12 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeLlmConfigRepository extends LlmConfigRepository {
+  _FakeLlmConfigRepository(this.config, AppDatabase database)
+    : super(database: database);
+
+  final LlmProviderConfig? config;
   @override
-  Future<LlmProviderConfig?> getByUserId(int userId) async => _testConfig;
+  Future<LlmProviderConfig?> getByUserId(int userId) async => config;
 }
 
 class _FakeAiChatService extends AiChatService {
@@ -149,35 +218,10 @@ class _FakeAiChatService extends AiChatService {
   }
 }
 
-class _FakeQsClawAgentService extends QsClawAgentService {
-  @override
-  Future<QsClawRunResult> runCommand({
-    required int userId,
-    required String command,
-    bool confirmed = false,
-  }) async {
-    return QsClawRunResult(
-      draft: const QsClawCommandDraft(
-        rawCommand: '植入演示数据',
-        topic: '演示数据',
-        libraryName: '演示知识库',
-        fileTypes: [],
-      ),
-      library: null,
-      matchedDocuments: const [],
-      movedCount: 0,
-      status: QsClawRunStatus.completed,
-      executedSteps: const [
-        QsClawAgentStep(
-          toolName: 'seed_debug_demo_data',
-          message: '已为当前调试账号植入演示数据。',
-        ),
-      ],
-    );
-  }
-}
-
 class _FakeKnowledgeContextRepository extends KnowledgeContextRepository {
+  _FakeKnowledgeContextRepository(AppDatabase database)
+    : super(database: database);
+
   @override
   Future<List<KnowledgeContextSource>> search({
     required int userId,
@@ -189,131 +233,5 @@ class _FakeKnowledgeContextRepository extends KnowledgeContextRepository {
     int limit = 6,
   }) async {
     return const <KnowledgeContextSource>[];
-  }
-}
-
-class _FakeAiChatRepository extends AiChatRepository {
-  _FakeAiChatRepository() {
-    sessions.add(
-      AiChatSessionRecord(
-        id: 1,
-        userId: _testUser.id,
-        title: '函数复习',
-        lastMessagePreview: '先看定义',
-        createdAt: DateTime.utc(2026, 5, 29, 8),
-        updatedAt: DateTime.utc(2026, 5, 29, 8, 10),
-      ),
-    );
-    messages[1] = [
-      AiChatMessageRecord(
-        id: 1,
-        sessionId: 1,
-        role: AiChatMessageRole.assistant,
-        content: '先看定义',
-        provider: 'minimax',
-        model: 'MiniMax-M2.7',
-        createdAt: DateTime.utc(2026, 5, 29, 8, 10),
-      ),
-    ];
-  }
-
-  _FakeAiChatRepository.empty();
-
-  final sessions = <AiChatSessionRecord>[];
-  final messages = <int, List<AiChatMessageRecord>>{};
-  final deletedSessionIds = <int>[];
-  int _nextSessionId = 2;
-  int _nextMessageId = 2;
-
-  @override
-  Future<AiChatSessionRecord> createSession({
-    required int userId,
-    required String title,
-  }) async {
-    final now = DateTime.utc(2026, 5, 29, 9, _nextSessionId);
-    final session = AiChatSessionRecord(
-      id: _nextSessionId++,
-      userId: userId,
-      title: title,
-      lastMessagePreview: '',
-      createdAt: now,
-      updatedAt: now,
-    );
-    sessions.insert(0, session);
-    messages[session.id] = [];
-    return session;
-  }
-
-  @override
-  Future<List<AiChatSessionRecord>> fetchSessions({
-    required int userId,
-    int limit = 100,
-  }) async {
-    return sessions
-        .where((session) => session.userId == userId)
-        .toList(growable: false);
-  }
-
-  @override
-  Future<List<AiChatMessageRecord>> fetchMessages({
-    required int sessionId,
-    int limit = 100,
-  }) async {
-    return List<AiChatMessageRecord>.from(messages[sessionId] ?? const []);
-  }
-
-  @override
-  Future<void> renameSession({
-    required int userId,
-    required int sessionId,
-    required String title,
-  }) async {
-    final index = sessions.indexWhere((item) => item.id == sessionId);
-    sessions[index] = sessions[index].copyWith(title: title);
-  }
-
-  @override
-  Future<void> deleteSession({
-    required int userId,
-    required int sessionId,
-  }) async {
-    deletedSessionIds.add(sessionId);
-    sessions.removeWhere((item) => item.id == sessionId);
-    messages.remove(sessionId);
-  }
-
-  @override
-  Future<AiChatMessageRecord> appendMessage({
-    required int sessionId,
-    required String role,
-    required String content,
-    String? provider,
-    String? model,
-    Map<String,Object?> metadata = const {},
-  }) async {
-    final message = AiChatMessageRecord(
-      id: _nextMessageId++,
-      sessionId: sessionId,
-      role: role,
-      content: content,
-      provider: provider,
-      model: model,
-      metadata: Map<String,dynamic>.from(metadata),
-      createdAt: DateTime.utc(2026, 5, 29, 9, _nextMessageId),
-    );
-    messages.putIfAbsent(sessionId, () => []).add(message);
-    return message;
-  }
-
-  @override
-  Future<void> touchSessionPreview({
-    required int sessionId,
-    required String preview,
-  }) async {
-    final index = sessions.indexWhere((item) => item.id == sessionId);
-    sessions[index] = sessions[index].copyWith(
-      lastMessagePreview: preview,
-      updatedAt: DateTime.utc(2026, 5, 29, 9, _nextSessionId),
-    );
   }
 }

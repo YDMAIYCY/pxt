@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'import_record_schema.dart';
 import 'interview_schema.dart';
 import 'eclaw_schema.dart';
 import 'feishu_schema.dart';
+import 'learning_schema.dart';
+import 'community_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -14,7 +17,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 22;
+  static const int databaseVersion = 24;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -60,7 +63,7 @@ class AppDatabase {
       path,
       options: OpenDatabaseOptions(
         version: databaseVersion,
-        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onConfigure: app._configureDatabase,
         onCreate: app._createTables,
         onUpgrade: app._upgradeTables,
         onOpen: app._ensureSchemaConsistency,
@@ -86,13 +89,29 @@ class AppDatabase {
     return openDatabase(
       dbPath,
       version: databaseVersion,
-      onConfigure: (db) async {
-        await db.execute('PRAGMA foreign_keys = ON;');
-      },
+      onConfigure: _configureDatabase,
       onCreate: _createTables,
       onUpgrade: _upgradeTables,
       onOpen: _ensureSchemaConsistency,
     );
+  }
+
+  Future<void> _configureDatabase(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON;');
+    final previous = await db.getVersion();
+    if (previous > 0 && previous < 24 && db.path != inMemoryDatabasePath) {
+      // No repository receives this connection until configuration/upgrade ends.
+      // Flush WAL before copying; a busy/failed backup aborts the upgrade.
+      final backup = '${db.path}.before-community-v$previous-${DateTime.now().microsecondsSinceEpoch}.bak';
+      final checkpoint = await db.rawQuery('PRAGMA wal_checkpoint(FULL)');
+      if (checkpoint.isNotEmpty && checkpoint.first['busy'] != 0) {
+        throw StateError('本地数据库正忙，已停止升级，请关闭其他实例后重试');
+      }
+      await File(db.path).copy(backup);
+      if (!await File(backup).exists()) {
+        throw StateError('本地数据库备份未完成，已停止升级');
+      }
+    }
   }
 
   Future<void> _createTables(Database db, int version) async {
@@ -414,6 +433,9 @@ class AppDatabase {
     await createEClawSchema(db);
     await createFeishuSchema(db);
     await upgradeFeishuToV22(db);
+    await _upgradeFocusToV11(db);
+    await createLearningSchema(db);
+    await createCommunityLocalSchema(db);
   }
 
   Future<void> _upgradeTables(
@@ -478,6 +500,12 @@ class AppDatabase {
     }
     if (oldVersion < 22) {
       await upgradeFeishuToV22(db);
+    }
+    if (oldVersion < 23) {
+      await createLearningSchema(db);
+    }
+    if (oldVersion < 24) {
+      await createCommunityLocalSchema(db);
     }
   }
 
@@ -1354,6 +1382,7 @@ class AppDatabase {
     await _upgradeFocusToV11(db);
     await _upgradeKnowledgeGraphToV12(db);
     await _upgradeCanonicalGraphToV18(db);
+    await createLearningSchema(db);
     await createInterviewSchema(db);
     await createEClawSchema(db);
     await _upgradeRichPracticeQuestionsToV13(db);

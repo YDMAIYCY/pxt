@@ -22,23 +22,24 @@ Future<void> createEClawSchema(DatabaseExecutor db) async {
     )''');
   }
   await createPracticeEvidenceSchema(db);
-  final questionColumns = await db.rawQuery(
-    'PRAGMA table_info(practice_questions)',
+  await _addColumnIfTableExists(
+    db,
+    'practice_questions',
+    'source_version_id',
+    'INTEGER REFERENCES record_source_versions(id) ON DELETE SET NULL',
   );
-  if (!questionColumns.any((c) => c['name'] == 'source_version_id')) {
-    await db.execute(
-      'ALTER TABLE practice_questions ADD COLUMN source_version_id INTEGER REFERENCES record_source_versions(id) ON DELETE SET NULL',
-    );
-  }
-  for (final table in ['ai_chat_sessions', 'ai_chat_messages']) {
-    final columns = await db.rawQuery('PRAGMA table_info($table)');
-    final name = table == 'ai_chat_sessions' ? 'context_json' : 'metadata_json';
-    if (!columns.any((c) => c['name'] == name)) {
-      await db.execute(
-        "ALTER TABLE $table ADD COLUMN $name TEXT NOT NULL DEFAULT '{}'",
-      );
-    }
-  }
+  await _addColumnIfTableExists(
+    db,
+    'ai_chat_sessions',
+    'context_json',
+    "TEXT NOT NULL DEFAULT '{}'",
+  );
+  await _addColumnIfTableExists(
+    db,
+    'ai_chat_messages',
+    'metadata_json',
+    "TEXT NOT NULL DEFAULT '{}'",
+  );
   await db.execute('''CREATE TABLE IF NOT EXISTS agent_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -57,4 +58,31 @@ Future<void> createEClawSchema(DatabaseExecutor db) async {
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     result_json TEXT NOT NULL
   )''');
+}
+
+/// Adds [column] to [table] only when the table exists and lacks the column.
+///
+/// A missing table must be skipped rather than altered: `PRAGMA table_info`
+/// returns no rows for a table that does not exist, which reads as "column
+/// missing" and turns into an `ALTER TABLE` against a nonexistent table. A
+/// legacy database that predates the table's introduction would then fail to
+/// open at all.
+Future<void> _addColumnIfTableExists(
+  DatabaseExecutor db,
+  String table,
+  String column,
+  String definition,
+) async {
+  final exists = await db.rawQuery(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+    [table],
+  );
+  if (exists.isEmpty) {
+    return;
+  }
+  final columns = await db.rawQuery('PRAGMA table_info($table)');
+  if (columns.any((c) => c['name'] == column)) {
+    return;
+  }
+  await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
 }

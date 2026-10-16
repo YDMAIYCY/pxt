@@ -1,0 +1,7 @@
+{
+  "COMMUNITY_LIVE_TEST": "true",
+  "COMMUNITY_TEST_EMAIL_A": "dedicated-account-a@example.com",
+  "COMMUNITY_TEST_PASSWORD_A": "REPLACE_WITH_TEST_PASSWORD",
+  "COMMUNITY_TEST_EMAIL_B": "dedicated-account-b@example.com",
+  "COMMUNITY_TEST_PASSWORD_B": "REPLACE_WITH_TEST_PASSWORD"
+}

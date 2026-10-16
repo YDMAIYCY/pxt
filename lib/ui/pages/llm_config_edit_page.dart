@@ -47,6 +47,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
       'deepseek',
       'kimi',
       'minimax',
+      'zhipu',
       'opencode_go',
       'claude',
       'gemini',
@@ -530,11 +531,13 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
     builder: (context, constraints) {
       final columns = constraints.maxWidth >= 330 ? 3 : 2;
       final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
+      // Index-aligned with the provider order in _presets.
       const colors = [
         Color(0xFF22B8D6),
         _blue,
         Color(0xFF9255EB),
         Color(0xFFEA73A5),
+        Color(0xFFD9A521),
         Color(0xFF24BF94),
         Color(0xFFF48454),
         Color(0xFF7955EF),
@@ -577,7 +580,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                           children: [
                             CircleAvatar(
                               radius: 13,
-                              backgroundColor: colors[entry.key],
+                              backgroundColor: colors[entry.key % colors.length],
                               child: preset.provider == 'custom'
                                   ? const Icon(
                                       Icons.settings_outlined,

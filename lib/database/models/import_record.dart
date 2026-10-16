@@ -38,7 +38,7 @@ class ImportRecord {
       isPdf ||
       sources.any((s) => s.sourceType == SourceDocumentSourceType.officePage);
   bool get isFeishu => sources.any((s) => s.sourceType == 'feishu_docx');
-  String get sourceLabel => isFeishu
+  String get sourceLabel => sources.any((s) => s.sourceType == 'community') ? '社区收藏' : isFeishu
       ? '飞书导入'
       : isDocument
       ? '文档导入'

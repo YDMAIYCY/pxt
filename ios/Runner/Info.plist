@@ -67,9 +67,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于选择头像和个人主页背景图。</string>
+	<string>用于选择头像、个人主页背景、社区问题和私聊中的图片。</string>
 	<key>NSCameraUsageDescription</key>
-	<string>用于拍照导入学习资料。</string>
+	<string>用于拍照导入学习资料、发布社区问题和发送私聊图片。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于录制 AI 视频面试作答声音。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

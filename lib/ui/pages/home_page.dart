@@ -7,6 +7,7 @@ import '../../database/import_record_repository.dart';
 import '../../database/knowledge_library_repository.dart';
 import '../../database/models/import_record.dart';
 import '../../database/models/knowledge_library_record.dart';
+import '../../learning/learning_events.dart';
 import '../theme/app_theme.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
@@ -17,6 +18,7 @@ import 'import_record_detail_page.dart';
 import 'tabs/focus_tab_page.dart';
 import 'tabs/profile_tab_page.dart';
 import 'tabs/tasks_tab_page.dart';
+import 'community/community_page.dart';
 
 const List<_BottomDockItem> _bottomDockItems = [
   _BottomDockItem(label: '\u9996\u9875', iconAsset: AppAssets.navHome),
@@ -24,7 +26,7 @@ const List<_BottomDockItem> _bottomDockItems = [
     label: '\u77e5\u8bc6\u5e93',
     iconAsset: AppAssets.navKnowledge,
   ),
-  _BottomDockItem(label: '\u4e13\u6ce8', icon: Icons.psychology_alt_rounded),
+  _BottomDockItem(label: '社区', icon: Icons.forum_outlined),
   _BottomDockItem(label: '\u4efb\u52a1', iconAsset: AppAssets.navTask),
   _BottomDockItem(label: '\u6211\u7684', iconAsset: AppAssets.navProfile),
 ];
@@ -66,11 +68,13 @@ class _HomePageState extends State<HomePage> {
     _currentIndex = widget.initialTab;
     _activeTabNotifier.value = _currentIndex;
     _tabs = _buildTabs();
+    LearningEvents.changed.addListener(_notifyDataChanged);
     _ensureActiveSession();
   }
 
   @override
   void dispose() {
+    LearningEvents.changed.removeListener(_notifyDataChanged);
     _refreshNotifier.dispose();
     _activeTabNotifier.dispose();
     super.dispose();
@@ -164,13 +168,21 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-      FocusTabPage(
-        tabIndex: 2,
-        refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
-        onDataChanged: _notifyDataChanged,
-      ),
+      const CommunityPage(),
       TasksTabPage(
+        onStartFocus: (taskId) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('专注学习')),
+                body: FocusTabPage(
+                  initialTaskId: taskId,
+                  onDataChanged: _notifyDataChanged,
+                ),
+              ),
+            ),
+          );
+        },
         tabIndex: 3,
         refreshListenable: _refreshNotifier,
         activeTabListenable: _activeTabNotifier,

@@ -34,13 +34,14 @@ void main() {
   });
 
   test('document batch labels are readable Chinese', () {
+    // \u591a\u56fe\u5bfc\u5165 is presented to users as \u76f8\u518c\u5bfc\u5165 (see import_entry_ui_test).
     expect(
       DocumentBatchSourceType.labelOf(DocumentBatchSourceType.multiImage),
-      '\u591a\u56fe\u5bfc\u5165',
+      '\u76f8\u518c\u5bfc\u5165',
     );
     expect(
       DocumentBatchSourceType.labelOf(DocumentBatchSourceType.pdf),
-      'PDF \u5bfc\u5165',
+      '\u6587\u6863\u5bfc\u5165',
     );
   });
 }

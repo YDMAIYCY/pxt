@@ -7,34 +7,43 @@ import '../../../database/models/ai_generation_task_record.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
-import '../../../common/app_assets.dart';
+import '../../../learning/learning_events.dart';
+import '../../../learning/learning_task_repository.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/premium_app_chrome.dart';
 import '../document_detail_page.dart';
+import '../learning_concept_page.dart';
+import '../library_practice_page.dart';
 import '../practice_review_page.dart';
 import '../wrong_question_page.dart';
+
+const _taskBlue = Color(0xFF3068E9);
+const _taskBackground = Color(0xFFF7F9FC);
 
 class TasksTabPage extends StatefulWidget {
   const TasksTabPage({
     this.authRepository,
     this.sourceDocumentRepository,
     this.aiGenerationRepository,
+    this.learningTaskRepository,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
     this.tabIndex,
     this.onDataChanged,
+    this.onStartFocus,
     super.key,
   });
 
   final AuthRepository? authRepository;
   final SourceDocumentRepository? sourceDocumentRepository;
   final AiGenerationRepository? aiGenerationRepository;
+  final LearningTaskRepository? learningTaskRepository;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
   final int? tabIndex;
   final VoidCallback? onDataChanged;
+  final ValueChanged<int>? onStartFocus;
 
   @override
   State<TasksTabPage> createState() => _TasksTabPageState();
@@ -44,9 +53,13 @@ class _TasksTabPageState extends State<TasksTabPage> {
   late final AuthRepository _authRepository;
   late final SourceDocumentRepository _sourceDocumentRepository;
   late final AiGenerationRepository _aiGenerationRepository;
-  late Future<_TaskCenterData> _future;
+  late final LearningTaskRepository _taskRepository;
+  late Future<LearningDashboard> _future;
   late int _handledRefreshVersion;
+  int? _userId;
   bool _reloadScheduled = false;
+  bool _notifying = false;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -56,9 +69,11 @@ class _TasksTabPageState extends State<TasksTabPage> {
         widget.sourceDocumentRepository ?? SourceDocumentRepository();
     _aiGenerationRepository =
         widget.aiGenerationRepository ?? AiGenerationRepository();
+    _taskRepository = widget.learningTaskRepository ?? LearningTaskRepository();
     _handledRefreshVersion = widget.refreshVersion;
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
+    LearningEvents.changed.addListener(_handleExternalRefresh);
     _future = _loadData();
   }
 
@@ -83,18 +98,17 @@ class _TasksTabPageState extends State<TasksTabPage> {
   void dispose() {
     widget.refreshListenable?.removeListener(_handleExternalRefresh);
     widget.activeTabListenable?.removeListener(_handleExternalRefresh);
+    LearningEvents.changed.removeListener(_handleExternalRefresh);
     super.dispose();
   }
 
-  bool get _canHandleExternalRefresh {
+  void _handleExternalRefresh() {
+    if (_notifying || _busy) return;
     final tabIndex = widget.tabIndex;
     final activeTab = widget.activeTabListenable?.value;
-    return tabIndex == null || activeTab == null || activeTab == tabIndex;
-  }
-
-  void _handleExternalRefresh() {
-    if (!_canHandleExternalRefresh) return;
-    _scheduleReload();
+    if (tabIndex == null || activeTab == null || activeTab == tabIndex) {
+      _scheduleReload();
+    }
   }
 
   void _scheduleReload() {
@@ -103,74 +117,63 @@ class _TasksTabPageState extends State<TasksTabPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _reloadScheduled = false;
-      _reload();
+      _refresh();
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  Future<_TaskCenterData> _loadData() async {
+  Future<LearningDashboard> _loadData() async {
     await _authRepository.ensureInitialized();
     final user = await _authRepository.getCurrentUserProfile();
     if (user == null) throw StateError('登录状态已失效');
-
-    final documents = await _sourceDocumentRepository.fetchAllSourceDocuments(
-      userId: user.id,
-      limit: 300,
-    );
-    final aiTasks = await _aiGenerationRepository.fetchAiTasksByUser(
-      userId: user.id,
-      limit: 300,
-    );
-    final todayPractice = await _aiGenerationRepository
-        .fetchTodayPracticeQuestionsByUser(userId: user.id, limit: 300);
-    final overduePractice = await _aiGenerationRepository
-        .fetchOverduePracticeQuestionsByUser(userId: user.id, limit: 300);
-    final wrongQuestions = await _aiGenerationRepository
-        .fetchPracticeQuestionsByUser(
-          userId: user.id,
-          reviewStatus: PracticeQuestionReviewStatus.wrong,
-          limit: 300,
-        );
-    final masteredQuestions = await _aiGenerationRepository
-        .fetchPracticeQuestionsByUser(
-          userId: user.id,
-          reviewStatus: PracticeQuestionReviewStatus.mastered,
-          limit: 300,
-        );
-    return _TaskCenterData(
-      documents: documents,
-      aiTasks: aiTasks,
-      todayPractice: todayPractice,
-      overduePractice: overduePractice,
-      wrongQuestions: wrongQuestions,
-      masteredQuestions: masteredQuestions,
-    );
+    _userId = user.id;
+    return _taskRepository.dashboard(user.id);
   }
 
   Future<void> _refresh() async {
-    final future = _reload();
-    await future;
-  }
-
-  Future<_TaskCenterData> _reload() {
     final future = _loadData();
     setState(() {
       _future = future;
     });
-    return future;
+    // FutureBuilder renders load failures, including failed pull-to-refresh.
+    try {
+      await future;
+    } catch (_) {}
   }
 
   Future<void> _afterDataChanged() async {
-    final onDataChanged = widget.onDataChanged;
-    if (onDataChanged != null) {
-      onDataChanged();
-      return;
+    if (!mounted) return;
+    _notifying = true;
+    try {
+      LearningEvents.notify();
+      widget.onDataChanged?.call();
+    } finally {
+      _notifying = false;
     }
-    await _refresh();
+    if (mounted) await _refresh();
+  }
+
+  void _message(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _mutate(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+      await _afterDataChanged();
+    } catch (error) {
+      _message('操作失败：$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _openTaskList(TaskListKind kind) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => TaskListPage(
           kind: kind,
           authRepository: _authRepository,
@@ -180,51 +183,923 @@ class _TasksTabPageState extends State<TasksTabPage> {
         ),
       ),
     );
-    if (mounted) await _afterDataChanged();
+    await _afterDataChanged();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<_TaskCenterData>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            snapshot.data == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return _StatePanel(
-            icon: Icons.error_outline_rounded,
-            title: '任务中心加载失败',
-            description: '请稍后重试。',
-            onPressed: _refresh,
-          );
-        }
-        final data = snapshot.data!;
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          child: CustomScrollView(
-            physics: const BouncingScrollPhysics(),
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 104),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _Header(),
-                      const SizedBox(height: 14),
-                      _TaskBoard(data: data, onOpenList: _openTaskList),
-                    ],
+  Future<void> _study(LearningTask task) async {
+    Widget? page;
+    if (task.questionId != null) {
+      page = LibraryPracticePage(
+        documentId: task.documentId,
+        initialConceptId: task.conceptId,
+        initialQuestionId: task.questionId,
+        questionIds: [task.questionId!],
+      );
+    } else if (task.conceptId != null) {
+      page = LearningConceptPage(conceptId: task.conceptId!);
+    } else if (task.documentId != null) {
+      page = DocumentDetailPage(documentId: task.documentId!);
+    }
+    if (page == null) {
+      if (!task.active) {
+        _message('这项任务${task.statusLabel}');
+        return;
+      }
+      await _mutate(() async {
+        await _taskRepository.setStatus(_userId!, task.id, 'in_progress');
+        _message('已开始学习，可从任务菜单进入专注或记录完成');
+      });
+      return;
+    }
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => page!));
+    await _afterDataChanged();
+  }
+
+  Future<void> _openRecommendation(ReviewRecommendation item) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LearningConceptPage(conceptId: item.conceptId),
+      ),
+    );
+    await _afterDataChanged();
+  }
+
+  Future<void> _showTaskActions(LearningTask task) async {
+    if (_busy) return;
+    final action = await showModalBottomSheet<_LearningAction>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    task.title,
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.menu_book_outlined,
+                    color: _taskBlue,
+                  ),
+                  title: const Text('直接学习'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, _LearningAction.study),
+                ),
+                if (task.active) ...[
+                  ListTile(
+                    leading: const Icon(Icons.timer_outlined, color: _taskBlue),
+                    title: const Text('专注学习'),
+                    subtitle: widget.onStartFocus == null
+                        ? const Text('专注入口暂不可用')
+                        : null,
+                    enabled: widget.onStartFocus != null,
+                    onTap: () =>
+                        Navigator.pop(sheetContext, _LearningAction.focus),
+                  ),
+                  ListTile(
+                    leading: Icon(
+                      task.status == 'paused'
+                          ? Icons.play_arrow_rounded
+                          : Icons.pause_rounded,
+                    ),
+                    title: Text(task.status == 'paused' ? '继续任务' : '暂停任务'),
+                    onTap: () => Navigator.pop(
+                      sheetContext,
+                      _LearningAction.togglePause,
+                    ),
+                  ),
+                  if (task.kind == 'personal' || task.kind == 'concept_review')
+                    ListTile(
+                      leading: const Icon(Icons.check_circle_outline_rounded),
+                      title: const Text('手动完成'),
+                      onTap: () =>
+                          Navigator.pop(sheetContext, _LearningAction.complete),
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.event_outlined),
+                    title: const Text('推迟任务'),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, _LearningAction.postpone),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.close_rounded),
+                    title: const Text('取消任务'),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, _LearningAction.cancel),
+                  ),
+                ],
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: AppColors.error,
+                  ),
+                  title: const Text(
+                    '删除任务',
+                    style: TextStyle(color: AppColors.error),
+                  ),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, _LearningAction.delete),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _LearningAction.study:
+        await _study(task);
+      case _LearningAction.focus:
+        widget.onStartFocus?.call(task.id);
+      case _LearningAction.togglePause:
+        await _setStatus(
+          task,
+          task.status == 'paused' ? 'in_progress' : 'paused',
+        );
+      case _LearningAction.complete:
+        await _setStatus(task, 'completed');
+      case _LearningAction.cancel:
+        await _setStatus(task, 'cancelled');
+      case _LearningAction.postpone:
+        final now = DateTime.now();
+        final tomorrow = DateTime(now.year, now.month, now.day + 1);
+        final currentDue = task.dueAt?.toLocal();
+        final date = await showDatePicker(
+          context: context,
+          initialDate: currentDue != null && currentDue.isAfter(tomorrow)
+              ? currentDue
+              : tomorrow,
+          firstDate: tomorrow,
+          lastDate: DateTime(now.year + 10, 12, 31),
+        );
+        if (date != null && mounted) {
+          await _mutate(
+            () => _taskRepository.setStatus(
+              _userId!,
+              task.id,
+              task.status,
+              dueAt: DateTime(date.year, date.month, date.day, 23, 59),
+            ),
+          );
+        }
+      case _LearningAction.delete:
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('删除任务？'),
+            content: Text('确定删除“${task.title}”？学习资料和答题记录会保留。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('保留'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('确认删除'),
               ),
             ],
           ),
         );
+        if (confirmed == true && mounted) await _setStatus(task, 'deleted');
+    }
+  }
+
+  Future<void> _setStatus(LearningTask task, String status) =>
+      _mutate(() => _taskRepository.setStatus(_userId!, task.id, status));
+
+  Future<void> _createTask() async {
+    final result = await showDialog<(String, int)>(
+      context: context,
+      builder: (_) => const _CreateLearningTaskDialog(),
+    );
+    if (result == null || !mounted) return;
+    final operationKey = 'personal-${DateTime.now().microsecondsSinceEpoch}';
+    await _mutate(() async {
+      await _taskRepository.create(
+        userId: _userId!,
+        title: result.$1,
+        estimatedPomodoros: result.$2,
+        operationKey: operationKey,
+      );
+    });
+  }
+
+  Future<void> _showAllTasks() async {
+    var future = _taskRepository.tasks(_userId!, includeFinished: true);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          top: false,
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * .8,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '全部任务',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '关闭',
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: FutureBuilder<List<LearningTask>>(
+                    future: future,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return _StatePanel(
+                          icon: Icons.error_outline,
+                          title: '任务加载失败',
+                          description: '请稍后重试。',
+                          onPressed: () async => setSheetState(() {
+                            future = _taskRepository.tasks(
+                              _userId!,
+                              includeFinished: true,
+                            );
+                          }),
+                        );
+                      }
+                      final tasks = snapshot.data!;
+                      if (tasks.isEmpty) {
+                        return const Center(child: Text('还没有任务，试试新建一个学习目标'));
+                      }
+                      return ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                        itemCount: tasks.length,
+                        itemBuilder: (_, index) => _LearningTaskCard(
+                          task: tasks[index],
+                          onTap: () async {
+                            await _showTaskActions(tasks[index]);
+                            if (sheetContext.mounted) {
+                              setSheetState(() {
+                                future = _taskRepository.tasks(
+                                  _userId!,
+                                  includeFinished: true,
+                                );
+                              });
+                            }
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _taskBackground,
+      child: FutureBuilder<LearningDashboard>(
+        future: _future,
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          final now = DateTime.now();
+          final tomorrow = DateTime(now.year, now.month, now.day + 1);
+          final todayTasks =
+              data?.tasks
+                  .where(
+                    (task) =>
+                        task.active &&
+                        (task.dueAt == null ||
+                            task.dueAt!.toLocal().isBefore(tomorrow)),
+                  )
+                  .toList() ??
+              <LearningTask>[];
+          return RefreshIndicator(
+            color: _taskBlue,
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 110),
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '任务中心',
+                            style: TextStyle(
+                              fontSize: 27,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '把每一次学习，变成看得见的进步',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'AI 处理列表',
+                      onPressed: () => _openTaskList(TaskListKind.activeFlow),
+                      icon: const Icon(
+                        Icons.auto_awesome_outlined,
+                        color: _taskBlue,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    data == null)
+                  const Padding(
+                    padding: EdgeInsets.all(48),
+                    child: Center(
+                      child: CircularProgressIndicator(color: _taskBlue),
+                    ),
+                  )
+                else if (snapshot.hasError)
+                  _StatePanel(
+                    icon: Icons.error_outline_rounded,
+                    title: '任务中心加载失败',
+                    description: '请检查登录状态后重试。',
+                    onPressed: _refresh,
+                  )
+                else if (data != null) ...[
+                  _LearningStats(
+                    data: data,
+                    onOpenList: _openTaskList,
+                    onOpenTasks: _showAllTasks,
+                  ),
+                  const SizedBox(height: 24),
+                  _LearningSectionHeader(
+                    title: '今日任务',
+                    action: '全部任务',
+                    onTap: _showAllTasks,
+                  ),
+                  const SizedBox(height: 12),
+                  if (todayTasks.isEmpty)
+                    const _EmptyHint(text: '今天暂无待办任务\n新建一个学习目标，或从下方添加复习计划')
+                  else
+                    ...todayTasks.map(
+                      (task) => _LearningTaskCard(
+                        task: task,
+                        onTap: _busy ? null : () => _showTaskActions(task),
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _taskBlue,
+                      side: const BorderSide(color: Color(0xFFCFDCFB)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _busy ? null : _createTask,
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text('新建学习任务'),
+                  ),
+                  const SizedBox(height: 26),
+                  const _LearningSectionHeader(title: '推荐复习'),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '根据掌握情况，为你安排下一步',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  if (data.recommendations.isEmpty)
+                    const _EmptyHint(text: '暂无推荐复习\n学习和答题后，会在这里推荐需要巩固的知识点')
+                  else
+                    ...data.recommendations.map(
+                      (item) => _ReviewRecommendationCard(
+                        item: item,
+                        onReview: () => _openRecommendation(item),
+                        onAdd: _busy
+                            ? null
+                            : () => _mutate(
+                                () => _taskRepository.addConceptReview(
+                                  _userId!,
+                                  item.conceptId,
+                                ),
+                              ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+enum _LearningAction {
+  study,
+  focus,
+  togglePause,
+  complete,
+  postpone,
+  cancel,
+  delete,
+}
+
+class _CreateLearningTaskDialog extends StatefulWidget {
+  const _CreateLearningTaskDialog();
+
+  @override
+  State<_CreateLearningTaskDialog> createState() =>
+      _CreateLearningTaskDialogState();
+}
+
+class _CreateLearningTaskDialogState extends State<_CreateLearningTaskDialog> {
+  final _title = TextEditingController();
+  int _pomodoros = 1;
+  String? _error;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('新建学习任务'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _title,
+            autofocus: true,
+            maxLength: 100,
+            minLines: 1,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: '任务名称',
+              hintText: '例如：复习第一章',
+              errorText: _error,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('预计番茄数', style: TextStyle(fontWeight: FontWeight.w600)),
+          Row(
+            children: [
+              IconButton(
+                tooltip: '减少番茄数',
+                onPressed: _pomodoros > 1
+                    ? () => setState(() => _pomodoros--)
+                    : null,
+                icon: const Icon(Icons.remove_circle_outline),
+              ),
+              Expanded(
+                child: Text(
+                  '$_pomodoros',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    color: _taskBlue,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '增加番茄数',
+                onPressed: _pomodoros < 99
+                    ? () => setState(() => _pomodoros++)
+                    : null,
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        style: FilledButton.styleFrom(backgroundColor: _taskBlue),
+        onPressed: () {
+          final title = _title.text.trim();
+          if (title.isEmpty) {
+            setState(() => _error = '请输入任务名称');
+            return;
+          }
+          Navigator.pop(context, (title, _pomodoros));
+        },
+        child: const Text('创建任务'),
+      ),
+    ],
+  );
+}
+
+class _LearningSectionHeader extends StatelessWidget {
+  const _LearningSectionHeader({required this.title, this.action, this.onTap});
+  final String title;
+  final String? action;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ),
+      if (action != null)
+        TextButton(
+          onPressed: onTap,
+          style: TextButton.styleFrom(foregroundColor: _taskBlue),
+          child: Text(action!),
+        ),
+    ],
+  );
+}
+
+class _LearningStats extends StatelessWidget {
+  const _LearningStats({
+    required this.data,
+    required this.onOpenList,
+    required this.onOpenTasks,
+  });
+  final LearningDashboard data;
+  final ValueChanged<TaskListKind> onOpenList;
+  final VoidCallback onOpenTasks;
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = [
+      (
+        '待刷练习',
+        data.pendingPractice,
+        Icons.edit_note_rounded,
+        _taskBlue,
+        () => onOpenList(TaskListKind.todayPractice),
+      ),
+      (
+        '逾期练习',
+        data.overduePractice,
+        Icons.event_busy_outlined,
+        const Color(0xFFE39135),
+        () => onOpenList(TaskListKind.overduePractice),
+      ),
+      (
+        '待处理错题',
+        data.wrongQuestions,
+        Icons.auto_stories_outlined,
+        const Color(0xFFE06476),
+        () => onOpenList(TaskListKind.wrongQuestions),
+      ),
+      (
+        '进行中',
+        data.inProgress,
+        Icons.timelapse_rounded,
+        const Color(0xFF6B62CE),
+        onOpenTasks,
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 560 ? 4 : 2;
+        final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: stats
+              .map(
+                (stat) => SizedBox(
+                  width: width,
+                  child: Material(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    child: InkWell(
+                      onTap: stat.$5,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(stat.$3, color: stat.$4, size: 24),
+                            const SizedBox(height: 12),
+                            Text(
+                              '${stat.$2}',
+                              style: TextStyle(
+                                fontSize: 27,
+                                fontWeight: FontWeight.w800,
+                                color: stat.$4,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              stat.$1,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        );
       },
     );
   }
+}
+
+class _LearningTaskCard extends StatelessWidget {
+  const _LearningTaskCard({required this.task, this.onTap});
+  final LearningTask task;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final due = task.dueAt?.toLocal();
+    final overdue = task.active && due != null && due.isBefore(DateTime.now());
+    final source = [
+      task.libraryName,
+      task.documentTitle,
+    ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+    final progress = task.progress.clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEDF3FF),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        task.questionId != null
+                            ? Icons.quiz_outlined
+                            : task.conceptId != null
+                            ? Icons.psychology_outlined
+                            : Icons.checklist_rounded,
+                        size: 22,
+                        color: _taskBlue,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            task.title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            source.isEmpty ? task.kindLabel : source,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      Icons.more_horiz_rounded,
+                      size: 20,
+                      color: AppColors.textTertiary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 6,
+                  children: [
+                    Text(
+                      '${task.kindLabel} · ${task.statusLabel}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: _taskBlue,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '已专注 ${task.focusedSeconds ~/ 60} 分钟 / 预计 ${task.estimatedPomodoros} 个番茄',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 5,
+                  borderRadius: BorderRadius.circular(8),
+                  color: _taskBlue,
+                  backgroundColor: const Color(0xFFEDF1F7),
+                ),
+                const SizedBox(height: 9),
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: 14,
+                  runSpacing: 6,
+                  children: [
+                    Text(
+                      task.totalUnits > 0
+                          ? '${task.completedUnits}/${task.totalUnits} · ${(progress * 100).round()}%'
+                          : '${(progress * 100).round()}%',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      due == null
+                          ? '未设截止时间'
+                          : '${overdue ? '已逾期' : '截止'} ${_formatTime(due)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: overdue
+                            ? AppColors.error
+                            : AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewRecommendationCard extends StatelessWidget {
+  const _ReviewRecommendationCard({
+    required this.item,
+    required this.onReview,
+    this.onAdd,
+  });
+  final ReviewRecommendation item;
+  final VoidCallback onReview;
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onReview,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.name,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '来源：${item.libraryName}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '掌握度 ${item.masteryScore}%',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _taskBlue,
+                ),
+              ),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: (item.masteryScore / 100).clamp(0, 1),
+                color: _taskBlue,
+                backgroundColor: const Color(0xFFEDF1F7),
+                borderRadius: BorderRadius.circular(8),
+                minHeight: 4,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                item.reason,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  TextButton.icon(
+                    onPressed: onAdd,
+                    style: TextButton.styleFrom(foregroundColor: _taskBlue),
+                    icon: const Icon(Icons.add_rounded, size: 17),
+                    label: const Text('加入任务'),
+                  ),
+                  FilledButton(
+                    onPressed: onReview,
+                    style: FilledButton.styleFrom(backgroundColor: _taskBlue),
+                    child: const Text('开始复习'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 // ========== Task List Page ==========
@@ -569,227 +1444,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 }
 
-// ========== Header ==========
-class _Header extends StatelessWidget {
-  const _Header();
-
-  @override
-  Widget build(BuildContext context) {
-    return PremiumHeroPanel(
-      asset: AppAssets.tasksHeaderIllustration,
-      child: Stack(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: AppColors.primaryLight.withValues(alpha: 0.62),
-                  ),
-                ),
-                child: const Icon(
-                  Icons.fact_check_rounded,
-                  color: AppColors.primary,
-                  size: 25,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 72),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '任务中心',
-                        maxLines: 2,
-                        softWrap: true,
-                        style: AppTextStyles.h1(context).copyWith(
-                          color: AppColors.textPrimary,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '把复习、错题、AI 处理流收束到一个清晰的学习队列。',
-                        style: AppTextStyles.bodySmall(context).copyWith(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ========== Task Board ==========
-class _TaskBoard extends StatelessWidget {
-  const _TaskBoard({required this.data, required this.onOpenList});
-  final _TaskCenterData data;
-  final ValueChanged<TaskListKind> onOpenList;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = [
-      _BoardItem(
-        kind: TaskListKind.todayPractice,
-        title: '待刷练习题',
-        value: '${data.todayPractice.length}',
-        icon: Icons.quiz_rounded,
-        color: const Color(0xFFF0FDFA),
-        foreground: AppColors.primary,
-      ),
-      _BoardItem(
-        kind: TaskListKind.overduePractice,
-        title: '逾期练习',
-        value: '${data.overduePractice.length}',
-        icon: Icons.schedule_rounded,
-        color: const Color(0xFFFEF2F2),
-        foreground: AppColors.error,
-      ),
-      _BoardItem(
-        kind: TaskListKind.wrongQuestions,
-        title: '待处理错题',
-        value: '${data.wrongQuestions.length}',
-        icon: Icons.report_problem_rounded,
-        color: const Color(0xFFFFF7ED),
-        foreground: AppColors.accentOrange,
-      ),
-      _BoardItem(
-        kind: TaskListKind.activeFlow,
-        title: '进行中任务',
-        value: '${data.activeFlowCount}',
-        icon: Icons.auto_mode_rounded,
-        color: const Color(0xFFEFF6FF),
-        foreground: AppColors.secondaryBlue,
-      ),
-      _BoardItem(
-        kind: TaskListKind.masteredQuestions,
-        title: '已掌握题目',
-        value: '${data.masteredQuestions.length}',
-        icon: Icons.check_circle_rounded,
-        color: const Color(0xFFF0FDF4),
-        foreground: AppColors.primary,
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final itemWidth = (constraints.maxWidth - 14) / 2;
-        return Wrap(
-          spacing: 14,
-          runSpacing: 14,
-          children: items
-              .map(
-                (item) => SizedBox(
-                  width: itemWidth,
-                  child: _BoardCard(
-                    item: item,
-                    onTap: () => onOpenList(item.kind),
-                  ),
-                ),
-              )
-              .toList(growable: false),
-        );
-      },
-    );
-  }
-}
-
-class _BoardCard extends StatelessWidget {
-  const _BoardCard({required this.item, required this.onTap});
-  final _BoardItem item;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        child: Ink(
-          height: 164,
-          padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-            border: Border.all(color: AppColors.borderLight),
-            boxShadow: AppShadows.cardSoftList,
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                right: -24,
-                bottom: -30,
-                child: Icon(
-                  item.icon,
-                  size: 46,
-                  color: item.foreground.withValues(alpha: 0.065),
-                ),
-              ),
-              const Positioned(
-                right: 0,
-                top: 0,
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  size: 26,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: item.foreground.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(item.icon, color: item.foreground, size: 22),
-                  ),
-                  const Spacer(),
-                  Text(
-                    item.value,
-                    style: AppTextStyles.h1(context).copyWith(
-                      color: item.foreground,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 28,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    item.title,
-                    maxLines: 3,
-                    softWrap: true,
-                    style: AppTextStyles.h3(context).copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ========== Task Import Groups ==========
 class _TaskImportGroupTile extends StatelessWidget {
   const _TaskImportGroupTile({required this.group, required this.children});
@@ -1020,7 +1674,8 @@ class _StatePanel extends StatelessWidget {
             const SizedBox(height: 14),
             FilledButton(
               onPressed: () => onPressed(),
-              child: const Text('閲嶈瘯'),
+              style: FilledButton.styleFrom(backgroundColor: _taskBlue),
+              child: const Text('重试'),
             ),
           ],
         ),
@@ -1100,34 +1755,6 @@ class _TaskImportGroup {
   int get itemCount => documents.length + aiTasks.length + questions.length;
 }
 
-class _TaskCenterData {
-  const _TaskCenterData({
-    required this.documents,
-    required this.aiTasks,
-    required this.todayPractice,
-    required this.overduePractice,
-    required this.wrongQuestions,
-    required this.masteredQuestions,
-  });
-
-  final List<SourceDocumentRecord> documents;
-  final List<AiTaskWithDocument> aiTasks;
-  final List<PracticeQuestionWithDocument> todayPractice;
-  final List<PracticeQuestionWithDocument> overduePractice;
-  final List<PracticeQuestionWithDocument> wrongQuestions;
-  final List<PracticeQuestionWithDocument> masteredQuestions;
-
-  int get activeFlowCount {
-    final activeOcr = documents
-        .where((item) => item.ocrStatus != SourceDocumentOcrStatus.success)
-        .length;
-    final activeAi = aiTasks
-        .where((item) => item.status != AiTaskStatus.completed)
-        .length;
-    return activeOcr + activeAi;
-  }
-}
-
 class _TaskListData {
   const _TaskListData({
     this.documents = const <SourceDocumentRecord>[],
@@ -1138,22 +1765,6 @@ class _TaskListData {
   final List<SourceDocumentRecord> documents;
   final List<AiTaskWithDocument> aiTasks;
   final List<PracticeQuestionWithDocument> questions;
-}
-
-class _BoardItem {
-  const _BoardItem({
-    required this.kind,
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-    required this.foreground,
-  });
-  final TaskListKind kind;
-  final String title, value;
-  final IconData icon;
-  final Color color;
-  final Color foreground;
 }
 
 enum TaskListKind {

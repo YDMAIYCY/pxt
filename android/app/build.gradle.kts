@@ -1,6 +1,9 @@
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
+import java.net.URI
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
 import org.gradle.api.artifacts.transform.TransformAction
 import org.gradle.api.artifacts.transform.TransformOutputs
 import org.gradle.api.artifacts.transform.TransformParameters
@@ -19,6 +22,39 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Include only public client configuration, even for a plain `flutter build apk`.
+val prepareCommunityCloudConfig = tasks.register("prepareCommunityCloudConfig") {
+    val sourceConfig = rootProject.file("../config/supabase.local.json")
+    val publicConfig = rootProject.file("../assets/config/supabase.public.json")
+    inputs.file(sourceConfig).optional()
+    outputs.file(publicConfig)
+    doLast {
+        if (!sourceConfig.exists()) return@doLast
+        val config = try {
+            JsonSlurper().parse(sourceConfig) as Map<*, *>
+        } catch (_: Exception) {
+            throw GradleException("Cloud configuration is invalid; check config/supabase.local.json")
+        }
+        val url = (config["SUPABASE_URL"] as? String)?.trim().orEmpty()
+        val key = (config["SUPABASE_PUBLISHABLE_KEY"] as? String)?.trim().orEmpty()
+        val uri = try { URI(url) } catch (_: Exception) { null }
+        if (uri == null || uri.scheme != "https" || uri.host.isNullOrEmpty() ||
+            uri.userInfo != null || uri.query != null || uri.fragment != null ||
+            (uri.path.isNotEmpty() && uri.path != "/") || !key.startsWith("sb_publishable_")) {
+            throw GradleException("Cloud configuration must contain an HTTPS API root and a publishable key")
+        }
+        publicConfig.parentFile.mkdirs()
+        publicConfig.writeText(JsonOutput.toJson(mapOf(
+            "SUPABASE_URL" to url.trimEnd('/'),
+            "SUPABASE_PUBLISHABLE_KEY" to key
+        )), Charsets.UTF_8)
+    }
+}
+
+tasks.configureEach {
+    if (name.startsWith("compileFlutterBuild")) dependsOn(prepareCommunityCloudConfig)
 }
 
 // POI's desktop mmap cleaner contains invokeExact (API 26). Imports below use

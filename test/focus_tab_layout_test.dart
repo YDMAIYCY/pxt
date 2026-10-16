@@ -7,7 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/models/user_profile.dart';
 import 'package:pxt1/focus/models/pomodoro_task.dart';
+import 'package:pxt1/focus/models/pomodoro_record.dart';
 import 'package:pxt1/focus/repository/focus_repository.dart';
+import 'package:pxt1/learning/learning_task_repository.dart';
 import 'package:pxt1/ui/pages/tabs/focus_tab_page.dart';
 import 'package:pxt1/ui/theme/app_theme.dart';
 
@@ -56,6 +58,12 @@ class _FakeFocusRepository extends FocusRepository {
   Future<void> ensureInitialized() async {}
 
   @override
+  Future<PomodoroRecord?> restoreActiveRecord(int userId) async => null;
+
+  @override
+  Future<List<PomodoroRecord>> fetchRecords({required int userId, DateTime? fromDate, DateTime? toDate}) async => [];
+
+  @override
   Future<FocusStats> fetchStats(int userId) async => _stats;
 
   @override
@@ -70,6 +78,11 @@ class _FakeFocusRepository extends FocusRepository {
 
   @override
   Future<int> getTotalPoints(int userId) async => _stats.totalPoints;
+}
+
+class _FakeLearningTasks extends LearningTaskRepository {
+  @override
+  Future<void> reconcile(int userId) async {}
 }
 
 Future<void> _waitFor(WidgetTester tester, Finder target) async {
@@ -108,6 +121,7 @@ Future<void> _pumpFocusTab(
       theme: theme,
       home: FocusTabPage(
         authRepository: _FakeAuthRepository(),
+        learningTaskRepository: _FakeLearningTasks(),
         focusRepository: _FakeFocusRepository(
           tasks: [
             PomodoroTask(
