@@ -231,6 +231,31 @@ void main() {
     },
   );
 
+  test('successful replay clears a previous Chinese speech error', () async {
+    final voice = _FakeVoice()..speechError = StateError('未找到可用的中文语音');
+    final controller = await build(
+      voice: voice,
+      responses: [
+        _questionsResponse([
+          {
+            'question_text': '请解释函数极限的定义。',
+            'evidence_key': 'ocr:1',
+            'knowledge_point': '极限定义',
+            'reference_points': ['趋近过程'],
+          },
+        ]),
+      ],
+    );
+    await controller.start();
+    expect(controller.error, contains('中文语音'));
+    expect(controller.canRecord, isTrue);
+    voice.speechError = null;
+    await controller.replayQuestion();
+    expect(controller.error, isNull);
+    expect(controller.canRecord, isTrue);
+    controller.dispose();
+  });
+
   test(
     'duplicate submit is ignored while evaluating and never double-writes',
     () async {
@@ -740,6 +765,7 @@ class _FakeVoice implements InterviewVoicePort {
   final _mouth = ValueNotifier<double>(0);
   final _controller = StreamController<VoiceTranscript>.broadcast();
   int cancelCount = 0;
+  Object? speechError;
   String _text = '';
 
   void emit(String text) {
@@ -767,6 +793,7 @@ class _FakeVoice implements InterviewVoicePort {
     double volume = 1,
     double rate = 0.5,
   }) async {
+    if (speechError != null) throw speechError!;
     _phase.value = VoicePhase.speaking;
     _mouth.value = .7;
     _phase.value = VoicePhase.idle;

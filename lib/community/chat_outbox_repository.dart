@@ -61,6 +61,7 @@ class ChatOutboxRepository {
         item['image_extension'] as String,
         conversation: item['conversation_id'] as String,
         token: item['token'] as String,
+        expectedOwner: owner.uuid,
       );
       await db.update(
         'chat_outbox',
@@ -74,6 +75,7 @@ class ChatOutboxRepository {
       token: item['token'] as String,
       body: item['body'] as String,
       image: path,
+      expectedSender: owner.uuid,
     );
     await db.delete(
       'chat_outbox',

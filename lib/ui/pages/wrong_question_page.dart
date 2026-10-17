@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/app_kit.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../database/auth_repository.dart';
 import '../../database/llm_config_repository.dart';
@@ -218,30 +219,100 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
           final hasPendingSimilar = data.hasPendingSimilarQuestions;
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
             children: [
-              _InfoCard(
-                title: widget.item.documentTitle,
-                children: [
-                  _TextBlock(label: '题目', text: question.questionText),
-                  if (question.lastUserAnswer?.isNotEmpty == true)
-                    _TextBlock(label: '上次作答', text: question.lastUserAnswer!),
-                  _TextBlock(
-                    label: '正确答案',
-                    text: question.answerText ?? '暂无答案',
-                  ),
-                  _TextBlock(
-                    label: '解析',
-                    text: question.analysisText ?? '暂无解析',
-                  ),
-                  _TextBlock(label: '错题次数', text: '${question.wrongCount} 次'),
-                  _TextBlock(
-                    label: '掌握度',
-                    text: '${question.masteryScore} / 100',
-                  ),
-                ],
+              // ---- 题目 ----
+              AppCard.plain(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        AppTag(
+                          label: '错 ${question.wrongCount} 次',
+                          accent: AppColors.accentRose,
+                          icon: Icons.error_outline_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _MetricPill(
+                          text: '掌握度 ${question.masteryScore} / 100',
+                          accent: AppColors.accentMint,
+                        ),
+                        const Spacer(),
+                        if (question.difficulty?.isNotEmpty == true)
+                          AppTag(
+                            label: question.difficulty!,
+                            accent: AppColors.accentSky,
+                            filled: false,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      widget.item.documentTitle,
+                      style: AppTextStyles.caption(context),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      question.questionText,
+                      style: AppTextStyles.h2(context).copyWith(
+                        fontWeight: FontWeight.w800,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
+
+              // ---- 作答对照 ----
+              AppCard.plain(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const AppSectionHeader(
+                      title: '作答对照',
+                      subtitle: '先看清错在哪一步，再做相似题',
+                      accent: AppColors.accentRose,
+                    ),
+                    const SizedBox(height: 12),
+                    if (question.lastUserAnswer?.isNotEmpty == true) ...[
+                      _CompareBlock(
+                        label: '上次作答',
+                        text: question.lastUserAnswer!,
+                        accent: AppColors.accentRose,
+                        icon: Icons.person_outline_rounded,
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    _CompareBlock(
+                      label: '正确答案',
+                      text: question.answerText ?? '暂无答案',
+                      accent: AppColors.success,
+                      icon: Icons.check_circle_outline_rounded,
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      '解析',
+                      style: AppTextStyles.label(
+                        context,
+                      ).copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 6),
+                    SelectableText(
+                      question.analysisText ?? '暂无解析',
+                      style: AppTextStyles.bodySmall(
+                        context,
+                      ).copyWith(height: 1.55, color: AppColors.slate),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // ---- 强化训练 ----
               _TrainingCard(
                 data: data,
                 isLoading: snapshot.connectionState == ConnectionState.waiting,
@@ -250,22 +321,29 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
                 onOpenQuestion: _openSimilarQuestion,
               ),
               const SizedBox(height: 14),
+
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                      ),
                       onPressed: _isSaving ? null : _retryQuestion,
-                      icon: const Icon(Icons.replay_rounded),
+                      icon: const Icon(Icons.replay_rounded, size: 18),
                       label: const Text('重新刷题'),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                      ),
                       onPressed: _isSaving || hasPendingSimilar
                           ? null
                           : _markMastered,
-                      icon: const Icon(Icons.check_circle_rounded),
+                      icon: const Icon(Icons.check_circle_rounded, size: 18),
                       label: const Text('我已掌握'),
                     ),
                   ),
@@ -273,12 +351,23 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
               ),
               if (hasPendingSimilar) ...[
                 const SizedBox(height: 8),
-                Text(
-                  '完成全部相似题后，原错题会自动进入已掌握。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFFB45309),
-                    fontWeight: FontWeight.w700,
-                  ),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.lock_clock_rounded,
+                      size: 14,
+                      color: AppColors.accentAmber,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '完成全部相似题后，原错题会自动进入已掌握。',
+                        style: AppTextStyles.caption(
+                          context,
+                        ).copyWith(color: AppColors.accentAmber),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -307,170 +396,317 @@ class _TrainingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      return const _InfoCard(
-        title: '强化训练',
-        children: [LinearProgressIndicator()],
+      return AppCard.plain(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: const [
+            AppSectionHeader(
+              title: '强化训练',
+              accent: AppColors.accentViolet,
+            ),
+            SizedBox(height: 14),
+            AppSkeleton(height: 16),
+            SizedBox(height: 8),
+            AppSkeleton(height: 16, width: 200),
+          ],
+        ),
       );
     }
 
     final training = data.training;
     if (training == null) {
-      return _InfoCard(
-        title: '强化训练',
-        children: [
-          Text(
-            '还没有错因标签和相似题。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w600,
+      return AppCard.plain(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const AppSectionHeader(
+              title: '强化训练',
+              subtitle: '用 AI 找出错因，再生成同类题',
+              accent: AppColors.accentViolet,
             ),
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: isGenerating ? null : onGenerate,
-            icon: const Icon(Icons.auto_awesome_rounded),
-            label: Text(isGenerating ? '生成中...' : '生成强化训练'),
-          ),
-        ],
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: AppColors.tintOf(AppColors.accentViolet, 0.12),
+                    borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+                  ),
+                  child: const Icon(
+                    Icons.psychology_alt_outlined,
+                    size: 18,
+                    color: AppColors.accentViolet,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '还没有错因标签和相似题。生成后会给出错因分析，并出几道同类型的题让你确认是否真的掌握。',
+                    style: AppTextStyles.bodySmall(context),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+              ),
+              onPressed: isGenerating ? null : onGenerate,
+              icon: isGenerating
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: Text(isGenerating ? '生成中...' : '生成强化训练'),
+            ),
+          ],
+        ),
       );
     }
 
-    return _InfoCard(
-      title: '强化训练',
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: training.causeTags
-              .map((tag) => _TagChip(text: tag))
-              .toList(growable: false),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          '相似题 ${data.masteredSimilarCount} / ${data.similarQuestions.length}',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w800,
+    final total = data.similarQuestions.length;
+    final mastered = data.masteredSimilarCount;
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppSectionHeader(
+            title: '强化训练',
+            accent: AppColors.accentViolet,
           ),
-        ),
-        const SizedBox(height: 8),
-        ...data.similarQuestions.map(
-          (question) => _SimilarQuestionTile(
-            question: question,
-            onTap: () => onOpenQuestion(question.id),
+          if (training.causeTags.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: training.causeTags
+                  .map(
+                    (tag) => AppTag(
+                      label: tag,
+                      accent: AppColors.accentAmber,
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Text(
+                '相似题',
+                style: AppTextStyles.label(
+                  context,
+                ).copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '$mastered / $total',
+                style: AppTextStyles.label(context).copyWith(
+                  color: mastered == total && total > 0
+                      ? AppColors.success
+                      : AppColors.textSecondary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          if (total == 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                '这次没有生成相似题，可以直接判断是否已掌握。',
+                style: AppTextStyles.caption(context),
+              ),
+            )
+          else ...[
+            AppProgressBar(
+              value: total == 0 ? 0 : mastered / total,
+              accent: AppColors.accentViolet,
+              height: 5,
+            ),
+            const SizedBox(height: 6),
+            for (final (i, question) in data.similarQuestions.indexed) ...[
+              if (i > 0)
+                const Divider(height: 1, color: AppColors.borderLight),
+              _SimilarQuestionTile(
+                index: i + 1,
+                question: question,
+                onTap: () => onOpenQuestion(question.id),
+              ),
+            ],
+          ],
+        ],
+      ),
     );
   }
 }
 
 class _SimilarQuestionTile extends StatelessWidget {
-  const _SimilarQuestionTile({required this.question, required this.onTap});
+  const _SimilarQuestionTile({
+    required this.index,
+    required this.question,
+    required this.onTap,
+  });
 
+  final int index;
   final PracticeQuestionRecord question;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
       onTap: onTap,
-      title: Text(question.questionText, maxLines: 5, softWrap: true),
-      subtitle: Text(
-        '掌握度 ${question.masteryScore} / 错 ${question.wrongCount} 次',
-      ),
-      trailing: Icon(
-        question.isMastered
-            ? Icons.check_circle_rounded
-            : Icons.chevron_right_rounded,
-        color: question.isMastered
-            ? const Color(0xFF16A34A)
-            : AppColors.textSecondary,
-      ),
-    );
-  }
-}
-
-class _TagChip extends StatelessWidget {
-  const _TagChip({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(
-      label: Text(text),
-      backgroundColor: const Color(0xFFFFF7ED),
-      side: const BorderSide(color: Color(0xFFFED7AA)),
-    );
-  }
-}
-
-class _InfoCard extends StatelessWidget {
-  const _InfoCard({required this.title, required this.children});
-
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w800,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: question.isMastered
+                    ? AppColors.tintOf(AppColors.success, 0.14)
+                    : AppColors.tintOf(AppColors.accentViolet, 0.12),
+                borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+              ),
+              child: Text(
+                '$index',
+                style: AppTextStyles.labelSmall(context).copyWith(
+                  color: question.isMastered
+                      ? AppColors.success
+                      : AppColors.accentViolet,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          ...children,
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    question.questionText,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmall(
+                      context,
+                    ).copyWith(color: AppColors.textPrimary, height: 1.5),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    question.isMastered
+                        ? '已掌握'
+                        : '掌握度 ${question.masteryScore} · 错 ${question.wrongCount} 次',
+                    style: AppTextStyles.caption(context).copyWith(
+                      color: question.isMastered
+                          ? AppColors.success
+                          : AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              question.isMastered
+                  ? Icons.check_circle_rounded
+                  : Icons.chevron_right_rounded,
+              size: 20,
+              color: question.isMastered
+                  ? AppColors.success
+                  : AppColors.textTertiary,
+            ),
+          ],
+        ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-class _TextBlock extends StatelessWidget {
-  const _TextBlock({required this.label, required this.text});
+/// A labelled comparison block: the user's answer in rose, the correct answer
+/// in green, so the gap between them is visible at a glance.
+class _CompareBlock extends StatelessWidget {
+  const _CompareBlock({
+    required this.label,
+    required this.text,
+    required this.accent,
+    required this.icon,
+  });
 
   final String label;
   final String text;
+  final Color accent;
+  final IconData icon;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+    decoration: BoxDecoration(
+      color: AppColors.tintOf(accent, 0.06),
+      borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+      border: Border.all(color: AppColors.tintOf(accent, 0.18)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: accent),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: AppTextStyles.labelSmall(
+                context,
+              ).copyWith(color: accent, fontWeight: FontWeight.w800),
             ),
-          ),
-          const SizedBox(height: 4),
-          SelectableText(
-            text,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: AppColors.textPrimary,
-              height: 1.45,
-            ),
-          ),
-        ],
+          ],
+        ),
+        const SizedBox(height: 5),
+        SelectableText(
+          text,
+          style: AppTextStyles.bodySmall(
+            context,
+          ).copyWith(color: AppColors.textPrimary, height: 1.5),
+        ),
+      ],
+    ),
+  );
+}
+
+class _MetricPill extends StatelessWidget {
+  const _MetricPill({required this.text, required this.accent});
+
+  final String text;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: AppColors.tintOf(accent, 0.12),
+      borderRadius: BorderRadius.circular(AppRadii.chip),
+    ),
+    child: Text(
+      text,
+      style: AppTextStyles.labelSmall(context).copyWith(
+        color: accent,
+        fontWeight: FontWeight.w700,
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _TrainingData {

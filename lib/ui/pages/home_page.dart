@@ -8,6 +8,7 @@ import '../../database/knowledge_library_repository.dart';
 import '../../database/models/import_record.dart';
 import '../../database/models/knowledge_library_record.dart';
 import '../../learning/learning_events.dart';
+import '../../learning/study_activity_tracker.dart';
 import '../theme/app_theme.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
@@ -26,7 +27,7 @@ const List<_BottomDockItem> _bottomDockItems = [
     label: '\u77e5\u8bc6\u5e93',
     iconAsset: AppAssets.navKnowledge,
   ),
-  _BottomDockItem(label: '社区', icon: Icons.forum_outlined),
+  _BottomDockItem(label: '社区', iconAsset: AppAssets.navCommunity),
   _BottomDockItem(label: '\u4efb\u52a1', iconAsset: AppAssets.navTask),
   _BottomDockItem(label: '\u6211\u7684', iconAsset: AppAssets.navProfile),
 ];
@@ -50,10 +51,11 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final AuthRepository _authRepository = AuthRepository();
   final ValueNotifier<int> _refreshNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> _activeTabNotifier = ValueNotifier<int>(0);
+  final StudyActivityTracker _studyTracker = StudyActivityTracker();
 
   int _currentIndex = 0;
   bool _isCheckingSession = true;
@@ -69,15 +71,29 @@ class _HomePageState extends State<HomePage> {
     _activeTabNotifier.value = _currentIndex;
     _tabs = _buildTabs();
     LearningEvents.changed.addListener(_notifyDataChanged);
+    WidgetsBinding.instance.addObserver(this);
+    _studyTracker.addListener(_notifyDataChanged);
     _ensureActiveSession();
   }
 
   @override
   void dispose() {
     LearningEvents.changed.removeListener(_notifyDataChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _studyTracker.removeListener(_notifyDataChanged);
+    _studyTracker.dispose();
     _refreshNotifier.dispose();
     _activeTabNotifier.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _studyTracker.resume();
+    } else {
+      _studyTracker.pause();
+    }
   }
 
   Future<void> _ensureActiveSession() async {
@@ -92,6 +108,13 @@ class _HomePageState extends State<HomePage> {
       ).pushNamedAndRemoveUntil(LoginPage.routeName, (route) => false);
       return;
     }
+
+    await _studyTracker.start(currentUser.id);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) {
+      await _studyTracker.pause();
+    }
+    if (!mounted) return;
 
     if (widget.initialRecordId != null) {
       _initialRecord = await ImportRecordRepository().get(
@@ -119,6 +142,7 @@ class _HomePageState extends State<HomePage> {
       _currentIndex = index;
     });
     _activeTabNotifier.value = index;
+    _studyTracker.flush();
     _refreshNotifier.value++;
   }
 
@@ -300,24 +324,15 @@ class _DockButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const SizedBox(height: 2),
-              if (item.iconAsset != null)
-                SvgPicture.asset(
-                  item.iconAsset!,
-                  width: 22,
-                  height: 22,
-                  colorFilter: ColorFilter.mode(
-                    isSelected ? AppColors.primary : AppColors.textTertiary,
-                    BlendMode.srcIn,
-                  ),
-                )
-              else if (item.icon != null)
-                Icon(
-                  item.icon,
-                  size: 22,
-                  color: isSelected
-                      ? AppColors.primary
-                      : AppColors.textTertiary,
+              SvgPicture.asset(
+                item.iconAsset,
+                width: 22,
+                height: 22,
+                colorFilter: ColorFilter.mode(
+                  isSelected ? AppColors.primary : AppColors.textTertiary,
+                  BlendMode.srcIn,
                 ),
+              ),
               const SizedBox(height: 2),
               Text(
                 item.label,
@@ -337,10 +352,11 @@ class _DockButton extends StatelessWidget {
   }
 }
 
+// Every dock item draws from the same outline SVG set, so the five tabs read as
+// one icon family — no mixed Material glyphs.
 class _BottomDockItem {
-  const _BottomDockItem({required this.label, this.iconAsset, this.icon});
+  const _BottomDockItem({required this.label, required this.iconAsset});
 
   final String label;
-  final String? iconAsset;
-  final IconData? icon;
+  final String iconAsset;
 }

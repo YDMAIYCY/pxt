@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/app_kit.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../database/auth_repository.dart';
 import '../../database/favorite_repository.dart';
@@ -230,27 +231,29 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting &&
               snapshot.data == null) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoadingState(label: '正在准备练习题…');
           }
           if (snapshot.hasError) {
-            return _StatePanel(
-              icon: Icons.error_outline_rounded,
+            return AppEmptyState(
+              icon: Icons.cloud_off_rounded,
+              accent: AppColors.error,
               title: '练习题加载失败',
               description: '请稍后重试。',
               actionLabel: '重新加载',
-              onPressed: _reload,
+              onAction: _reload,
             );
           }
 
           final questions =
               snapshot.data ?? const <PracticeQuestionWithDocument>[];
           if (questions.isEmpty) {
-            return _StatePanel(
+            return AppEmptyState(
               icon: Icons.check_circle_rounded,
+              accent: AppColors.success,
               title: '暂无待刷练习题',
               description: '生成练习题后，会自动出现在这里。',
               actionLabel: '返回',
-              onPressed: () async => Navigator.of(context).maybePop(),
+              onAction: () async => Navigator.of(context).maybePop(),
             );
           }
 
@@ -266,71 +269,105 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           final isFavorited = _favoriteKeys.contains(favoriteKey);
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
             children: [
               _ProgressHeader(
                 currentIndex: _currentIndex,
                 total: questions.length,
                 documentTitle: current.documentTitle,
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               _QuestionCard(
                 question: question,
                 isFavorited: isFavorited,
                 isFavoriteSaving: _isFavoriteSaving,
                 onFavorite: () => _toggleFavorite(question),
               ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _answerController,
-                minLines: 3,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: '我的答案',
-                  hintText: '写下你的作答或简单判断',
-                  border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+
+              // ---- 作答 ----
+              AppCard.plain(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const AppSectionHeader(
+                      title: '我的答案',
+                      subtitle: '先自己写一遍，再对答案',
+                      accent: AppColors.primary,
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _answerController,
+                      minLines: 3,
+                      maxLines: 6,
+                      decoration: InputDecoration(
+                        hintText: '写下你的作答或简单判断',
+                        filled: true,
+                        fillColor: AppColors.surfaceAlt,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppRadii.cardSmall,
+                          ),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.all(14),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (!_answerRevealed)
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                        onPressed: _completeAnswer,
+                        icon: const Icon(Icons.done_rounded, size: 18),
+                        label: const Text('完成'),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(46),
+                              ),
+                              onPressed: _isSaving
+                                  ? null
+                                  : () => _retryQuestion(question),
+                              icon: const Icon(Icons.replay_rounded, size: 18),
+                              label: const Text('重新刷题'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(46),
+                              ),
+                              onPressed: _isSaving
+                                  ? null
+                                  : () => _markMastered(question),
+                              icon: const Icon(
+                                Icons.check_circle_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('已掌握'),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  if (!_answerRevealed)
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _completeAnswer,
-                        icon: const Icon(Icons.done_rounded),
-                        label: const Text('完成'),
-                      ),
-                    )
-                  else ...[
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _isSaving
-                            ? null
-                            : () => _retryQuestion(question),
-                        icon: const Icon(Icons.replay_rounded),
-                        label: const Text('重新刷题'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _isSaving
-                            ? null
-                            : () => _markMastered(question),
-                        icon: const Icon(Icons.check_circle_rounded),
-                        label: const Text('已掌握'),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+
               if (_answerRevealed) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 _AnswerCard(question: question),
               ],
-              const SizedBox(height: 10),
-              if (questions.length > 1)
+
+              if (questions.length > 1) ...[
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -365,6 +402,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                     ),
                   ],
                 ),
+              ],
             ],
           );
         },
@@ -373,6 +411,8 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
   }
 }
 
+/// Quiz progress: position, a thin bar, and the source document. No card — the
+/// header should read as a status line, not as a content block.
 class _ProgressHeader extends StatelessWidget {
   const _ProgressHeader({
     required this.currentIndex,
@@ -386,32 +426,32 @@ class _ProgressHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '第 ${currentIndex + 1} / $total 题',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
+    final ratio = total == 0 ? 0.0 : (currentIndex + 1) / total;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '第 ${currentIndex + 1} / $total 题',
+              style: AppTextStyles.title(
+                context,
+              ).copyWith(fontWeight: FontWeight.w800),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            documentTitle,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w600,
+            const Spacer(),
+            Flexible(
+              child: Text(
+                documentTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption(context),
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        AppProgressBar(value: ratio, height: 5),
+      ],
     );
   }
 }
@@ -431,68 +471,83 @@ class _QuestionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  question.questionText,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                    height: 1.45,
-                  ),
+              if (question.difficulty?.isNotEmpty == true)
+                AppTag(
+                  label: question.difficulty!,
+                  accent: AppColors.accentAmber,
+                  filled: false,
                 ),
-              ),
-              const SizedBox(width: 8),
+              const Spacer(),
               IconButton(
                 tooltip: isFavorited ? '取消收藏' : '收藏',
                 onPressed: isFavoriteSaving ? null : onFavorite,
                 icon: Icon(
                   isFavorited ? Icons.star_rounded : Icons.star_border_rounded,
                   color: isFavorited
-                      ? const Color(0xFFF59E0B)
+                      ? AppColors.accentAmber
                       : AppColors.textSecondary,
                 ),
               ),
             ],
           ),
-          if (question.difficulty?.isNotEmpty == true) ...[
-            const SizedBox(height: 10),
-            _ChipText(text: '难度：${question.difficulty}'),
-          ],
+          const SizedBox(height: 2),
+          Text(
+            question.questionText,
+            style: AppTextStyles.h2(context).copyWith(
+              fontWeight: FontWeight.w800,
+              height: 1.5,
+            ),
+          ),
           if (question.options.isNotEmpty) ...[
             const SizedBox(height: 12),
             _QuestionOptionList(options: question.options),
           ] else if (question.questionKind ==
               PracticeQuestionKind.multipleChoice) ...[
             const SizedBox(height: 12),
-            Text(
-              '选项缺失，请回到 AI 生成结果页重新生成练习题',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFFB45309),
-                fontWeight: FontWeight.w700,
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+              decoration: BoxDecoration(
+                color: AppColors.tintOf(AppColors.accentAmber, 0.10),
+                borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+              ),
+              child: Text(
+                '选项缺失，请回到 AI 生成结果页重新生成练习题',
+                style: AppTextStyles.caption(
+                  context,
+                ).copyWith(color: AppColors.accentAmber),
               ),
             ),
           ],
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _ChipText(text: '掌握度 ${question.masteryScore}'),
-              _ChipText(text: '错 ${question.wrongCount} 次'),
+              _MetricPill(
+                icon: Icons.trending_up_rounded,
+                text: '掌握度 ${question.masteryScore}',
+                accent: AppColors.accentMint,
+              ),
+              _MetricPill(
+                icon: Icons.close_rounded,
+                text: '错 ${question.wrongCount} 次',
+                accent: question.wrongCount > 0
+                    ? AppColors.accentRose
+                    : AppColors.textTertiary,
+              ),
               if (question.nextReviewAt != null)
-                _ChipText(text: '下次 ${_formatTime(question.nextReviewAt!)}'),
+                _MetricPill(
+                  icon: Icons.schedule_rounded,
+                  text: '下次 ${_formatTime(question.nextReviewAt!)}',
+                  accent: AppColors.accentSky,
+                ),
             ],
           ),
         ],
@@ -509,26 +564,31 @@ class _QuestionOptionList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: options
-          .map(
-            (option) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: SelectableText(
-                option,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textPrimary,
-                  height: 1.45,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final option in options)
+          Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+              border: Border.all(color: AppColors.borderLight),
             ),
-          )
-          .toList(growable: false),
+            child: SelectableText(
+              option,
+              style: AppTextStyles.bodySmall(
+                context,
+              ).copyWith(color: AppColors.textPrimary, height: 1.45),
+            ),
+          ),
+      ],
     );
   }
 }
 
+/// Answer + explanation, revealed after the user commits to an answer. Green
+/// because this is the "check yourself" moment, not another input block.
 class _AnswerCard extends StatelessWidget {
   const _AnswerCard({required this.question});
 
@@ -536,49 +596,49 @@ class _AnswerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            '正确答案',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w800,
-            ),
+          const AppSectionHeader(
+            title: '正确答案',
+            accent: AppColors.success,
           ),
-          const SizedBox(height: 8),
-          SelectableText(
-            question.answerText?.isNotEmpty == true
-                ? question.answerText!
-                : '暂无答案',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: AppColors.textPrimary,
-              height: 1.45,
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+            decoration: BoxDecoration(
+              color: AppColors.tintOf(AppColors.success, 0.07),
+              borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+              border: Border.all(
+                color: AppColors.tintOf(AppColors.success, 0.18),
+              ),
+            ),
+            child: SelectableText(
+              question.answerText?.isNotEmpty == true
+                  ? question.answerText!
+                  : '暂无答案',
+              style: AppTextStyles.body(
+                context,
+              ).copyWith(color: AppColors.textPrimary, height: 1.55),
             ),
           ),
           const SizedBox(height: 14),
           Text(
             '解析',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w800,
-            ),
+            style: AppTextStyles.label(
+              context,
+            ).copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           SelectableText(
             question.analysisText?.isNotEmpty == true
                 ? question.analysisText!
                 : '暂无解析',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF475569),
-              height: 1.45,
-            ),
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(height: 1.55, color: AppColors.slate),
           ),
         ],
       ),
@@ -586,79 +646,41 @@ class _AnswerCard extends StatelessWidget {
   }
 }
 
-class _ChipText extends StatelessWidget {
-  const _ChipText({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.primarySoft,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: AppColors.primary,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _StatePanel extends StatelessWidget {
-  const _StatePanel({
+/// One piece of question state (mastery / wrong count / next review). Colour
+/// carries meaning here, so the three pills no longer look interchangeable.
+class _MetricPill extends StatelessWidget {
+  const _MetricPill({
     required this.icon,
-    required this.title,
-    required this.description,
-    required this.actionLabel,
-    required this.onPressed,
+    required this.text,
+    required this.accent,
   });
 
   final IconData icon;
-  final String title;
-  final String description;
-  final String actionLabel;
-  final Future<void> Function() onPressed;
+  final String text;
+  final Color accent;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: AppColors.textSecondary),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              description,
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            FilledButton(
-              onPressed: () => onPressed(),
-              child: Text(actionLabel),
-            ),
-          ],
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: AppColors.tintOf(accent, 0.10),
+      borderRadius: BorderRadius.circular(AppRadii.chip),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: accent),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: AppTextStyles.labelSmall(context).copyWith(
+            color: accent,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
 String _formatTime(DateTime time) {

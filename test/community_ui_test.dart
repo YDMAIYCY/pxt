@@ -11,14 +11,39 @@ import 'package:pxt1/database/app_database.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/llm_config_repository.dart';
-import 'package:pxt1/database/source_document_repository.dart';
 import 'package:pxt1/focus/repository/focus_repository.dart';
+import 'package:pxt1/learning/study_activity_repository.dart';
 import 'package:pxt1/ui/pages/community/community_page.dart';
 import 'package:pxt1/ui/pages/tabs/profile_tab_page.dart';
 import 'package:pxt1/ui/pages/tabs/focus_tab_page.dart';
 import 'package:pxt1/ui/theme/app_theme.dart';
 
 // Only test fixtures use synthetic community responses; production has no seed data.
+class OverlappingCommunity extends FixtureCommunity {
+  @override
+  Future<List<Json>> feed({
+    String mode = 'latest',
+    String keyword = '',
+    int offset = 0,
+    String? author,
+    bool bookmarks = false,
+  }) async {
+    final result = await super.feed(
+      mode: mode,
+      keyword: keyword,
+      offset: offset == 20
+          ? 0
+          : offset == 40
+          ? 20
+          : offset,
+      author: author,
+      bookmarks: bookmarks,
+    );
+    calls[calls.length - 1] = '$mode:$keyword:$offset';
+    return result;
+  }
+}
+
 class FixtureCommunity extends CommunityRepository {
   final calls = <String>[];
   bool fail = false, empty = false;
@@ -161,7 +186,9 @@ void main() {
     await tester.tap(find.text('最新'));
     await tester.pumpAndSettle();
     expect(repo.calls.last, 'latest::0');
-    await tester.tap(find.widgetWithText(ChoiceChip, '待解答'));
+    await tester.tap(
+      find.byKey(const ValueKey('community-filter-unanswered')),
+    );
     await tester.pumpAndSettle();
     expect(repo.calls.last, 'unanswered::0');
     expect(find.text('还没有相关问题'), findsOneWidget);
@@ -201,8 +228,28 @@ void main() {
     expect(repo.calls.any((c) => c.endsWith(':20')), isTrue);
     expect(tester.takeException(), isNull);
   });
+  testWidgets('overlapping feed pages still advance the server offset', (
+    tester,
+  ) async {
+    final repo = OverlappingCommunity();
+    await pump(tester, CommunityPage(repository: repo));
+    for (
+      var i = 0;
+      i < 35 && !repo.calls.any((call) => call.endsWith(':40'));
+      i++
+    ) {
+      await tester.drag(find.byType(ListView), const Offset(0, 140));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, -950));
+      await tester.pumpAndSettle();
+    }
+    expect(repo.calls.any((call) => call.endsWith(':20')), isTrue);
+    expect(repo.calls.any((call) => call.endsWith(':40')), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
-    'profile uses local focus records, keeps settings and opens original focus page',
+    'profile uses foreground usage, keeps settings and opens original focus page',
     (tester) async {
       final fixture = (await tester.runAsync(() async {
         final dir = await Directory.systemTemp.createTemp('pxt-profile-ui-');
@@ -225,6 +272,9 @@ void main() {
           user.copyWith(displayName: '测试同学', bio: '记录学习灵感，慢慢长成自己的知识库。'),
         );
         final today = DateTime.now();
+        await StudyActivityRepository(database: app).recordUsage(
+          user.id, today.subtract(const Duration(minutes: 6)), today,
+        );
         final date =
             '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
         await db.insert('checkin_records', {
@@ -246,16 +296,16 @@ void main() {
         tester,
         ProfileTabPage(
           authRepository: auth,
-          sourceDocumentRepository: SourceDocumentRepository(database: app),
           llmConfigRepository: LlmConfigRepository(database: app),
           aiGenerationRepository: AiGenerationRepository(database: app),
           focusRepository: FocusRepository(database: app),
+          studyActivityRepository: StudyActivityRepository(database: app),
         ),
         width: 390,
         height: 1080,
       );
       expect(find.text('我的学习空间'), findsOneWidget);
-      expect(find.text('0.5'), findsOneWidget);
+      expect(find.text('0.10'), findsOneWidget);
       expect(find.text('—'), findsNWidgets(2));
       expect(tester.takeException(), isNull);
       await screenshot(tester, 'profile-local-fixture');

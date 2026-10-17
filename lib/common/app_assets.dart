@@ -17,6 +17,7 @@ class AppAssets {
   // 底部导航
   static const String navHome = '$iconsDir/nav_home.svg';
   static const String navKnowledge = '$iconsDir/nav_knowledge.svg';
+  static const String navCommunity = '$iconsDir/nav_community.svg';
   static const String navTask = '$iconsDir/nav_task.svg';
   static const String navProfile = '$iconsDir/nav_profile.svg';
 
@@ -26,6 +27,11 @@ class AppAssets {
   static const String iconPdfMulti = '$iconsDir/pdf_multi.svg';
   static const String iconAi = '$iconsDir/ai.svg';
   static const String iconOcr = '$iconsDir/ocr.svg';
+
+  // 首页快捷入口的立体图标（自带圆角底色，与 EClaw 头像统一图标语言）
+  static const String quickCamera = 'assets/images/quick_camera.png';
+  static const String quickImport = 'assets/images/quick_import.png';
+  static const String quickInterview = 'assets/images/quick_interview.png';
 
   // AI 成果类型
   static const String knowledgeCard = '$iconsDir/knowledge_card.svg';

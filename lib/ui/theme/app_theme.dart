@@ -34,6 +34,43 @@ class AppColors {
   static const Color warning = Color(0xFFF59E0B);
   static const Color error = Color(0xFFE11D48);
   static const Color info = Color(0xFF0284C7);
+
+  // ---- Primary ramp ----
+  // Deep end of the brand blue, for gradient anchors and pressed states.
+  static const Color primaryDeep = Color(0xFF1B3A8F);
+
+  // ---- Paper neutrals ----
+  // Slightly warmed off-whites so surfaces read as paper rather than glass.
+  static const Color paper = Color(0xFFFCFDFF);
+  static const Color paperEdge = Color(0xFFE7EDF6);
+
+  // ---- Quiet slate ----
+  // Promoted from the values most often hand-written across pages.
+  static const Color textQuiet = Color(0xFF8A94A6);
+  static const Color slate = Color(0xFF475569);
+
+  // ---- Categorical accents ----
+  // One coherent set for metrics, tags and category icons, replacing the
+  // ad-hoc hexes that were repeated per page.
+  static const Color accentFlame = Color(0xFFFF8556);
+  static const Color accentSky = Color(0xFF51A5FF);
+  static const Color accentMint = Color(0xFF21BF94);
+  static const Color accentViolet = Color(0xFF9573FF);
+  static const Color accentAmber = Color(0xFFFFB827);
+  static const Color accentRose = Color(0xFFFF4380);
+
+  // ---- Content over imagery ----
+  // For text and icons laid directly on a photo or cover, where no surface
+  // token can guarantee contrast.
+  static const Color onImage = Color(0xFFFFFFFF);
+  static const Color onImageMuted = Color(0xE6FFFFFF);
+  static const Color scrimStrong = Color(0x66000000);
+  static const Color scrimSoft = Color(0x40000000);
+
+  // ---- Accent tints ----
+  // A tint is the accent at ~10% for icon boxes and selected chips.
+  static Color tintOf(Color accent, [double alpha = 0.10]) =>
+      accent.withValues(alpha: alpha);
 }
 
 // ========== 文字样式 ==========
@@ -102,6 +139,70 @@ class AppTextStyles {
         height: 1.4,
       ) ??
       const TextStyle();
+
+  /// Section heading inside a page body (18/w800).
+  static TextStyle section(BuildContext context) =>
+      Theme.of(context).textTheme.titleMedium?.copyWith(
+        fontSize: 18,
+        fontWeight: FontWeight.w800,
+        color: AppColors.textPrimary,
+        height: 1.3,
+        letterSpacing: -0.2,
+      ) ??
+      const TextStyle();
+
+  /// Card and list-row title (15/w700).
+  static TextStyle title(BuildContext context) =>
+      Theme.of(context).textTheme.titleSmall?.copyWith(
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        color: AppColors.textPrimary,
+        height: 1.35,
+      ) ??
+      const TextStyle();
+
+  /// Control and field label (13/w600).
+  static TextStyle label(BuildContext context) =>
+      Theme.of(context).textTheme.labelLarge?.copyWith(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: AppColors.textPrimary,
+        height: 1.35,
+      ) ??
+      const TextStyle();
+
+  /// Dense metadata: tag text, trailing counts, footnotes (11/w600).
+  static TextStyle labelSmall(BuildContext context) =>
+      Theme.of(context).textTheme.labelSmall?.copyWith(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: AppColors.textSecondary,
+        height: 1.3,
+      ) ??
+      const TextStyle();
+
+  /// The big number in a metric tile (22/w800, tabular).
+  static TextStyle metric(BuildContext context) =>
+      Theme.of(context).textTheme.headlineSmall?.copyWith(
+        fontSize: 22,
+        fontWeight: FontWeight.w800,
+        color: AppColors.textPrimary,
+        height: 1.1,
+        letterSpacing: -0.4,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ) ??
+      const TextStyle();
+
+  /// Category label above a value, or a group eyebrow (11/w700, tracked).
+  static TextStyle overline(BuildContext context) =>
+      Theme.of(context).textTheme.labelSmall?.copyWith(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: AppColors.textTertiary,
+        height: 1.2,
+        letterSpacing: 0.8,
+      ) ??
+      const TextStyle();
 }
 
 // ========== 间距系统 (4 的倍数) ==========
@@ -128,8 +229,11 @@ class AppRadii {
 
   static const double card = 22;
   static const double cardSmall = 18;
+  static const double cardLarge = 26;
   static const double button = 16;
+  static const double tile = 16;
   static const double input = 14;
+  static const double chipSmall = 12;
   static const double sheet = 28;
   static const double chip = 999;
   static const double iconBox = 13;
@@ -163,10 +267,28 @@ class AppShadows {
     offset: const Offset(0, 18),
   );
 
+  /// Tight shadow for dense list rows and inline tiles, where `cardSoft`
+  /// would look loose and muddy.
+  static BoxShadow get cardTight => BoxShadow(
+    color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+    blurRadius: 16,
+    offset: const Offset(0, 6),
+  );
+
+  /// Brand-tinted lift for the single hero surface at the top of a page.
+  /// Kept soft: at full strength it reads as a second grey band under the card.
+  static BoxShadow get hero => BoxShadow(
+    color: AppColors.primaryDeep.withValues(alpha: 0.15),
+    blurRadius: 28,
+    offset: const Offset(0, 12),
+  );
+
   static List<BoxShadow> get cardSoftList => [cardSoft];
   static List<BoxShadow> get cardMediumList => [cardMedium];
   static List<BoxShadow> get floatList => [float];
   static List<BoxShadow> get navList => [nav];
+  static List<BoxShadow> get cardTightList => [cardTight];
+  static List<BoxShadow> get heroList => [hero];
 }
 
 // ========== 统一主题 ==========
@@ -306,6 +428,125 @@ class AppTheme {
         color: AppColors.border,
         thickness: 1,
         space: 1,
+      ),
+      // ---- Below: component themes that were previously left on raw
+      // Material defaults. The app has ~250 call sites on these widgets, so
+      // theming here is what makes the whole surface read as one product.
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: primary,
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.button),
+          ),
+        ),
+      ),
+      listTileTheme: ListTileThemeData(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.xs,
+        ),
+        iconColor: AppColors.textSecondary,
+        minVerticalPadding: 10,
+        titleTextStyle: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textPrimary,
+        ),
+        subtitleTextStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w400,
+          color: AppColors.textSecondary,
+          height: 1.4,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.tile),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: AppColors.textPrimary,
+          iconSize: 21,
+          highlightColor: AppColors.primarySoft,
+        ),
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: primary,
+        linearTrackColor: AppColors.surfaceMuted,
+        circularTrackColor: Colors.transparent,
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: AppColors.surface,
+        elevation: 0,
+        position: PopupMenuPosition.under,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+          side: const BorderSide(color: AppColors.borderLight),
+        ),
+        textStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimary,
+        ),
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: AppColors.chrome.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+        ),
+        textStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+        waitDuration: const Duration(milliseconds: 500),
+      ),
+      tabBarTheme: const TabBarThemeData(
+        labelColor: AppColors.primary,
+        unselectedLabelColor: AppColors.textSecondary,
+        indicatorColor: AppColors.primary,
+        indicatorSize: TabBarIndicatorSize.label,
+        dividerColor: Colors.transparent,
+        labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        unselectedLabelStyle: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? Colors.white
+              : AppColors.surface,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? primary
+              : AppColors.surfaceMuted,
+        ),
+        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? primary
+              : Colors.transparent,
+        ),
+        side: const BorderSide(color: AppColors.border, width: 1.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: primary,
+        inactiveTrackColor: AppColors.surfaceMuted,
+        thumbColor: Colors.white,
+        overlayColor: primary.withValues(alpha: 0.12),
+        trackHeight: 6,
+      ),
+      textSelectionTheme: const TextSelectionThemeData(
+        cursorColor: primary,
+        selectionColor: AppColors.primaryLight,
+        selectionHandleColor: primary,
       ),
     );
   }

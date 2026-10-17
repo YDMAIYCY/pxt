@@ -222,15 +222,16 @@ void main() {
             });
         await subscribed.future.timeout(const Duration(seconds: 25));
         final message =
-            (await a
-                    .from('chat_messages')
-                    .insert({
-                      'conversation_id': cid,
-                      'client_token': messageToken,
-                      'body': '[验收] Realtime 私信 $run',
-                    })
-                    .select('id')
-                    .single())['id']
+            await a.rpc(
+                  'send_chat_message',
+                  params: {
+                    'cid': cid,
+                    'token': messageToken,
+                    'message_body': '[验收] Realtime 私信 $run',
+                    'image': null,
+                    'expected_sender': uidA,
+                  },
+                )
                 as String;
         await arrived.future.timeout(const Duration(seconds: 25));
         await expectLater(
@@ -293,13 +294,16 @@ void main() {
           anon.storage.from('chat-images').createSignedUrl(object, 60),
           throwsA(isA<StorageException>()),
         );
-        await a.from('chat_messages').insert({
-          'conversation_id': cid,
-          'client_token': const Uuid().v4(),
-          'kind': 'image',
-          'body': '',
-          'image_path': object,
-        });
+        await a.rpc(
+          'send_chat_message',
+          params: {
+            'cid': cid,
+            'token': const Uuid().v4(),
+            'message_body': '',
+            'image': object,
+            'expected_sender': uidA,
+          },
+        );
         expect(
           (await b
                   .from('chat_messages')

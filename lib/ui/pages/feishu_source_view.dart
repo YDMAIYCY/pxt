@@ -11,6 +11,8 @@ import '../../database/models/source_document_record.dart';
 import '../../database/models/ai_generation_task_record.dart';
 import '../../database/ocr_text_repository.dart';
 import '../../generator/ai_generation_orchestrator.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_kit.dart';
 import '../widgets/ask_eclaw_button.dart';
 import 'feishu_import_page.dart';
 import '../../feishu/docx_markdown.dart';
@@ -139,131 +141,303 @@ class _FeishuSourceViewState extends State<FeishuSourceView> {
       future: _data,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Text('读取失败：${snapshot.error}'));
+          return AppEmptyState(
+            icon: Icons.cloud_off_rounded,
+            accent: AppColors.error,
+            title: '读取失败',
+            description: '${snapshot.error}',
+            actionLabel: '重试',
+            onAction: () => setState(() {
+              _data = _load();
+            }),
+          );
         }
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const AppLoadingState(label: '正在读取飞书原文…');
         }
         final data = snapshot.data!;
         final meta = data['meta'] as Map<String, Object?>?;
         final cards = data['cards'] as List;
+        final needsUpdate = meta?['knowledge_needs_update'] == 1;
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
           children: [
-            Text(
-              widget.source.title,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            if (meta != null) ...[
-              Text(
-                '飞书来源：${meta['relative_path'] ?? widget.source.title}\n远端更新时间：${_sourceTime(meta['remote_modified_time'])}\n同步时间：${_sourceTime(meta['synced_at'])}',
-              ),
-              Wrap(
-                spacing: 8,
+            // ---- 来源信息 ----
+            AppCard.plain(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  OutlinedButton(
-                    onPressed: () async {
-                      final url = Uri.parse(meta['source_url'] as String);
-                      if (url.scheme != 'https' ||
-                          !(url.host == 'feishu.cn' ||
-                              url.host.endsWith('.feishu.cn'))) {
-                        return;
-                      }
-                      await launchUrl(
-                        url,
-                        mode: LaunchMode.externalApplication,
-                      );
-                    },
-                    child: const Text('在飞书查看原文'),
+                  Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: AppColors.tintOf(AppColors.primary, 0.12),
+                          borderRadius: BorderRadius.circular(
+                            AppRadii.chipSmall,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.description_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          widget.source.title,
+                          style: AppTextStyles.title(context),
+                        ),
+                      ),
+                    ],
                   ),
-                  if (meta['container_type'] == 'folder')
-                    OutlinedButton(
-                      onPressed: _busy
-                          ? null
-                          : () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => FeishuImportPage(
-                                    userId: widget.source.userId,
-                                    database: widget.database,
-                                    initialFolder:
-                                        meta['container_id'] as String,
-                                  ),
-                                ),
-                              );
-                              if (mounted) {
-                                setState(() {
-                                  _data = _load();
-                                });
-                              }
-                            },
-                      child: const Text('选择来源资料'),
+                  if (meta != null) ...[
+                    const SizedBox(height: 12),
+                    _MetaRow(
+                      label: '飞书路径',
+                      value: '${meta['relative_path'] ?? widget.source.title}',
                     ),
+                    _MetaRow(
+                      label: '远端更新',
+                      value: _sourceTime(meta['remote_modified_time']),
+                    ),
+                    _MetaRow(
+                      label: '同步时间',
+                      value: _sourceTime(meta['synced_at']),
+                    ),
+                  ],
+                  if (meta != null) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 40),
+                          ),
+                          onPressed: () async {
+                            final url = Uri.parse(meta['source_url'] as String);
+                            if (url.scheme != 'https' ||
+                                !(url.host == 'feishu.cn' ||
+                                    url.host.endsWith('.feishu.cn'))) {
+                              return;
+                            }
+                            await launchUrl(
+                              url,
+                              mode: LaunchMode.externalApplication,
+                            );
+                          },
+                          icon: const Icon(Icons.open_in_new_rounded, size: 17),
+                          label: const Text('在飞书查看原文'),
+                        ),
+                        if (meta['container_type'] == 'folder')
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 40),
+                            ),
+                            onPressed: _busy
+                                ? null
+                                : () async {
+                                    await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => FeishuImportPage(
+                                          userId: widget.source.userId,
+                                          database: widget.database,
+                                          initialFolder:
+                                              meta['container_id'] as String,
+                                        ),
+                                      ),
+                                    );
+                                    if (mounted) {
+                                      setState(() {
+                                        _data = _load();
+                                      });
+                                    }
+                                  },
+                            icon: const Icon(
+                              Icons.folder_open_rounded,
+                              size: 17,
+                            ),
+                            label: const Text('选择来源资料'),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (needsUpdate) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                      decoration: BoxDecoration(
+                        color: AppColors.tintOf(AppColors.accentAmber, 0.10),
+                        borderRadius: BorderRadius.circular(
+                          AppRadii.chipSmall,
+                        ),
+                        border: Border.all(
+                          color: AppColors.tintOf(
+                            AppColors.accentAmber,
+                            0.25,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.sync_problem_rounded,
+                            size: 16,
+                            color: AppColors.accentAmber,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '原文已更新；已有知识点仍保留，请重新整理知识点。',
+                              style: AppTextStyles.caption(
+                                context,
+                              ).copyWith(color: AppColors.slate),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
-              if (meta['knowledge_needs_update'] == 1)
-                const Text('原文已更新；已有知识点仍保留，请重新整理知识点。'),
-            ],
-            const SizedBox(height: 16),
-            Text(
-              _busy
-                  ? '知识整理：处理中'
-                  : meta?['knowledge_needs_update'] == 1
-                  ? '知识整理：原文已更新，待重新整理'
-                  : cards.isEmpty
-                  ? '知识整理：尚未生成'
-                  : '知识整理：已生成 ${cards.length} 个知识点',
             ),
+            const SizedBox(height: AppSpacing.md),
+
+            // ---- 原文 / 知识点 ----
             Row(
               children: [
-                TextButton(
-                  onPressed: () => setState(() => _tab = 0),
-                  child: const Text('原文'),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _tab = 1),
-                  child: Text('知识点 (${cards.length})'),
+                Expanded(
+                  child: AppSegmented<int>(
+                    value: _tab,
+                    onChanged: (v) => setState(() => _tab = v),
+                    options: [
+                      const AppSegmentedOption(0, '原文'),
+                      AppSegmentedOption(1, '知识点 ${cards.length}'),
+                    ],
+                  ),
                 ),
               ],
             ),
+            const SizedBox(height: 12),
             if (_tab == 0)
-              MarkdownBody(
-                data: data['markdown'] as String? ?? data['text'] as String,
-                selectable: true,
-                imageBuilder: (uri, title, alt) => const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('[图片暂不支持展示，可查看飞书原文]'),
-                ),
-                onTapLink: (text, href, title) async {
-                  final uri = Uri.tryParse(href ?? '');
-                  if (uri != null && {'https', 'http'}.contains(uri.scheme)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  }
-                },
-              ),
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: _busy ? null : _generate,
-              child: const Text('AI 整理知识点'),
-            ),
-            Text(_message),
-            if (_busy) const LinearProgressIndicator(),
-            if (_tab == 1 && cards.isEmpty) const Text('尚未生成知识点'),
-            if (_tab == 1)
-              for (final card in cards)
-                Card(
-                  child: Padding(
+              AppCard.plain(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                child: MarkdownBody(
+                  data: data['markdown'] as String? ?? data['text'] as String,
+                  selectable: true,
+                  imageBuilder: (uri, title, alt) => Padding(
                     padding: const EdgeInsets.all(12),
+                    child: Text(
+                      '[图片暂不支持展示，可查看飞书原文]',
+                      style: AppTextStyles.caption(context),
+                    ),
+                  ),
+                  onTapLink: (text, href, title) async {
+                    final uri = Uri.tryParse(href ?? '');
+                    if (uri != null && {'https', 'http'}.contains(uri.scheme)) {
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
+                    }
+                  },
+                ),
+              )
+            else if (cards.isEmpty)
+              const AppEmptyState(
+                compact: true,
+                icon: Icons.auto_awesome_rounded,
+                accent: AppColors.accentViolet,
+                title: '尚未生成知识点',
+                description: '用 AI 把这篇原文整理成可复习的知识点，生成后会保存在本机。',
+              )
+            else
+              for (final card in cards)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: AppCard.plain(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [Text(card.title), Text(card.content)],
+                      children: [
+                        Text(card.title, style: AppTextStyles.title(context)),
+                        const SizedBox(height: 5),
+                        SelectableText(
+                          card.content,
+                          style: AppTextStyles.bodySmall(
+                            context,
+                          ).copyWith(height: 1.55, color: AppColors.slate),
+                        ),
+                      ],
                     ),
                   ),
                 ),
+            if (_busy) const LinearProgressIndicator(),
+            if (_message.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _message,
+                  style: AppTextStyles.bodySmall(
+                    context,
+                  ).copyWith(color: AppColors.textSecondary),
+                ),
+              ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+              ),
+              onPressed: _busy ? null : _generate,
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: const Text('AI 整理知识点'),
+            ),
           ],
         );
       },
+    ),
+  );
+}
+
+/// Left label / right value row, used for the source metadata block.
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 66,
+          child: Text(
+            label,
+            style: AppTextStyles.labelSmall(
+              context,
+            ).copyWith(color: AppColors.textTertiary),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(color: AppColors.textPrimary),
+          ),
+        ),
+      ],
     ),
   );
 }

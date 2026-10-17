@@ -32,6 +32,49 @@ void main() {
       expect(repository.replacedMindmapText, '一次函数\n- 定义域\n- 图像\n- 易错点');
     },
   );
+  test(
+    'new generation requests sibling branches and preserves nested fallback output',
+    () async {
+      final client = _CapturingMiniMaxClient()
+        ..response = {
+          'root_topic': '数据结构',
+          'branches': [
+            {
+              'title': '存储',
+              'children': [
+                {
+                  'title': '哈希表',
+                  'children': ['冲突处理'],
+                },
+              ],
+            },
+            {
+              'title': '算法',
+              'children': ['二分查找'],
+            },
+          ],
+        };
+      final repository = _CapturingAiGenerationRepository();
+      final result =
+          await AiGenerationOrchestrator(
+            miniMaxClient: client,
+            aiGenerationRepository: repository,
+            knowledgeGraphRepository: _NoopKnowledgeGraphRepository(),
+          ).generateSingle(
+            documentId: 7,
+            ocrText: '数据结构讲义',
+            taskType: AiTaskType.mindmapText,
+          );
+      expect(result.success, isTrue);
+      expect(client.lastUserPrompt, contains('不要把所有知识点串在单一分支下'));
+      expect(client.lastUserPrompt, contains('每深入一级增加两个空格'));
+      expect(client.lastUserPrompt, contains('不凑数量、不编造知识'));
+      expect(
+        repository.replacedMindmapText,
+        '数据结构\n- 存储\n  - 哈希表\n    - 冲突处理\n- 算法\n  - 二分查找',
+      );
+    },
+  );
 }
 
 class _NoopKnowledgeGraphRepository extends KnowledgeGraphRepository {
@@ -47,6 +90,7 @@ class _CapturingMiniMaxClient extends MiniMaxClient {
   _CapturingMiniMaxClient() : super(apiKey: 'test-key');
 
   String? lastUserPrompt;
+  Map<String, dynamic>? response;
 
   @override
   Future<Map<String, dynamic>> generateStructuredJson({
@@ -55,7 +99,7 @@ class _CapturingMiniMaxClient extends MiniMaxClient {
     Map<String, dynamic>? jsonSchema,
   }) async {
     lastUserPrompt = userPrompt;
-    return {'mindmap_text': '一次函数\n- 定义域\n- 图像\n- 易错点'};
+    return response ?? {'mindmap_text': '一次函数\n- 定义域\n- 图像\n- 易错点'};
   }
 }
 

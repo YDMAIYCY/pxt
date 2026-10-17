@@ -26,7 +26,7 @@ import 'knowledge_graph_page.dart';
 import 'library_practice_page.dart';
 import 'record_source_page.dart';
 import 'tabs/focus_tab_page.dart';
-import 'tabs/knowledge_tab_page.dart';
+import 'home_page.dart';
 import 'tabs/tasks_tab_page.dart';
 import 'learning_concept_page.dart';
 
@@ -504,10 +504,10 @@ class _AiChatPageState extends State<AiChatPage> {
               ? DocumentDetailPage(documentId: result['documentId'] as int)
               : null;
         case 'knowledge':
-          page = Scaffold(
-            appBar: AppBar(title: const Text('知识库')),
-            body: const KnowledgeTabPage(),
-          );
+          // One knowledge base in the product: the shelf. This used to open the
+          // older KnowledgeTabPage (a categorised grid), which meant two
+          // different "知识库" experiences depending on where you came from.
+          page = const HomePage(initialTab: 1);
         case 'home':
           if (mounted) Navigator.pop(context);
           return;

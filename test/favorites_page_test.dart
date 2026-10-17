@@ -33,18 +33,18 @@ void main() {
     expect(find.textContaining('答案：A'), findsWidgets);
     expect(find.textContaining('解析：导数大于 0 单调递增。'), findsWidgets);
 
+    await tester.tap(find.text('原有笔记与重点'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('取消高亮'));
     await tester.tap(find.text('取消高亮'));
     await tester.pumpAndSettle();
     expect(repository.lastHighlight, isNull);
 
-    await tester.tap(find.textContaining('点击查看完整内容'));
-    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('删除笔记'));
     await tester.tap(find.text('删除笔记'));
     await tester.pumpAndSettle();
     expect(repository.lastNote, isNull);
 
-    await tester.tap(find.textContaining('点击查看完整内容'));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('取消收藏'));
     await tester.pumpAndSettle();
     expect(repository.removedFavoriteId, 9);

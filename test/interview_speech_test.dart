@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
 
@@ -175,6 +176,58 @@ void main() {
         expect(models.downloading.value, isFalse);
         expect(models.progress.value, lessThan(1));
         expect(await models.root.list().length, 0);
+      },
+    );
+
+    test(
+      'HTTP rejection and corrupt hub bytes retry verified mirror',
+      () async {
+        var rejectHttp = true;
+        final hosts = <String>[];
+        models = OfflineModelManager(
+          documentsDirectory: temp,
+          files: [
+            OfflineModelFile(
+              'model.onnx',
+              payload.length,
+              sha256.convert(payload).toString(),
+              'https://huggingface.co/owner/repo/resolve/rev/model.onnx',
+            ),
+          ],
+          clientFactory: () => MockClient((request) async {
+            hosts.add(request.url.host);
+            if (request.url.host == 'huggingface.co') {
+              return rejectHttp
+                  ? http.Response('expired redirect', 403)
+                  : http.Response.bytes([4, 3, 2, 1], 200);
+            }
+            return http.Response.bytes(payload, 200);
+          }),
+        );
+        await models.ensure();
+        expect(models.ready, isTrue);
+        await models.dispose();
+        await models.directory.delete(recursive: true);
+        rejectHttp = false;
+        models = OfflineModelManager(
+          documentsDirectory: temp,
+          files: models.files,
+          clientFactory: () => MockClient((request) async {
+            hosts.add(request.url.host);
+            return http.Response.bytes(
+              request.url.host == 'huggingface.co' ? [4, 3, 2, 1] : payload,
+              200,
+            );
+          }),
+        );
+        await models.ensure();
+        expect(models.ready, isTrue);
+        expect(hosts, [
+          'huggingface.co',
+          'hf-mirror.com',
+          'huggingface.co',
+          'hf-mirror.com',
+        ]);
       },
     );
 
@@ -581,6 +634,32 @@ void main() {
   });
 
   // Opt-in actual model/native smoke. Never downloads during normal tests.
+  final downloadPath = Platform.environment['INTERVIEW_MODEL_DOWNLOAD_SMOKE'];
+  test(
+    'actual pinned Chinese model downloads and verifies all four files',
+    () async {
+      final manager = OfflineModelManager(
+        documentsDirectory: Directory(downloadPath!),
+        clientFactory: () => IOClient(_LiveHttpOverrides().createHttpClient(null)),
+      );
+      try {
+        await manager.ensure();
+        expect(manager.ready, isTrue);
+        expect(await manager.inspect(), isTrue);
+        for (final spec in chinese14mFiles) {
+          expect(
+            await File(p.join(manager.directory.path, spec.name)).length(),
+            spec.size,
+          );
+        }
+      } finally {
+        await manager.dispose();
+      }
+    },
+    skip: downloadPath == null,
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+
   final modelPath = Platform.environment['INTERVIEW_ASR_SMOKE'];
   test(
     'actual 14M native model loads and recognizes Chinese sample',
@@ -633,6 +712,8 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 }
+
+class _LiveHttpOverrides extends HttpOverrides {}
 
 class _StalledClient extends http.BaseClient {
   bool closed = false;

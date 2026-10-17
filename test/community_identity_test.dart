@@ -31,6 +31,7 @@ class DeliveryFixture extends CommunityRepository {
     required String token,
     required String body,
     String? image,
+    String? expectedSender,
   }) async {
     storedTokens.add(token);
     if (loseAcknowledgement) {
@@ -46,6 +47,7 @@ class DeliveryFixture extends CommunityRepository {
     String extension, {
     String? conversation,
     String? token,
+    String? expectedOwner,
   }) async {
     uploads++;
     return '$conversation/$cloudA/$token.png';
@@ -288,7 +290,142 @@ void main() {
     },
   );
   test(
-    'v23 to v24 migration preserves local users, sources and focus history',
+    'saved copies are scoped to each chosen library and do not replace publication sources',
+    () async {
+      final userId = await local('save-libraries');
+      await cloud(cloudA);
+      await identity.activateAuthenticatedUser(legacyUserId: userId);
+      final firstLibrary =
+          (await db.query('knowledge_libraries')).single['id'] as int;
+      final now = DateTime.now().toUtc().toIso8601String();
+      final secondLibrary = await db.insert('knowledge_libraries', {
+        'user_id': userId,
+        'name': '第二知识库',
+        'description': '',
+        'created_at': now,
+        'updated_at': now,
+      });
+      final bridge = KnowledgeCommunityBridge(
+        database: app,
+        identity: identity,
+      );
+      final original = await SourceDocumentRepository(database: app)
+          .createSourceDocument(
+            userId: userId,
+            sourceType: 'gallery_image',
+            imagePath: 'original-only.png',
+            title: '原文档',
+          );
+      const question = {
+        'id': 'published-question',
+        'title': '发布的问题',
+        'body': '问题正文',
+      };
+      await bridge.linkPublishedQuestion(question['id']!, original.id);
+      final firstSave = await bridge.saveToLibrary(
+        question: question,
+        libraryId: firstLibrary,
+      );
+      final secondSave = await bridge.saveToLibrary(
+        question: question,
+        libraryId: secondLibrary,
+      );
+      expect(firstSave, isNot(original.id));
+      expect(secondSave, isNot(firstSave));
+      expect(
+        await bridge.saveToLibrary(
+          question: question,
+          libraryId: secondLibrary,
+        ),
+        secondSave,
+      );
+      expect(
+        (await db.query('community_knowledge_links')).single['document_id'],
+        original.id,
+      );
+      expect(await db.query('community_knowledge_saves'), hasLength(2));
+      expect(
+        (await db.query(
+          'source_documents',
+          where: 'id=?',
+          whereArgs: [secondSave],
+        )).single['library_id'],
+        secondLibrary,
+      );
+      final recordId =
+          (await db.query(
+                'source_documents',
+                where: 'id=?',
+                whereArgs: [firstSave],
+              )).single['import_record_id']
+              as int;
+      expect(
+        (await bridge.linksForRecord(userId, recordId)).single['question_id'],
+        question['id'],
+      );
+    },
+  );
+
+  test(
+    'v24 saved community sources migrate without changing documents or session',
+    () async {
+      final userId = await local('upgrade-saves');
+      await cloud(cloudA);
+      await identity.activateAuthenticatedUser(legacyUserId: userId);
+      final library =
+          (await db.query('knowledge_libraries')).single['id'] as int;
+      final bridge = KnowledgeCommunityBridge(
+        database: app,
+        identity: identity,
+      );
+      const question = {'id': 'legacy-saved-q', 'title': '原收藏', 'body': '原内容'};
+      final saved = await bridge.saveToLibrary(
+        question: question,
+        libraryId: library,
+      );
+      final row = (await db.query('community_knowledge_saves')).single;
+      await db.insert('community_knowledge_links', {
+        'user_id': userId,
+        'auth_uuid': cloudA,
+        'question_id': question['id'],
+        'document_id': saved,
+        'created_at': row['created_at'],
+      });
+      await db.execute('DROP TABLE community_knowledge_saves');
+      await db.execute('PRAGMA user_version=24');
+      await db.close();
+      app = await AppDatabase.openForTesting(
+        databaseFactoryFfi,
+        path: '${dir.path}/test.db',
+      );
+      db = await app.database;
+      final restored = KnowledgeCommunityBridge(
+        database: app,
+        identity: CloudIdentityRepository(database: app, client: client),
+      );
+      expect(
+        await restored.saveToLibrary(question: question, libraryId: library),
+        saved,
+      );
+      expect(await db.query('community_knowledge_links'), hasLength(1));
+      expect(await db.query('community_knowledge_saves'), hasLength(1));
+      expect(
+        (await AuthRepository(database: app).getCurrentUserProfile())!.id,
+        userId,
+      );
+      expect(await db.getVersion(), AppDatabase.databaseVersion);
+      expect(
+        await dir
+            .list()
+            .where((file) => file.path.contains('.before-community-v24-'))
+            .length,
+        1,
+      );
+    },
+  );
+
+  test(
+    'v23 to v25 migration preserves local users, sources and focus history',
     () async {
       final id = await local('migration');
       final source = await SourceDocumentRepository(database: app)
@@ -316,7 +453,7 @@ void main() {
         path: '${dir.path}/test.db',
       );
       db = await app.database;
-      expect(await db.getVersion(), 24);
+      expect(await db.getVersion(), AppDatabase.databaseVersion);
       final backups = await dir
           .list()
           .where((f) => f.path.contains('.before-community-v23-'))

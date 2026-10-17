@@ -16,7 +16,7 @@ class KnowledgeCommunityBridge {
   final CloudIdentityRepository? _identity;
   Future<List<Map<String, Object?>>> shareableCards() async {
     final user = await AuthRepository(database: _db).getCurrentUserProfile();
-    if (user == null) throw const CloudFailure('请先登录本地账号');
+    if (user == null) throw const CloudFailure('请先登录智学帮');
     return (await _db.database).rawQuery(
       '''SELECT k.id,k.title,k.content,k.document_id FROM knowledge_cards k
       JOIN source_documents s ON s.id=k.document_id WHERE s.user_id=? ORDER BY k.id DESC LIMIT 100''',
@@ -31,7 +31,7 @@ class KnowledgeCommunityBridge {
     required int libraryId,
   }) async {
     final user = await AuthRepository(database: _db).getCurrentUserProfile();
-    if (user == null) throw const CloudFailure('请先登录本地账号');
+    if (user == null) throw const CloudFailure('请先登录智学帮');
     final uuid = await (_identity ?? CloudIdentityRepository(database: _db))
         .requireLinked();
     final now = DateTime.now().toUtc().toIso8601String();
@@ -45,9 +45,15 @@ class KnowledgeCommunityBridge {
         throw const CloudFailure('请选择自己的知识库');
       }
       final old = await txn.query(
-        'community_knowledge_links',
-        where: 'user_id=? AND question_id=? AND answer_id IS ?',
-        whereArgs: [user.id, question['id'], answer?['id']],
+        'community_knowledge_saves',
+        where:
+            'user_id=? AND library_id=? AND question_id=? AND answer_id ${answer == null ? 'IS NULL' : '=?'}',
+        whereArgs: [
+          user.id,
+          libraryId,
+          question['id'],
+          if (answer != null) answer['id'],
+        ],
       );
       if (old.isNotEmpty) return old.first['document_id'] as int;
       final title = question['title'] as String;
@@ -57,7 +63,7 @@ class KnowledgeCommunityBridge {
         'user_id': user.id,
         'library_id': libraryId,
         'operation_id':
-            'community:${question['id']}:${answer?['id'] ?? 'question'}',
+            'community:$libraryId:${question['id']}:${answer?['id'] ?? 'question'}',
         'title': title,
         'tags_json': '[]',
         'created_at': now,
@@ -86,9 +92,10 @@ class KnowledgeCommunityBridge {
         'content': content,
         'created_at': now,
       });
-      await txn.insert('community_knowledge_links', {
+      await txn.insert('community_knowledge_saves', {
         'user_id': user.id,
         'auth_uuid': uuid,
+        'library_id': libraryId,
         'question_id': question['id'],
         'answer_id': answer?['id'],
         'document_id': id,
@@ -126,8 +133,12 @@ class KnowledgeCommunityBridge {
     int userId,
     int recordId,
   ) async => (await _db.database).rawQuery(
-    '''SELECT c.* FROM community_knowledge_links c JOIN source_documents d ON d.id=c.document_id
-      WHERE c.user_id=? AND d.user_id=? AND d.import_record_id=? ORDER BY c.id DESC''',
-    [userId, userId, recordId],
+    '''SELECT c.question_id,c.answer_id,c.document_id,c.created_at
+      FROM community_knowledge_links c JOIN source_documents d ON d.id=c.document_id
+      WHERE c.user_id=? AND d.user_id=? AND d.import_record_id=?
+      UNION SELECT c.question_id,c.answer_id,c.document_id,c.created_at
+      FROM community_knowledge_saves c JOIN source_documents d ON d.id=c.document_id
+      WHERE c.user_id=? AND d.user_id=? AND d.import_record_id=? ORDER BY 4 DESC''',
+    [userId, userId, recordId, userId, userId, recordId],
   );
 }

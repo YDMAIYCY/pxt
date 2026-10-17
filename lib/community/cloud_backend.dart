@@ -110,6 +110,20 @@ String cloudError(Object error) {
     if (error.code == 'invalid_credentials') return '邮箱或密码不正确';
     if (error.code == 'email_not_confirmed') return '请先到邮箱确认注册，再登录';
     if (error.code == 'user_already_exists') return '此邮箱已注册，请直接登录';
+    if (error.code == 'email_provider_disabled') {
+      return '云端尚未开启邮箱登录，请在 Supabase 的 Auth Providers 中启用 Email';
+    }
+    if (error.code == 'signup_disabled') {
+      return '云端已关闭新用户注册，请在 Supabase 中重新开启';
+    }
+    if (error.code == 'over_email_send_rate_limit') {
+      return '确认邮件发送过于频繁，请稍后再试；也可让管理员关闭邮箱确认';
+    }
+    if (error.code == 'over_request_rate_limit') return '操作过于频繁，请稍后重试';
+    if (error.code == 'weak_password') return '密码强度不足，请改用更长的密码';
+    if (error.code == 'validation_failed') {
+      return '邮箱或密码格式不被接受，请检查后重试';
+    }
     return '账号操作失败，请检查邮箱、密码或稍后重试';
   }
   if (error is PostgrestException) {

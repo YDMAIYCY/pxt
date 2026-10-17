@@ -301,12 +301,9 @@ class _FeishuImportPageState extends State<FeishuImportPage>
                     '已选择 ${selection.rules.length} 项',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  const Text(
+                  Text(
                     '文档数量将在确认前扫描',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                    ),
+                    style: AppTextStyles.caption(context),
                   ),
                 ],
               ),
@@ -315,10 +312,9 @@ class _FeishuImportPageState extends State<FeishuImportPage>
               style: FilledButton.styleFrom(
                 minimumSize: const Size(0, 48),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
+                textStyle: AppTextStyles.label(
+                  context,
+                ).copyWith(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               onPressed:
                   busy || selection.rules.isEmpty || !controller.connected

@@ -5,27 +5,37 @@ import '../../../community/community_repository.dart';
 import '../../../community/knowledge_community_bridge.dart';
 import '../../../database/auth_repository.dart';
 import '../../../database/knowledge_library_repository.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 import '../../widgets/eclaw_chat_widgets.dart' show EClawRichText;
 import 'community_widgets.dart';
 import 'social_pages.dart';
 
 class QuestionDetailPage extends StatefulWidget {
-  const QuestionDetailPage({required this.questionId, super.key});
+  const QuestionDetailPage({
+    required this.questionId,
+    this.repository,
+    super.key,
+  });
   final String questionId;
+  final CommunityRepository? repository;
   @override
   State<QuestionDetailPage> createState() => _QuestionDetailPageState();
 }
 
 class _QuestionDetailPageState extends State<QuestionDetailPage> {
-  final _repo = CommunityRepository(), _reply = TextEditingController();
+  late final _repo = widget.repository ?? CommunityRepository();
+  final _reply = TextEditingController();
   late Future<Json> _future;
   List<Json> _answers = [];
   bool _bookmarked = false, _busy = false, _more = true;
   String _token = const Uuid().v4();
+  ({String body, String token})? _pendingReply;
+  String? _replyError;
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _future = _load()..ignore();
   }
 
   @override
@@ -45,7 +55,9 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load()..ignore();
+    });
     try {
       await _future;
     } catch (_) {}
@@ -68,6 +80,35 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _submitReply() async {
+    if (_busy) return;
+    final pending = _pendingReply ?? (body: _reply.text, token: _token);
+    if (pending.body.trim().isEmpty) {
+      communityMessage(context, '回答不能为空');
+      return;
+    }
+    setState(() {
+      _pendingReply = pending;
+      _replyError = null;
+    });
+    await _action(() async {
+      try {
+        await _repo.answer(widget.questionId, pending.body, pending.token);
+      } catch (e) {
+        if (mounted) {
+          setState(() => _replyError = '结果待确认，请重试确认\n${cloudError(e)}');
+        }
+        rethrow;
+      }
+      if (!mounted) return;
+      setState(() {
+        _reply.clear();
+        _pendingReply = null;
+        _token = const Uuid().v4();
+      });
+    }, message: '回答已发布');
   }
 
   void _user(Json p) => Navigator.push(
@@ -158,7 +199,7 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
     }
   }
 
-  Widget _author(Json item) {
+  Widget _author(Json item, {Widget? trailing}) {
     final p = Json.from(item['profile'] as Map? ?? {});
     return Row(
       children: [
@@ -172,19 +213,38 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
               children: [
                 Text(
                   p['nickname'] as String? ?? '同学',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title(context),
                 ),
+                const SizedBox(height: 1),
                 Text(
                   communityTime(item['created_at']),
-                  style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
+                  style: AppTextStyles.caption(context),
                 ),
               ],
             ),
           ),
         ),
+        if (trailing != null) ...[const SizedBox(width: 8), trailing],
       ],
     );
   }
+
+  /// Owner-only and destructive actions live in an overflow so they never sit
+  /// shoulder to shoulder with the primary "收藏 / 存入知识库" pair.
+  Widget _moreMenu({
+    required List<PopupMenuEntry<String>> items,
+    required void Function(String) onSelected,
+  }) => PopupMenuButton<String>(
+    tooltip: '更多操作',
+    icon: const Icon(
+      Icons.more_horiz_rounded,
+      color: AppColors.textSecondary,
+    ),
+    onSelected: onSelected,
+    itemBuilder: (_) => items,
+  );
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -193,315 +253,384 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
     body: CloudFutureView(
       future: _future,
       onRetry: () => _refresh(),
-      builder: (q) => RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _card(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _author(q),
-                  const SizedBox(height: 16),
-                  Text(
-                    q['title'] as String,
-                    style: const TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.w800,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  EClawRichText(q['body'] as String),
-                  for (final path in q['image_paths'] as List)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: CommunityImage(
-                        path: path as String,
-                        height: 210,
-                        width: double.infinity,
+      builder: (q) {
+        final resolved = q['accepted_answer_id'] != null;
+        final isOwner = q['author_id'] == _repo.uid;
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+            children: [
+              // ---- 问题 ----
+              AppCard.plain(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _author(
+                      q,
+                      trailing: AppTag(
+                        label: resolved ? '已解决' : '待解答',
+                        accent: resolved
+                            ? AppColors.success
+                            : AppColors.accentAmber,
+                        icon: resolved
+                            ? Icons.check_circle_rounded
+                            : Icons.pending_outlined,
                       ),
                     ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      for (final tag in q['tags'] as List)
-                        Chip(
-                          label: Text(
-                            tag.toString(),
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                    ],
-                  ),
-                  Wrap(
-                    spacing: 4,
-                    children: [
-                      TextButton.icon(
-                        onPressed: _busy
-                            ? null
-                            : () => _action(
-                                () => _repo.bookmark(
-                                  widget.questionId,
-                                  !_bookmarked,
-                                ),
-                              ),
-                        icon: Icon(
-                          _bookmarked ? Icons.star : Icons.star_border,
-                        ),
-                        label: Text(_bookmarked ? '已收藏' : '收藏'),
+                    const SizedBox(height: 14),
+                    Text(
+                      q['title'] as String,
+                      style: AppTextStyles.h2(context).copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        height: 1.4,
                       ),
-                      TextButton.icon(
-                        onPressed: _busy ? null : () => _save(q, null),
-                        icon: const Icon(Icons.library_add_outlined),
-                        label: const Text('存入知识库'),
+                    ),
+                    const SizedBox(height: 10),
+                    EClawRichText(q['body'] as String),
+                    for (final path in q['image_paths'] as List)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: CommunityImage(
+                          path: path as String,
+                          height: 210,
+                          width: double.infinity,
+                        ),
                       ),
-                      if (q['author_id'] == _repo.uid) ...[
-                        TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _edit('community_questions', q),
-                          child: const Text('编辑'),
-                        ),
-                        TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () async {
-                                  if (await confirmCommunityDelete(context)) {
-                                    await _action(() async {
-                                      await _repo.deleteContent(
-                                        'community_questions',
-                                        widget.questionId,
-                                      );
-                                      if (context.mounted) {
-                                        Navigator.pop(context);
-                                      }
-                                    });
-                                  }
-                                },
-                          child: const Text('删除'),
-                        ),
-                      ] else
-                        TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _report('question', widget.questionId),
-                          child: const Text('举报'),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Text(
-                q['accepted_answer_id'] == null ? '回答与讨论' : '已解决 · 已采纳的回答会突出显示',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (_answers.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  '还没有回答，分享你的思路吧',
-                  style: TextStyle(color: Colors.blueGrey),
-                ),
-              ),
-            for (final a
-                in [..._answers]..sort(
-                  (a, b) => (a['id'] == q['accepted_answer_id']
-                      ? -1
-                      : b['id'] == q['accepted_answer_id']
-                      ? 1
-                      : 0),
-                ))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: q['accepted_answer_id'] == a['id']
-                        ? Border.all(color: const Color(0xFF24BB8D), width: 2)
-                        : null,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: _card(
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (q['accepted_answer_id'] == a['id'])
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              '✓ 已采纳',
-                              style: TextStyle(
-                                color: Color(0xFF12A777),
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        _author(a),
-                        const SizedBox(height: 12),
-                        EClawRichText(a['body'] as String),
-                        const SizedBox(height: 8),
-                        Wrap(
+                    if ((q['tags'] as List).isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
                           children: [
-                            TextButton(
-                              onPressed: _busy ? null : () => _save(q, a),
-                              child: const Text('存入知识库'),
-                            ),
-                            if (q['author_id'] == _repo.uid)
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => _action(
-                                        () => _repo.accept(
-                                          widget.questionId,
-                                          q['accepted_answer_id'] == a['id']
-                                              ? null
-                                              : a['id'] as String,
-                                        ),
-                                      ),
-                                child: Text(
-                                  q['accepted_answer_id'] == a['id']
-                                      ? '取消采纳'
-                                      : '采纳',
-                                ),
-                              ),
-                            if (a['author_id'] == _repo.uid) ...[
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => _edit('community_answers', a),
-                                child: const Text('编辑'),
-                              ),
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () async {
-                                        if (await confirmCommunityDelete(
-                                          context,
-                                        )) {
-                                          await _action(
-                                            () => _repo.deleteContent(
-                                              'community_answers',
-                                              a['id'] as String,
-                                            ),
-                                          );
-                                        }
-                                      },
-                                child: const Text('删除'),
-                              ),
-                            ] else
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () =>
-                                          _report('answer', a['id'] as String),
-                                child: const Text('举报'),
+                            for (final tag in q['tags'] as List)
+                              AppTag(
+                                label: tag.toString(),
+                                accent: AppColors.primary,
                               ),
                           ],
                         ),
-                        AnswerComments(
-                          key: ValueKey('${a['id']}:${q['updated_at']}'),
-                          answerId: a['id'] as String,
-                          repository: _repo,
+                      ),
+                    const SizedBox(height: 12),
+                    const Divider(height: 1, color: AppColors.borderLight),
+                    Row(
+                      children: [
+                        _ActionChip(
+                          icon: _bookmarked
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                          label: _bookmarked ? '已收藏' : '收藏',
+                          active: _bookmarked,
+                          onTap: _busy
+                              ? null
+                              : () => _action(
+                                  () => _repo.bookmark(
+                                    widget.questionId,
+                                    !_bookmarked,
+                                  ),
+                                ),
+                        ),
+                        _ActionChip(
+                          icon: Icons.library_add_outlined,
+                          label: '存入知识库',
+                          onTap: _busy ? null : () => _save(q, null),
+                        ),
+                        const Spacer(),
+                        _moreMenu(
+                          items: [
+                            if (isOwner) ...[
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Text('编辑'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Text('删除'),
+                              ),
+                            ] else
+                              const PopupMenuItem(
+                                value: 'report',
+                                child: Text('举报'),
+                              ),
+                          ],
+                          onSelected: (value) async {
+                            if (value == 'edit') {
+                              await _edit('community_questions', q);
+                            } else if (value == 'delete') {
+                              if (await confirmCommunityDelete(context)) {
+                                await _action(() async {
+                                  await _repo.deleteContent(
+                                    'community_questions',
+                                    widget.questionId,
+                                  );
+                                  if (context.mounted) Navigator.pop(context);
+                                });
+                              }
+                            } else {
+                              await _report('question', widget.questionId);
+                            }
+                          },
                         ),
                       ],
                     ),
-                  ),
+                  ],
                 ),
               ),
-            if (_more)
-              TextButton(
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        setState(() => _busy = true);
-                        try {
-                          final more = await _repo.answers(
-                            widget.questionId,
-                            offset: _answers.length,
-                          );
-                          if (mounted) {
-                            setState(() {
-                              _answers.addAll(more);
-                              _more = more.length == 20;
-                            });
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            communityMessage(context, cloudError(e));
-                          }
-                        } finally {
-                          if (mounted) setState(() => _busy = false);
-                        }
-                      },
-                child: const Text('加载更多回答'),
+
+              // ---- 回答 ----
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 20, 2, 12),
+                child: AppSectionHeader(
+                  title: '回答与讨论',
+                  subtitle: resolved
+                      ? '已解决 · 采纳的回答排在最前'
+                      : _answers.isEmpty
+                      ? null
+                      : '共 ${_answers.length} 条',
+                  accent: resolved ? AppColors.success : AppColors.accentSky,
+                ),
               ),
-            _card(
-              Column(
-                children: [
-                  TextField(
-                    controller: _reply,
-                    minLines: 3,
-                    maxLines: 10,
-                    maxLength: 30000,
-                    enabled: !_busy,
-                    decoration: const InputDecoration(
-                      labelText: '写下你的回答',
-                      hintText: '支持 Markdown、代码块和数学公式',
+              if (_answers.isEmpty)
+                const AppEmptyState(
+                  compact: true,
+                  icon: Icons.forum_outlined,
+                  title: '还没有回答',
+                  description: '分享一下你的思路，也许正好能解开这个卡点。',
+                ),
+              for (final a
+                  in [..._answers]..sort(
+                    (a, b) => (a['id'] == q['accepted_answer_id']
+                        ? -1
+                        : b['id'] == q['accepted_answer_id']
+                        ? 1
+                        : 0),
+                  ))
+                _answerCard(q, a, isOwner: isOwner),
+              if (_more)
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          setState(() => _busy = true);
+                          try {
+                            final more = await _repo.answers(
+                              widget.questionId,
+                              offset: _answers.length,
+                            );
+                            if (mounted) {
+                              setState(() {
+                                _answers.addAll(more);
+                                _more = more.length == 20;
+                              });
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              communityMessage(context, cloudError(e));
+                            }
+                          } finally {
+                            if (mounted) setState(() => _busy = false);
+                          }
+                        },
+                  child: const Text('加载更多回答'),
+                ),
+
+              // ---- 写回答 ----
+              AppCard.plain(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const AppSectionHeader(
+                      title: '写下你的回答',
+                      subtitle: '支持 Markdown、代码块和数学公式',
+                      accent: AppColors.accentSky,
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 44),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _reply,
+                      minLines: 3,
+                      maxLines: 10,
+                      maxLength: 30000,
+                      enabled: !_busy && _pendingReply == null,
+                      decoration: const InputDecoration(
+                        labelText: '写下你的回答',
+                        hintText: '先说结论，再说你的推导过程',
                       ),
-                      onPressed: _busy
-                          ? null
-                          : () {
-                              if (_reply.text.trim().isEmpty) {
-                                communityMessage(context, '回答不能为空');
-                                return;
-                              }
-                              _action(() async {
-                                await _repo.answer(
-                                  widget.questionId,
-                                  _reply.text,
-                                  _token,
-                                );
-                                _reply.clear();
-                                _token = const Uuid().v4();
-                              }, message: '回答已发布');
-                            },
-                      child: Text(_busy ? '提交中…' : '发布回答'),
                     ),
-                  ),
-                ],
+                    if (_replyError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          _replyError!,
+                          style: AppTextStyles.bodySmall(
+                            context,
+                          ).copyWith(color: AppColors.error),
+                        ),
+                      ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                        ),
+                        onPressed: _busy ? null : _submitReply,
+                        child: Text(
+                          _busy
+                              ? '提交中…'
+                              : _pendingReply != null
+                              ? '重试确认'
+                              : '发布回答',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  Widget _answerCard(Json q, Json a, {required bool isOwner}) {
+    final accepted = q['accepted_answer_id'] == a['id'];
+    final mine = a['author_id'] == _repo.uid;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        decoration: BoxDecoration(
+          color: accepted
+              ? AppColors.tintOf(AppColors.success, 0.04)
+              : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(
+            color: accepted ? AppColors.success : AppColors.borderLight,
+            width: accepted ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _author(
+              a,
+              trailing: accepted
+                  ? const AppTag(
+                      label: '已采纳',
+                      accent: AppColors.success,
+                      icon: Icons.check_circle_rounded,
+                    )
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            EClawRichText(a['body'] as String),
+            Row(
+              children: [
+                _ActionChip(
+                  icon: Icons.library_add_outlined,
+                  label: '存入知识库',
+                  onTap: _busy ? null : () => _save(q, a),
+                ),
+                if (isOwner)
+                  _ActionChip(
+                    icon: accepted
+                        ? Icons.undo_rounded
+                        : Icons.verified_outlined,
+                    label: accepted ? '取消采纳' : '采纳',
+                    active: accepted,
+                    onTap: _busy
+                        ? null
+                        : () => _action(
+                            () => _repo.accept(
+                              widget.questionId,
+                              accepted ? null : a['id'] as String,
+                            ),
+                          ),
+                  ),
+                const Spacer(),
+                _moreMenu(
+                  items: [
+                    if (mine) ...[
+                      const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                      const PopupMenuItem(value: 'delete', child: Text('删除')),
+                    ] else
+                      const PopupMenuItem(value: 'report', child: Text('举报')),
+                  ],
+                  onSelected: (value) async {
+                    if (value == 'edit') {
+                      await _edit('community_answers', a);
+                    } else if (value == 'delete') {
+                      if (await confirmCommunityDelete(context)) {
+                        await _action(
+                          () => _repo.deleteContent(
+                            'community_answers',
+                            a['id'] as String,
+                          ),
+                        );
+                      }
+                    } else {
+                      await _report('answer', a['id'] as String);
+                    }
+                  },
+                ),
+              ],
+            ),
+            AnswerComments(
+              key: ValueKey('${a['id']}:${q['updated_at']}'),
+              answerId: a['id'] as String,
+              repository: _repo,
             ),
           ],
         ),
       ),
-    ),
-  );
-  Widget _card(Widget child) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: child,
-  );
+    );
+  }
+}
+
+/// A compact footer action: icon + label, tinted when active. Replaces five
+/// loose `TextButton`s that had no grouping and no visual hierarchy.
+class _ActionChip extends StatelessWidget {
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    this.active = false,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = active ? AppColors.accentAmber : AppColors.textSecondary;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: accent),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: AppTextStyles.label(
+                context,
+              ).copyWith(color: accent, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class AnswerComments extends StatefulWidget {

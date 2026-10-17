@@ -9,19 +9,20 @@ import '../../../common/profile_image_store.dart';
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
 import '../../../database/favorite_repository.dart';
-import '../../../database/source_document_repository.dart';
 import '../../../database/llm_config_repository.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/llm_provider_config.dart';
 import '../../../database/models/user_profile.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
+import '../../widgets/favorite_annotation_sheet.dart';
 import '../llm_config_edit_page.dart';
 import '../login_page.dart';
 import 'knowledge_tab_page.dart';
-import 'tasks_tab_page.dart';
 import '../../../community/cloud_backend.dart';
 import '../../../community/community_repository.dart';
 import '../../../focus/repository/focus_repository.dart';
+import '../../../learning/study_activity_repository.dart';
 import '../community/community_page.dart';
 import '../community/community_widgets.dart';
 import '../community/social_pages.dart';
@@ -109,10 +110,10 @@ const List<_BackgroundPreset> _backgroundPresets = [
 class ProfileTabPage extends StatefulWidget {
   const ProfileTabPage({
     this.authRepository,
-    this.sourceDocumentRepository,
     this.llmConfigRepository,
     this.aiGenerationRepository,
     this.focusRepository,
+    this.studyActivityRepository,
     this.refreshVersion = 0,
     this.refreshListenable,
     this.activeTabListenable,
@@ -123,10 +124,10 @@ class ProfileTabPage extends StatefulWidget {
   });
 
   final AuthRepository? authRepository;
-  final SourceDocumentRepository? sourceDocumentRepository;
   final LlmConfigRepository? llmConfigRepository;
   final AiGenerationRepository? aiGenerationRepository;
   final FocusRepository? focusRepository;
+  final StudyActivityRepository? studyActivityRepository;
   final int refreshVersion;
   final ValueListenable<int>? refreshListenable;
   final ValueListenable<int>? activeTabListenable;
@@ -140,7 +141,6 @@ class ProfileTabPage extends StatefulWidget {
 
 class _ProfileTabPageState extends State<ProfileTabPage> {
   late final AuthRepository _authRepository;
-  late final SourceDocumentRepository _sourceDocumentRepository;
   late final LlmConfigRepository _llmConfigRepository;
   late final AiGenerationRepository _aiGenerationRepository;
   late final FavoriteRepository _favoriteRepository;
@@ -151,6 +151,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   StudyOverviewStats? _studyStats;
   FocusStats? _focusStats;
   int? _learningStreak;
+  int? _todayStudySeconds;
   Json? _cloudProfile;
   Json? _cloudStats;
   String? _cloudStatus;
@@ -164,8 +165,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   void initState() {
     super.initState();
     _authRepository = widget.authRepository ?? AuthRepository();
-    _sourceDocumentRepository =
-        widget.sourceDocumentRepository ?? SourceDocumentRepository();
     _llmConfigRepository = widget.llmConfigRepository ?? LlmConfigRepository();
     _aiGenerationRepository =
         widget.aiGenerationRepository ?? AiGenerationRepository();
@@ -262,8 +261,13 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       }
       final streak = await (widget.focusRepository ?? FocusRepository())
           .fetchLearningStreak(userId);
+      final activity = widget.studyActivityRepository ?? StudyActivityRepository();
+      final todaySeconds = await activity.todaySeconds(userId);
       if (mounted && _profile?.id == userId) {
-        setState(() => _learningStreak = streak);
+        setState(() {
+          _learningStreak = streak;
+          _todayStudySeconds = todaySeconds;
+        });
       }
     } catch (_) {
       /* Local statistics failure does not hide profile settings. */
@@ -727,32 +731,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     }
   }
 
-  // ignore: unused_element
-  Future<void> _openWrongQuestionsEntry() async {
-    final onOpenTab = widget.onOpenTab;
-    if (onOpenTab != null) {
-      onOpenTab(3);
-      return;
-    }
-
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TaskListPage(
-          kind: TaskListKind.wrongQuestions,
-          authRepository: _authRepository,
-          sourceDocumentRepository: _sourceDocumentRepository,
-          aiGenerationRepository: _aiGenerationRepository,
-          onDataChanged: widget.onDataChanged,
-        ),
-      ),
-    );
-    if (mounted) {
-      widget.onDataChanged?.call();
-      await _loadProfile();
-    }
-  }
-
-  // ignore: unused_element
   Future<void> _openKnowledgeEntry() async {
     final onOpenTab = widget.onOpenTab;
     if (onOpenTab != null) {
@@ -990,167 +968,177 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   }
 
   Widget _buildProfileStats() {
-    final values = [
-      (
-        Icons.local_fire_department_rounded,
-        const Color(0xFFFF8556),
-        _learningStreak?.toString() ?? '—',
-        '连续学习（天）',
-      ),
-      (
-        Icons.schedule_rounded,
-        const Color(0xFF51A5FF),
-        _focusStats == null
-            ? '—'
-            : (_focusStats!.todaySeconds / 3600).toStringAsFixed(1),
-        '今日时长（时）',
-      ),
-      (
-        Icons.forum_rounded,
-        const Color(0xFF21BF94),
-        _cloudStats?['answers']?.toString() ?? '—',
-        '社区回答（个）',
-      ),
-      (
-        Icons.people_rounded,
-        const Color(0xFF9573FF),
-        _cloudStats?['friends']?.toString() ?? '—',
-        '好友数（人）',
-      ),
-    ];
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 0, 14, 16),
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 5),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < values.length; i++) ...[
-            if (i > 0)
-              Container(height: 56, width: 1, color: const Color(0xFFEDF2FC)),
-            Expanded(
-              child: Column(
-                children: [
-                  Icon(values[i].$1, color: values[i].$2, size: 25),
-                  const SizedBox(height: 7),
-                  Text(
-                    values[i].$3,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF101C36),
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    values[i].$4,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF8090A8),
-                      fontSize: 10,
-                    ),
-                  ),
-                ],
-              ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 16),
+      child: AppCard.plain(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+        child: AppStatRow(
+          tiles: [
+            AppStatTile(
+              icon: Icons.local_fire_department_rounded,
+              value: _learningStreak?.toString() ?? '—',
+              label: '连续学习（天）',
+              accent: AppColors.accentFlame,
+            ),
+            AppStatTile(
+              icon: Icons.schedule_rounded,
+              value: _todayStudySeconds == null
+                  ? '—'
+                  : (_todayStudySeconds! / 3600).toStringAsFixed(2),
+              label: '今日时长（时）',
+              accent: AppColors.accentSky,
+            ),
+            AppStatTile(
+              icon: Icons.forum_rounded,
+              value: _cloudStats?['answers']?.toString() ?? '—',
+              label: '社区回答（个）',
+              accent: AppColors.accentMint,
+            ),
+            AppStatTile(
+              icon: Icons.people_rounded,
+              value: _cloudStats?['friends']?.toString() ?? '—',
+              label: '好友数（人）',
+              accent: AppColors.accentViolet,
             ),
           ],
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildSettingsSection(BuildContext context) {
     final stats = _studyStats;
+    final focusSubtitle = _focusStats == null
+        ? '查看专注记录与统计'
+        : '今日 ${(_focusStats!.todaySeconds / 60).toStringAsFixed(0)} 分钟 · 查看专注详情';
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+      padding: const EdgeInsets.fromLTRB(16, 22, 16, 20),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(34),
+          top: Radius.circular(AppRadii.sheet),
           bottom: Radius.circular(AppRadii.card),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF111827).withValues(alpha: 0.06),
-            blurRadius: 18,
-            offset: const Offset(0, -2),
-          ),
-        ],
+        boxShadow: AppShadows.cardTightList,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('我的学习空间', style: AppTextStyles.h2(context)),
-          const SizedBox(height: 6),
-          Text(
-            '管理学习资料、社交互动与个性化设置，让学习更高效。',
-            style: AppTextStyles.bodySmall(context),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('我的学习空间', style: AppTextStyles.h2(context)),
+                const SizedBox(height: 6),
+                Text(
+                  '管理学习资料、社交互动与个性化设置。',
+                  style: AppTextStyles.bodySmall(context),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
-          if (_cloudStatus != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Text(
-                _cloudStatus!,
-                style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
+          const SizedBox(height: 18),
+          if (_cloudStatus != null) ...[
+            AppCard.tinted(
+              accent: AppColors.warning,
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.cloud_off_rounded,
+                    size: 18,
+                    color: AppColors.warning,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _cloudStatus!,
+                      style: AppTextStyles.caption(context),
+                    ),
+                  ),
+                ],
               ),
             ),
-          _SettingTile(
-            icon: Icons.menu_book_rounded,
-            title: '我的知识资产',
-            subtitle: '学习资料、知识卡片与学习成果',
-            onTap: _openKnowledgeEntry,
+            const SizedBox(height: 16),
+          ],
+          // Eight flat tiles became four labelled clusters, so the page reads
+          // as "assets / social / study / account" instead of one long list.
+          _SettingsGroup(
+            title: '学习资产',
+            rows: [
+              _SettingRowData(
+                icon: Icons.menu_book_rounded,
+                title: '我的知识资产',
+                subtitle: '学习资料、知识卡片与学习成果',
+                onTap: _openKnowledgeEntry,
+              ),
+              _SettingRowData(
+                icon: Icons.collections_bookmark_rounded,
+                accent: AppColors.accentAmber,
+                title: '收藏',
+                subtitle: stats == null ? '待同步' : '知识卡片、错题和 AI 学习成果集中查看',
+                onTap: _openFavoritesEntry,
+              ),
+            ],
           ),
-          _SettingTile(
-            icon: Icons.collections_bookmark_rounded,
-            color: const Color(0xFFFFB827),
-            title: '收藏',
-            subtitle: stats == null ? '待同步' : '知识卡片、错题和 AI 学习成果集中查看',
-            onTap: _openFavoritesEntry,
+          const SizedBox(height: 16),
+          _SettingsGroup(
+            title: '社交',
+            rows: [
+              _SettingRowData(
+                icon: Icons.people_rounded,
+                accent: AppColors.accentMint,
+                title: '好友与聊天',
+                subtitle: '管理好友、查看申请与私聊',
+                onTap: () => _openSocial(const FriendsChatPage()),
+              ),
+              _SettingRowData(
+                icon: Icons.notifications_rounded,
+                accent: AppColors.accentRose,
+                title: '学习消息',
+                subtitle: _unread == null ? '社区回复、采纳与好友通知' : '$_unread 条未读消息',
+                onTap: () => _openSocial(const LearningNotificationsPage()),
+              ),
+            ],
           ),
-          _SettingTile(
-            icon: Icons.people_rounded,
-            color: const Color(0xFF20BF91),
-            title: '好友与聊天',
-            subtitle: '管理好友、查看申请与私聊',
-            onTap: () => _openSocial(const FriendsChatPage()),
+          const SizedBox(height: 16),
+          _SettingsGroup(
+            title: '学习设置',
+            rows: [
+              _SettingRowData(
+                icon: Icons.adjust_rounded,
+                accent: AppColors.accentViolet,
+                title: '专注学习',
+                subtitle: focusSubtitle,
+                onTap: _openFocus,
+              ),
+              _SettingRowData(
+                icon: Icons.auto_awesome_rounded,
+                title: 'AI 模型配置',
+                subtitle: _llmConfig?.isConfigured == true
+                    ? '${_llmConfig!.provider.toUpperCase()} / ${_llmConfig!.effectiveModel}'
+                    : '填写 API Key、Base URL 和模型 ID',
+                onTap: _editLlmConfig,
+              ),
+            ],
           ),
-          _SettingTile(
-            icon: Icons.notifications_rounded,
-            color: const Color(0xFFFF4380),
-            title: '学习消息',
-            subtitle: _unread == null ? '社区回复、采纳与好友通知' : '$_unread 条未读消息',
-            onTap: () => _openSocial(const LearningNotificationsPage()),
+          const SizedBox(height: 16),
+          _SettingsGroup(
+            title: '账号',
+            rows: [
+              _SettingRowData(
+                icon: Icons.info_outline_rounded,
+                accent: AppColors.slate,
+                title: '账号与安全',
+                subtitle: '账号信息、登录邮箱与隐私设置',
+                onTap: _showAccountInfo,
+              ),
+            ],
           ),
-          _SettingTile(
-            icon: Icons.adjust_rounded,
-            color: const Color(0xFF8D68FF),
-            title: '专注学习',
-            subtitle: _focusStats == null
-                ? '查看专注记录与统计'
-                : '今日 ${(_focusStats!.todaySeconds / 60).toStringAsFixed(0)} 分钟 · 查看专注详情',
-            onTap: _openFocus,
-          ),
-          _SettingTile(
-            icon: Icons.auto_awesome_rounded,
-            title: 'AI 模型配置',
-            subtitle: _llmConfig?.isConfigured == true
-                ? '${_llmConfig!.provider.toUpperCase()} / ${_llmConfig!.effectiveModel}'
-                : '填写 API Key、Base URL 和模型 ID',
-            onTap: _editLlmConfig,
-          ),
-          _SettingTile(
-            icon: Icons.info_outline_rounded,
-            color: const Color(0xFF73829A),
-            title: '账号与安全',
-            subtitle: '账号信息、登录邮箱与隐私设置',
-            onTap: _showAccountInfo,
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1159,7 +1147,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
               label: const Text('退出登录'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.error,
-                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                side: BorderSide(color: AppColors.error.withValues(alpha: 0.4)),
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadii.button),
@@ -1256,24 +1244,36 @@ class _FavoritesPageState extends State<FavoritesPage> {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting &&
                 snapshot.data == null) {
-              return const Center(child: CircularProgressIndicator());
+              return const AppSkeletonList(items: 4, height: 68);
             }
             final categories = snapshot.data ?? const [];
             if (categories.isEmpty) {
-              return const _FavoriteEmptyList(text: '还没有可查看的收藏内容。');
+              return const AppEmptyState(
+                icon: Icons.star_border_rounded,
+                title: '还没有收藏内容',
+                description: '学习过程中收藏的知识卡片、错题和成果会集中在这里。',
+              );
             }
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-              children: categories
-                  .map(
-                    (category) => _SettingTile(
-                      icon: _favoriteIconFor(category.iconName),
-                      title: category.title,
-                      subtitle: '${category.count} 条收藏',
-                      onTap: () => _openCategory(category),
-                    ),
-                  )
-                  .toList(growable: false),
+              children: [
+                AppCard.outlined(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < categories.length; i++) ...[
+                        if (i > 0) const Divider(height: 1, indent: 62),
+                        AppListRow(
+                          icon: _favoriteIconFor(categories[i].iconName),
+                          title: categories[i].title,
+                          subtitle: '${categories[i].count} 条收藏',
+                          onTap: () => _openCategory(categories[i]),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             );
           },
         ),
@@ -1358,65 +1358,29 @@ class _FavoriteCategoryPageState extends State<FavoriteCategoryPage> {
     }
   }
 
-  Future<void> _editText({
-    required FavoriteItemRecord item,
-    required String title,
-    required String initialText,
-    required ValueChanged<String> onSaved,
-  }) async {
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) =>
-          _FavoriteTextDialog(title: title, initialText: initialText),
-    );
-    if (result != null) onSaved(result);
-  }
-
-  void _showDetail(FavoriteItemRecord item) {
-    showModalBottomSheet<void>(
+  Future<void> _showDetail(FavoriteItemRecord item) async {
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (context) => _FavoriteDetailSheet(
+      builder: (sheetContext) => FavoriteAnnotationSheet(
         item: item,
-        onEditHighlight: () {
-          Navigator.of(context).pop();
-          _editText(
-            item: item,
-            title: '高亮重点',
-            initialText: item.highlightText ?? '',
-            onSaved: (value) => _setHighlight(item, value),
-          );
-        },
-        onClearHighlight: item.highlightText?.isNotEmpty == true
-            ? () {
-                Navigator.of(context).pop();
-                _setHighlight(item, '');
-              }
-            : null,
-        onEditNote: () {
-          Navigator.of(context).pop();
-          _editText(
-            item: item,
-            title: '添加笔记',
-            initialText: item.note ?? '',
-            onSaved: (value) => _setNote(item, value),
-          );
-        },
-        onClearNote: item.note?.isNotEmpty == true
-            ? () {
-                Navigator.of(context).pop();
-                _setNote(item, '');
-              }
-            : null,
+        onSave: (annotations) => widget.favoriteRepository.saveAnnotations(
+          userId: widget.userId,
+          favoriteId: item.favoriteId,
+          annotations: annotations,
+        ),
+        onClearLegacyNote: () => _setNote(item, ''),
+        onClearLegacyHighlight: () => _setHighlight(item, ''),
         onRemoveFavorite: () {
-          Navigator.of(context).pop();
+          Navigator.of(sheetContext).pop();
           _removeFavorite(item);
         },
       ),
     );
+    if (mounted) await _refresh();
   }
 
   void _showMessage(String message) {
@@ -1437,11 +1401,15 @@ class _FavoriteCategoryPageState extends State<FavoriteCategoryPage> {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting &&
                 snapshot.data == null) {
-              return const Center(child: CircularProgressIndicator());
+              return const AppSkeletonList(items: 3, height: 96);
             }
             final items = snapshot.data ?? const [];
             if (items.isEmpty) {
-              return const _FavoriteEmptyList(text: '这里没有可查看的收藏内容。');
+              return const AppEmptyState(
+                icon: Icons.star_border_rounded,
+                title: '这里还没有收藏内容',
+                description: '在学习过程中收藏的内容会出现在这里。',
+              );
             }
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
@@ -1504,201 +1472,6 @@ class _FavoriteItemTile extends StatelessWidget {
           icon: const Icon(Icons.star_border_rounded),
         ),
       ),
-    );
-  }
-}
-
-class _FavoriteDetailSheet extends StatelessWidget {
-  const _FavoriteDetailSheet({
-    required this.item,
-    required this.onEditHighlight,
-    required this.onClearHighlight,
-    required this.onEditNote,
-    required this.onClearNote,
-    required this.onRemoveFavorite,
-  });
-
-  final FavoriteItemRecord item;
-  final VoidCallback onEditHighlight;
-  final VoidCallback? onClearHighlight;
-  final VoidCallback onEditNote;
-  final VoidCallback? onClearNote;
-  final VoidCallback onRemoveFavorite;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.86,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(item.title, style: AppTextStyles.h2(context)),
-              const SizedBox(height: 6),
-              Text(item.subtitle, style: AppTextStyles.bodySmall(context)),
-              const SizedBox(height: 12),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (item.highlightText?.isNotEmpty == true)
-                        _FavoriteDetailBlock(
-                          title: '高亮重点',
-                          text: item.highlightText!,
-                        ),
-                      if (item.note?.isNotEmpty == true)
-                        _FavoriteDetailBlock(title: '我的笔记', text: item.note!),
-                      _FavoriteDetailBlock(title: '完整内容', text: item.body),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: onEditHighlight,
-                    icon: const Icon(Icons.highlight_rounded),
-                    label: const Text('高亮'),
-                  ),
-                  if (onClearHighlight != null)
-                    OutlinedButton.icon(
-                      onPressed: onClearHighlight,
-                      icon: const Icon(Icons.format_color_reset_rounded),
-                      label: const Text('取消高亮'),
-                    ),
-                  OutlinedButton.icon(
-                    onPressed: onEditNote,
-                    icon: const Icon(Icons.edit_note_rounded),
-                    label: const Text('笔记'),
-                  ),
-                  if (onClearNote != null)
-                    OutlinedButton.icon(
-                      onPressed: onClearNote,
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      label: const Text('删除笔记'),
-                    ),
-                  FilledButton.icon(
-                    onPressed: onRemoveFavorite,
-                    icon: const Icon(Icons.star_border_rounded),
-                    label: const Text('取消收藏'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FavoriteTextDialog extends StatefulWidget {
-  const _FavoriteTextDialog({required this.title, required this.initialText});
-
-  final String title;
-  final String initialText;
-
-  @override
-  State<_FavoriteTextDialog> createState() => _FavoriteTextDialogState();
-}
-
-class _FavoriteTextDialogState extends State<_FavoriteTextDialog> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialText);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        maxLines: 4,
-        decoration: const InputDecoration(border: OutlineInputBorder()),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_controller.text),
-          child: const Text('保存'),
-        ),
-      ],
-    );
-  }
-}
-
-class _FavoriteDetailBlock extends StatelessWidget {
-  const _FavoriteDetailBlock({required this.title, required this.text});
-
-  final String title;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.borderLight),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: AppTextStyles.bodySmall(
-              context,
-            ).copyWith(fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 8),
-          SelectableText(text, style: AppTextStyles.body(context)),
-        ],
-      ),
-    );
-  }
-}
-
-class _FavoriteEmptyList extends StatelessWidget {
-  const _FavoriteEmptyList({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text(
-          text,
-          textAlign: TextAlign.center,
-          style: AppTextStyles.body(context),
-        ),
-      ],
     );
   }
 }
@@ -1892,78 +1665,62 @@ class _BackgroundPreview extends StatelessWidget {
   }
 }
 
-class _SettingTile extends StatelessWidget {
-  const _SettingTile({
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.title, required this.rows});
+
+  final String title;
+  final List<_SettingRowData> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            title,
+            style: AppTextStyles.overline(
+              context,
+            ).copyWith(color: AppColors.textQuiet),
+          ),
+        ),
+        AppCard.outlined(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Column(
+            children: [
+              for (var i = 0; i < rows.length; i++) ...[
+                if (i > 0) const Divider(height: 1, indent: 62),
+                AppListRow(
+                  icon: rows[i].icon,
+                  accent: rows[i].accent,
+                  title: rows[i].title,
+                  subtitle: rows[i].subtitle,
+                  onTap: rows[i].onTap,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingRowData {
+  const _SettingRowData({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
-    this.color = AppColors.primary,
+    this.accent = AppColors.primary,
   });
-  final IconData icon;
-  final Color color;
-  final String title, subtitle;
-  final VoidCallback onTap;
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-          child: Ink(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F8FC),
-              borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: .08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: color, size: 23),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        style: AppTextStyles.caption(
-                          context,
-                        ).copyWith(fontWeight: FontWeight.w400),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textTertiary,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  final IconData icon;
+  final Color accent;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
 }
 
 class _ProfileUnavailableState extends StatelessWidget {

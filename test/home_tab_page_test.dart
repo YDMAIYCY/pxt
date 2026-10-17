@@ -192,9 +192,13 @@ void main() {
   for (final width in [320.0, 360.0, 390.0]) {
     testWidgets('home workbench fits $width wide screens', (tester) async {
       await render(tester, width);
-      expect(find.text('当前任务'), findsOneWidget);
+      // The hero replaced the old "当前任务" card and absorbed the greeting, so
+      // the current task is now the page's focal surface.
+      expect(find.text('继续上次的学习'), findsOneWidget);
       expect(find.text('学习概览'), findsOneWidget);
-      expect(find.text('快捷操作'), findsOneWidget);
+      // Quick actions are a bare row of tiles now, not a titled card.
+      expect(find.text('拍照识别'), findsOneWidget);
+      expect(find.text('问 EClaw'), findsOneWidget);
       expect(find.text('为你推荐'), findsOneWidget);
       expect(find.text('我的知识库'), findsOneWidget);
       expect(find.text('完成设计模式练习'), findsOneWidget);

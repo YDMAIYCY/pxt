@@ -147,7 +147,6 @@ void main() {
           ProfileTabPage(
             refreshVersion: 0,
             authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: _FakeSourceDocumentRepository(),
             llmConfigRepository: _FakeLlmConfigRepository(),
             aiGenerationRepository: aiGeneration,
           ),
@@ -162,7 +161,6 @@ void main() {
           ProfileTabPage(
             refreshVersion: 1,
             authRepository: _FakeAuthRepository(),
-            sourceDocumentRepository: _FakeSourceDocumentRepository(),
             llmConfigRepository: _FakeLlmConfigRepository(),
             aiGenerationRepository: aiGeneration,
           ),
@@ -190,7 +188,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('EClaw'), findsOneWidget);
+    expect(find.text('问 EClaw'), findsOneWidget);
     expect(find.text('\u4e3a\u4f60\u63a8\u8350'), findsOneWidget);
     // \u65e7\u7248 AI \u9762\u8bd5\u5165\u53e3\u7684\u5360\u4f4d\u6587\u6848\u5df2\u79fb\u9664\uff0c\u53ea\u4fdd\u7559\u65b0\u7684\u5feb\u6377\u5165\u53e3\u3002
     expect(find.text('AI \u9762\u8bd5\u5b98'), findsNothing);
@@ -217,12 +215,12 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('EClaw'),
+      find.text('问 EClaw'),
       120,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('EClaw'));
+    await tester.tap(find.text('问 EClaw'));
     await tester.pumpAndSettle();
 
     expect(find.text('qsclaw-chat'), findsOneWidget);
@@ -238,7 +236,6 @@ void main() {
         ProfileTabPage(
           refreshVersion: 0,
           authRepository: _FakeAuthRepository(),
-          sourceDocumentRepository: _FakeSourceDocumentRepository(),
           llmConfigRepository: _FakeLlmConfigRepository(),
           aiGenerationRepository: _FakeAiGenerationRepository(),
           onOpenTab: openedTabs.add,

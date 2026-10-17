@@ -497,62 +497,102 @@ class _OcrActionButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // One primary action, then a quiet row of refinements. Four equal
+    // full-width buttons gave every option the same weight, so nothing read as
+    // "do this first".
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: isBusy ? null : onRunOcr,
-                icon: Icon(
-                  hasSuccess ? Icons.refresh_rounded : Icons.play_arrow_rounded,
-                ),
-                label: Text(hasSuccess ? '重试 OCR' : '开始 OCR'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: isBusy ? null : onCropAndRunOcr,
-                icon: const Icon(Icons.crop_rounded),
-                label: const Text('框选重试'),
-              ),
-            ),
-          ],
+        FilledButton.icon(
+          onPressed: isBusy ? null : onRunOcr,
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          icon: Icon(
+            hasSuccess ? Icons.refresh_rounded : Icons.play_arrow_rounded,
+          ),
+          label: Text(hasSuccess ? '重试 OCR' : '开始 OCR'),
         ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: isBusy ? null : onRepairWithAi,
-                icon: isRepairing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.auto_fix_high_rounded),
-                label: const Text('AI 修复'),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+            border: Border.all(color: AppColors.borderLight),
+          ),
+          child: Row(
+            children: [
+              _MinorOcrAction(
+                icon: Icons.crop_rounded,
+                label: '框选重试',
+                onTap: isBusy ? null : onCropAndRunOcr,
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: isBusy ? null : onSaveEditedText,
-                icon: isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_rounded),
-                label: const Text('保存修改'),
+              _MinorOcrAction(
+                icon: Icons.auto_fix_high_rounded,
+                label: 'AI 修复',
+                busy: isRepairing,
+                onTap: isBusy ? null : onRepairWithAi,
               ),
-            ),
-          ],
+              _MinorOcrAction(
+                icon: Icons.save_rounded,
+                label: '保存修改',
+                busy: isSaving,
+                onTap: isBusy ? null : onSaveEditedText,
+              ),
+            ],
+          ),
         ),
       ],
+    );
+  }
+}
+
+/// A secondary OCR action: icon over label, no border, no fill. Three of these
+/// share one quiet track under the primary button.
+class _MinorOcrAction extends StatelessWidget {
+  const _MinorOcrAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final accent = enabled ? AppColors.textSecondary : AppColors.textQuiet;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(icon, size: 19, color: accent),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: AppTextStyles.labelSmall(
+                  context,
+                ).copyWith(color: accent, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

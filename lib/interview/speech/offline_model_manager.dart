@@ -66,7 +66,7 @@ class OfflineModelManager {
     required Directory documentsDirectory,
     this.files = chinese14mFiles,
     http.Client Function()? clientFactory,
-    this.timeout = const Duration(minutes: 5),
+    this.timeout = const Duration(seconds: 20),
   }) : root = Directory(p.join(documentsDirectory.path, 'interview_asr')),
        _clientFactory = clientFactory ?? http.Client.new {
     for (final file in files) {
@@ -162,21 +162,17 @@ class OfflineModelManager {
     downloading.value = true;
     progress.value = 0;
     Directory? stage;
-    http.Client? client;
     final total = files.fold<int>(0, (n, f) => n + f.size);
     var completed = 0;
     try {
       callback?.call(0);
       stage = await root.createTemp('.partial-');
       _check(generation);
-      client = _clientFactory();
-      _client = client;
       for (final spec in files) {
         _check(generation);
         await _fetchWithFallback(
           spec: spec,
           stage: stage,
-          client: client,
           generation: generation,
           completedBytes: completed,
           totalBytes: total,
@@ -203,8 +199,6 @@ class OfflineModelManager {
       progress.value = 1;
       callback?.call(1);
     } finally {
-      client?.close();
-      _client = null;
       try {
         if (stage != null && await stage.exists()) await _deleteOwned(stage);
       } finally {
@@ -215,13 +209,11 @@ class OfflineModelManager {
 
   /// Tries the official Hugging Face host, then the mirror.
   ///
-  /// Only transport-level failures fall back: a size or SHA-256 mismatch is
-  /// rethrown, because retrying another source would mask real corruption
-  /// rather than fix it.
+  /// HTTP rejections (including expired hub redirects) and corrupt responses
+  /// also try the mirror. Every source must pass the same pinned SHA-256.
   Future<void> _fetchWithFallback({
     required OfflineModelFile spec,
     required Directory stage,
-    required http.Client client,
     required int generation,
     required int completedBytes,
     required int totalBytes,
@@ -229,8 +221,10 @@ class OfflineModelManager {
   }) async {
     Object? lastError;
     final mirror = _mirrorOf(spec.url);
-    for (final url in [spec.url, if (mirror != null) mirror]) {
+    for (final url in [spec.url, ?mirror]) {
       _check(generation);
+      final client = _clientFactory();
+      _client = client;
       try {
         await _fetchOne(
           spec: spec,
@@ -245,14 +239,11 @@ class OfflineModelManager {
         return;
       } on VoiceCancelled {
         rethrow;
-      } on StateError {
-        rethrow;
-      } on HttpException {
-        // The host answered. A mirror would not fix an HTTP-level rejection,
-        // and callers surface HTTP failures to the user as-is.
-        rethrow;
       } catch (error) {
         lastError = error;
+      } finally {
+        client.close();
+        if (identical(_client, client)) _client = null;
       }
     }
     // Preserve the original error type: callers distinguish timeouts from HTTP

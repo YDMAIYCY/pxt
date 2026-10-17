@@ -10,6 +10,7 @@ import '../../database/models/source_document_record.dart';
 import '../../database/ocr_text_repository.dart';
 import '../../database/source_document_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_kit.dart';
 import 'ai_generation_page.dart';
 import 'ocr_result_page.dart';
 import 'feishu_source_view.dart';
@@ -180,7 +181,7 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
                 const SizedBox(height: 14),
                 _OcrSection(ocrRecord: data.ocrRecord),
                 const SizedBox(height: 14),
-                _AiResultSection(data: data),
+                _AiResultSection(data: data, onOpenAi: _openAi),
               ],
             ),
           );
@@ -370,9 +371,14 @@ class _QualityWarning extends StatelessWidget {
 }
 
 class _AiResultSection extends StatelessWidget {
-  const _AiResultSection({required this.data});
+  const _AiResultSection({required this.data, required this.onOpenAi});
 
   final _DocumentDetailData data;
+  final VoidCallback onOpenAi;
+
+  /// A summary section must stay scannable: past this many questions the rest
+  /// belong in the AI result page, not stacked onto the document page.
+  static const _questionPreviewLimit = 6;
 
   @override
   Widget build(BuildContext context) {
@@ -381,111 +387,455 @@ class _AiResultSection extends StatelessWidget {
         data.outline != null ||
         data.mindmap != null ||
         data.questions.isNotEmpty;
+    if (!hasAnyResult) {
+      return const _Section(
+        title: 'AI 结果',
+        child: _EmptyHint(text: '暂无 AI 结果，请先进入 AI 生成页。'),
+      );
+    }
+
+    final summary = <String>[
+      if (data.cards.isNotEmpty) '卡片 ${data.cards.length} 张',
+      if (data.questions.isNotEmpty) '练习 ${data.questions.length} 道',
+      if (data.outline != null) '复习提纲',
+      if (data.mindmap != null) '思维导图',
+    ].join(' · ');
 
     return _Section(
       title: 'AI 结果',
-      child: hasAnyResult
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (data.cards.isNotEmpty)
-                  _ResultBlock(
-                    title: '知识卡片',
-                    text: data.cards
-                        .map((item) => '${item.title}\n${item.content}')
-                        .join('\n\n'),
-                  ),
-                if (data.outline != null)
-                  _ResultBlock(title: '复习提纲', text: data.outline!.outlineText),
-                if (data.mindmap != null)
-                  _ResultBlock(
-                    title: '思维导图文字版',
-                    text: data.mindmap!.mindmapText,
-                  ),
-                if (data.questions.isNotEmpty)
-                  _ResultBlock(
-                    title: '练习题',
-                    text: data.questions
-                        .map(
-                          (item) =>
-                              '${item.questionText}\n答案：${item.answerText ?? ''}\n解析：${item.analysisText ?? ''}',
-                        )
-                        .join('\n\n'),
-                  ),
-              ],
-            )
-          : const _EmptyHint(text: '暂无 AI 结果，请先进入 AI 生成页。'),
-    );
-  }
-}
-
-class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.child});
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-      ),
+      subtitle: '已生成 $summary',
+      accent: AppColors.accentViolet,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w800,
+          if (data.cards.isNotEmpty) ...[
+            _GroupLabel(
+              icon: Icons.style_outlined,
+              label: '知识卡片',
+              count: data.cards.length,
+              accent: AppColors.accentViolet,
             ),
-          ),
-          const SizedBox(height: 10),
-          child,
+            const SizedBox(height: 8),
+            for (final (i, card) in data.cards.indexed)
+              _CardResultTile(
+                index: i + 1,
+                title: card.title,
+                body: card.content,
+              ),
+            const SizedBox(height: 12),
+          ],
+          if (data.outline != null) ...[
+            _GroupLabel(
+              icon: Icons.list_alt_rounded,
+              label: '复习提纲',
+              accent: AppColors.accentSky,
+            ),
+            const SizedBox(height: 8),
+            _LongTextBlock(text: data.outline!.outlineText),
+            const SizedBox(height: 12),
+          ],
+          if (data.mindmap != null) ...[
+            _GroupLabel(
+              icon: Icons.account_tree_outlined,
+              label: '思维导图文字版',
+              accent: AppColors.accentMint,
+            ),
+            const SizedBox(height: 8),
+            _LongTextBlock(text: data.mindmap!.mindmapText),
+            const SizedBox(height: 12),
+          ],
+          if (data.questions.isNotEmpty) ...[
+            _GroupLabel(
+              icon: Icons.quiz_outlined,
+              label: '练习题',
+              count: data.questions.length,
+              accent: AppColors.accentAmber,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '轻点题目展开答案与解析',
+              style: AppTextStyles.caption(context),
+            ),
+            const SizedBox(height: 8),
+            // Questions are long and repetitive; a collapsed list of stems with
+            // tap-to-reveal answers keeps the page scannable instead of a wall
+            // of "练习题 N / 答案 / 解析" plain text.
+            for (final (i, question) in data.questions
+                .take(_questionPreviewLimit)
+                .indexed)
+              _QuestionResultTile(index: i + 1, question: question),
+            if (data.questions.length > _questionPreviewLimit)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '还有 ${data.questions.length - _questionPreviewLimit} 道题未展示',
+                        style: AppTextStyles.caption(context),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onOpenAi,
+                      child: const Text('查看全部'),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _ResultBlock extends StatelessWidget {
-  const _ResultBlock({required this.title, required this.text});
+/// Small category line inside the AI section: icon, name, optional count.
+class _GroupLabel extends StatelessWidget {
+  const _GroupLabel({
+    required this.icon,
+    required this.label,
+    required this.accent,
+    this.count,
+  });
 
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final int? count;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 15, color: accent),
+      const SizedBox(width: 6),
+      Text(
+        label,
+        style: AppTextStyles.label(
+          context,
+        ).copyWith(color: accent, fontWeight: FontWeight.w700),
+      ),
+      if (count != null) ...[
+        const SizedBox(width: 6),
+        Text(
+          '$count',
+          style: AppTextStyles.labelSmall(
+            context,
+          ).copyWith(color: AppColors.textTertiary),
+        ),
+      ],
+    ],
+  );
+}
+
+class _CardResultTile extends StatelessWidget {
+  const _CardResultTile({
+    required this.index,
+    required this.title,
+    required this.body,
+  });
+
+  final int index;
   final String title;
-  final String text;
+  final String body;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
       decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(14),
+        color: AppColors.tintOf(AppColors.accentViolet, 0.05),
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        border: Border.all(color: AppColors.tintOf(AppColors.accentViolet, 0.14)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                index.toString().padLeft(2, '0'),
+                style: AppTextStyles.labelSmall(context).copyWith(
+                  color: AppColors.tintOf(AppColors.accentViolet, 0.75),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: AppTextStyles.title(context),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          SelectableText(
+            body,
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(height: 1.55, color: AppColors.slate),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One practice question: stem always visible, answer/analysis on demand.
+class _QuestionResultTile extends StatefulWidget {
+  const _QuestionResultTile({required this.index, required this.question});
+
+  final int index;
+  final PracticeQuestionRecord question;
+
+  @override
+  State<_QuestionResultTile> createState() => _QuestionResultTileState();
+}
+
+class _QuestionResultTileState extends State<_QuestionResultTile> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final q = widget.question;
+    final answer = q.answerText?.trim();
+    final analysis = q.analysisText?.trim();
+    final hasDetail =
+        (answer != null && answer.isNotEmpty) ||
+        (analysis != null && analysis.isNotEmpty);
+    final difficulty = q.difficulty?.trim();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        border: Border.all(
+          color: _open
+              ? AppColors.tintOf(AppColors.accentAmber, 0.45)
+              : AppColors.borderLight,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+          onTap: hasDetail ? () => setState(() => _open = !_open) : null,
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 22,
+                        height: 22,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.tintOf(AppColors.accentAmber, 0.16),
+                          borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+                        ),
+                        child: Text(
+                          '${widget.index}',
+                          style: AppTextStyles.labelSmall(context).copyWith(
+                            color: AppColors.accentAmber,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      if (difficulty != null && difficulty.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        AppTag(
+                          label: difficulty,
+                          accent: AppColors.accentSky,
+                          filled: false,
+                        ),
+                      ],
+                      const Spacer(),
+                      if (hasDetail)
+                        Icon(
+                          _open
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 20,
+                          color: AppColors.textTertiary,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    q.questionText,
+                    maxLines: _open ? null : 3,
+                    overflow: _open ? null : TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmall(
+                      context,
+                    ).copyWith(color: AppColors.textPrimary, height: 1.55),
+                  ),
+                  if (_open) ...[
+                    if (answer != null && answer.isNotEmpty)
+                      _AnswerBlock(
+                        label: '答案',
+                        text: answer,
+                        accent: AppColors.accentMint,
+                      ),
+                    if (analysis != null && analysis.isNotEmpty)
+                      _AnswerBlock(
+                        label: '解析',
+                        text: analysis,
+                        accent: AppColors.accentViolet,
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnswerBlock extends StatelessWidget {
+  const _AnswerBlock({
+    required this.label,
+    required this.text,
+    required this.accent,
+  });
+
+  final String label;
+  final String text;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+      decoration: BoxDecoration(
+        color: AppColors.tintOf(accent, 0.06),
+        borderRadius: BorderRadius.circular(AppRadii.chipSmall),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-            ),
+            label,
+            style: AppTextStyles.labelSmall(
+              context,
+            ).copyWith(color: accent, fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           SelectableText(
             text,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF475569),
-              height: 1.45,
-            ),
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(height: 1.55, color: AppColors.slate),
           ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Long-form generated text (outline / mindmap). Collapsed by default so one
+/// artifact cannot push everything else below the fold.
+class _LongTextBlock extends StatefulWidget {
+  const _LongTextBlock({required this.text});
+
+  final String text;
+
+  @override
+  State<_LongTextBlock> createState() => _LongTextBlockState();
+}
+
+class _LongTextBlockState extends State<_LongTextBlock> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final long = widget.text.length > 140;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(
+            widget.text,
+            maxLines: _open || !long ? null : 5,
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(height: 1.55, color: AppColors.slate),
+          ),
+          if (long)
+            GestureDetector(
+              onTap: () => setState(() => _open = !_open),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Text(
+                      _open ? '收起' : '展开全部',
+                      style: AppTextStyles.labelSmall(
+                        context,
+                      ).copyWith(color: AppColors.primary),
+                    ),
+                    Icon(
+                      _open
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 16,
+                      color: AppColors.primary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Section extends StatelessWidget {
+  const _Section({
+    required this.title,
+    required this.child,
+    this.subtitle,
+    this.accent,
+  });
+
+  final String title;
+  final Widget child;
+  final String? subtitle;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppSectionHeader(
+            title: title,
+            subtitle: subtitle,
+            accent: accent ?? AppColors.primary,
+          ),
+          const SizedBox(height: 12),
+          child,
         ],
       ),
     );

@@ -19,6 +19,7 @@ import '../widgets/knowledge_graph_canvas.dart';
 import '../widgets/premium_app_chrome.dart';
 import 'document_detail_page.dart';
 import 'import_record_detail_page.dart';
+import 'interview/interview_prepare_page.dart';
 import '../../agent/eclaw_context.dart';
 import '../widgets/ask_eclaw_button.dart';
 
@@ -449,13 +450,18 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
     );
     if (!mounted) return;
 
+    // The node's own knowledge base is the most useful interview scope, so the
+    // entry stays live exactly when the node resolves to one.
+    final interviewLibraryId = detail.sources
+        .map((view) => view.source.knowledgeBaseId)
+        .firstWhere((id) => id != null, orElse: () => null);
+
     final result = await showGraphNodeDetailSheet(
       context,
       detail: detail,
       libraryColors: _libraryColors(),
       mergeCandidates: candidates,
-      // 应用内尚无 AI 面试入口，详情里明确标注为未开放。
-      aiInterviewAvailable: false,
+      aiInterviewAvailable: interviewLibraryId != null,
     );
     if (result == null || !mounted) return;
 
@@ -490,7 +496,19 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
           await _reloadGraph();
         }
       case GraphNodeSheetAction.startAiInterview:
-        break;
+        final libraryId = interviewLibraryId;
+        if (libraryId != null) {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => InterviewPreparePage(
+                userId: userId,
+                libraryId: libraryId,
+                database: widget.database,
+              ),
+            ),
+          );
+          if (mounted) await _reloadGraph();
+        }
       case GraphNodeSheetAction.openRelation:
         break;
     }
@@ -674,7 +692,7 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
                 scrollDirection: Axis.horizontal,
                 children: [
                   ..._selectedLibraryIds.map(_buildLibraryChip),
-                  _buildAddChip(),
+                  _buildAddChip(context),
                 ],
               ),
             ),
@@ -730,7 +748,7 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
     );
   }
 
-  Widget _buildAddChip() {
+  Widget _buildAddChip(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: OutlinedButton.icon(
@@ -740,7 +758,9 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
           padding: const EdgeInsets.symmetric(horizontal: 14),
           side: const BorderSide(color: AppColors.border),
           foregroundColor: AppColors.textSecondary,
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+          textStyle: AppTextStyles.label(
+            context,
+          ).copyWith(fontWeight: FontWeight.w800),
         ),
         icon: const Icon(Icons.add_rounded, size: 17),
         label: const Text('添加'),

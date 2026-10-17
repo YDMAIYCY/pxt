@@ -10,6 +10,7 @@ import '../../../database/models/knowledge_library_record.dart';
 import '../../../interview/interview_evidence_service.dart';
 import '../../../interview/interview_failure.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 import '../../widgets/premium_app_chrome.dart';
 import 'interview_chat_page.dart';
 import 'interview_history_page.dart';
@@ -389,44 +390,46 @@ class _InterviewPreparePageState extends State<InterviewPreparePage> {
               _section('面试设置', [
                 _choice(
                   '模式',
-                  _Segmented(
-                    options: const [
-                      _SegmentedOption('basic', '基础问答'),
-                      _SegmentedOption('deep', '深度面试'),
-                      _SegmentedOption('quick', '快速复习'),
-                    ],
-                    selected: _mode,
+                  AppSegmented<String>(
+                    variant: AppSegmentedVariant.pill,
+                    value: _mode,
                     enabled: !_starting,
-                    onSelected: (value) => setState(() => _mode = value),
+                    onChanged: (value) => setState(() => _mode = value),
+                    options: const [
+                      AppSegmentedOption('basic', '基础问答'),
+                      AppSegmentedOption('deep', '深度面试'),
+                      AppSegmentedOption('quick', '快速复习'),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 10),
                 _choice(
                   '难度',
-                  _Segmented(
-                    options: const [
-                      _SegmentedOption('easy', '简单'),
-                      _SegmentedOption('medium', '中等'),
-                      _SegmentedOption('hard', '困难'),
-                    ],
-                    selected: _difficulty,
+                  AppSegmented<String>(
+                    variant: AppSegmentedVariant.pill,
+                    value: _difficulty,
                     enabled: !_starting,
-                    onSelected: (value) => setState(() => _difficulty = value),
+                    onChanged: (value) => setState(() => _difficulty = value),
+                    options: const [
+                      AppSegmentedOption('easy', '简单'),
+                      AppSegmentedOption('medium', '中等'),
+                      AppSegmentedOption('hard', '困难'),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 10),
                 _choice(
                   '题数',
-                  _Segmented(
-                    options: const [
-                      _SegmentedOption('3', '3 题'),
-                      _SegmentedOption('5', '5 题'),
-                      _SegmentedOption('10', '10 题'),
-                    ],
-                    selected: '$_count',
+                  AppSegmented<String>(
+                    variant: AppSegmentedVariant.pill,
+                    value: '$_count',
                     enabled: !_starting,
-                    onSelected: (value) =>
-                        setState(() => _count = int.parse(value)),
+                    onChanged: (value) => setState(() => _count = int.parse(value)),
+                    options: const [
+                      AppSegmentedOption('3', '3 题'),
+                      AppSegmentedOption('5', '5 题'),
+                      AppSegmentedOption('10', '10 题'),
+                    ],
                   ),
                 ),
               ]),
@@ -525,89 +528,6 @@ class _InterviewPreparePageState extends State<InterviewPreparePage> {
         ),
       ),
     ],
-  );
-}
-
-class _SegmentedOption {
-  const _SegmentedOption(this.value, this.label);
-  final String value;
-  final String label;
-}
-
-class _Segmented extends StatelessWidget {
-  const _Segmented({
-    required this.options,
-    required this.selected,
-    required this.enabled,
-    required this.onSelected,
-  });
-
-  final List<_SegmentedOption> options;
-  final String selected;
-  final bool enabled;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      for (final option in options) ...[
-        Expanded(
-          child: _Segment(
-            label: option.label,
-            selected: option.value == selected,
-            enabled: enabled,
-            onTap: () => onSelected(option.value),
-          ),
-        ),
-        if (option != options.last) const SizedBox(width: 8),
-      ],
-    ],
-  );
-}
-
-class _Segment extends StatelessWidget {
-  const _Segment({
-    required this.label,
-    required this.selected,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    button: true,
-    selected: selected,
-    child: InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(AppRadii.chip),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        constraints: const BoxConstraints(minHeight: 44),
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primarySoft : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadii.chip),
-          border: Border.all(
-            color: selected ? AppColors.primary : AppColors.border,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? AppColors.primaryDark : AppColors.textSecondary,
-          ),
-        ),
-      ),
-    ),
   );
 }
 

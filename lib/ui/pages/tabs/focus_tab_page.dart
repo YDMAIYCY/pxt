@@ -13,9 +13,10 @@ import '../../../focus/repository/focus_repository.dart';
 import '../../../learning/learning_events.dart';
 import '../../../learning/learning_task_repository.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 
-const _focusBlue = Color(0xFF3068E9);
-const _focusBackground = Color(0xFFF7F9FC);
+const _focusBlue = AppColors.primary;
+const _focusBackground = AppColors.background;
 const List<Color> _pieColors = [
   Color(0xFF3068E9),
   Color(0xFF14B8A6),
@@ -505,7 +506,7 @@ class _FocusTabPageState extends State<FocusTabPage>
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: _focusBlue));
+      return const AppSkeletonList(items: 4, height: 110);
     }
     return Material(
       color: _focusBackground,
@@ -526,7 +527,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF17233B),
+                          color: AppColors.textPrimary,
                         ),
                       ),
                       SizedBox(height: 4),
@@ -534,7 +535,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                         '把时间留给重要的事',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF8A94A6),
+                          color: AppColors.textQuiet,
                         ),
                       ),
                     ],
@@ -559,7 +560,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(color: Colors.red),
+                        style: TextStyle(color: AppColors.error),
                       ),
                     ),
                     TextButton(
@@ -584,23 +585,11 @@ class _FocusTabPageState extends State<FocusTabPage>
     );
   }
 
-  Widget _card(Widget child) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFEDF0F6)),
-    ),
-    child: child,
-  );
+  Widget _card(Widget child) =>
+      AppCard.plain(padding: const EdgeInsets.all(20), child: child);
 
-  Widget _buildCheckin() => Container(
+  Widget _buildCheckin() => AppCard.ink(
     padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: _focusBlue,
-      borderRadius: BorderRadius.circular(18),
-    ),
     child: Row(
       children: [
         const Icon(
@@ -650,48 +639,29 @@ class _FocusTabPageState extends State<FocusTabPage>
   );
 
   Widget _buildStats() {
-    final values = [
-      _formatSeconds(_stats?.todaySeconds ?? 0),
-      '${_stats?.todayPomodoros ?? 0}个',
-      '${_stats?.totalPoints ?? 0}',
-    ];
-    const labels = ['今日专注', '完成番茄', '累计积分'];
-    return Row(
-      children: List.generate(
-        3,
-        (i) => Expanded(
-          child: Container(
-            margin: EdgeInsets.only(right: i < 2 ? 8 : 0),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    values[i],
-                    style: const TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w800,
-                      color: _focusBlue,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  labels[i],
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF8A94A6),
-                  ),
-                ),
-              ],
-            ),
+    return AppCard.plain(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+      child: AppStatRow(
+        tiles: [
+          AppStatTile(
+            icon: Icons.timer_outlined,
+            value: _formatSeconds(_stats?.todaySeconds ?? 0),
+            label: '今日专注',
+            accent: AppColors.accentSky,
           ),
-        ),
+          AppStatTile(
+            icon: Icons.local_fire_department_rounded,
+            value: '${_stats?.todayPomodoros ?? 0} 个',
+            label: '完成番茄',
+            accent: AppColors.accentFlame,
+          ),
+          AppStatTile(
+            icon: Icons.workspace_premium_outlined,
+            value: '${_stats?.totalPoints ?? 0}',
+            label: '累计积分',
+            accent: AppColors.accentAmber,
+          ),
+        ],
       ),
     );
   }
@@ -713,7 +683,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                 : record.isRunning
                 ? '正在专注'
                 : '已暂停',
-            style: const TextStyle(color: Color(0xFF8A94A6), fontSize: 13),
+            style: const TextStyle(color: AppColors.textQuiet, fontSize: 13),
           ),
           const SizedBox(height: 10),
           FittedBox(
@@ -722,7 +692,7 @@ class _FocusTabPageState extends State<FocusTabPage>
               style: const TextStyle(
                 fontSize: 60,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF17233B),
+                color: AppColors.textPrimary,
               ),
             ),
           ),
@@ -732,7 +702,7 @@ class _FocusTabPageState extends State<FocusTabPage>
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF8A94A6)),
+            style: const TextStyle(fontSize: 12, color: AppColors.textQuiet),
           ),
           const SizedBox(height: 20),
           TextButton.icon(
@@ -814,7 +784,7 @@ class _FocusTabPageState extends State<FocusTabPage>
             padding: EdgeInsets.symmetric(vertical: 20),
             child: Text(
               '还没有待办，添加一个小目标吧',
-              style: TextStyle(color: Color(0xFF8A94A6)),
+              style: TextStyle(color: AppColors.textQuiet),
             ),
           ),
         ..._tasks.map(
@@ -849,7 +819,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                         '预估 ${task.estimatedPomodoros} 个番茄 · 已专注 ${_formatSeconds(task.focusedSeconds)}',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF8A94A6),
+                          color: AppColors.textQuiet,
                         ),
                       ),
                       if ((task.documentTitle ?? '').isNotEmpty)
@@ -859,7 +829,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 11,
-                            color: Color(0xFF8A94A6),
+                            color: AppColors.textQuiet,
                           ),
                         ),
                     ],
@@ -930,11 +900,12 @@ class _FocusTabPageState extends State<FocusTabPage>
                     label: Center(child: Text(const ['今日', '本周', '本月'][i])),
                     selected: _period == i,
                     showCheckmark: false,
-                    selectedColor: const Color(0xFFEAF0FF),
+                    selectedColor: AppColors.primarySoft,
                     labelStyle: TextStyle(
-                      color: _period == i
-                          ? _focusBlue
-                          : const Color(0xFF8A94A6),
+                      color: _period == i ? _focusBlue : AppColors.textQuiet,
+                      fontWeight: _period == i
+                          ? FontWeight.w700
+                          : FontWeight.w600,
                     ),
                     onSelected: (_) => setState(() => _period = i),
                   ),
@@ -953,7 +924,7 @@ class _FocusTabPageState extends State<FocusTabPage>
               child: Center(
                 child: Text(
                   '暂无专注记录',
-                  style: TextStyle(color: Color(0xFF8A94A6)),
+                  style: TextStyle(color: AppColors.textQuiet),
                 ),
               ),
             )
@@ -998,7 +969,7 @@ class _FocusTabPageState extends State<FocusTabPage>
                         textAlign: TextAlign.right,
                         style: const TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF8A94A6),
+                          color: AppColors.textQuiet,
                         ),
                       ),
                     ),
@@ -1016,8 +987,8 @@ class _FocusTabPageState extends State<FocusTabPage>
       '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
   String _formatSeconds(int seconds) {
     if (seconds >= 3600) return '${seconds ~/ 3600}h${seconds % 3600 ~/ 60}m';
-    if (seconds < 60 && seconds > 0) return '$seconds秒';
-    return '${seconds ~/ 60}分钟';
+    if (seconds < 60 && seconds > 0) return '$seconds 秒';
+    return '${seconds ~/ 60} 分钟';
   }
 }
 

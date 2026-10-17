@@ -797,13 +797,14 @@ class FocusRepository {
     );
   }
 
-  /// Learning streak excludes a manual check-in with no recorded study.
+  /// Visits count as learning days; a manual check-in alone still does not.
   Future<int> fetchLearningStreak(int userId) async {
     final db = await _database.database;
     final rows = await db.rawQuery('''
       SELECT date AS day FROM checkin_records WHERE user_id=? AND study_seconds>0
       UNION SELECT DATE(created_at, 'localtime') AS day FROM practice_submissions WHERE user_id=?
-    ''', [userId, userId]);
+      UNION SELECT day FROM study_activity_days WHERE user_id=?
+    ''', [userId, userId, userId]);
     final days = rows.map((row) => row['day'] as String?).whereType<String>().toSet();
     final now = _now();
     var day = DateTime(now.year, now.month, now.day);

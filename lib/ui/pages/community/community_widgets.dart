@@ -3,16 +3,18 @@ import 'package:flutter/material.dart';
 import '../../../community/cloud_backend.dart';
 import '../../../community/community_repository.dart';
 import '../../../database/auth_repository.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 import '../home_page.dart';
 import '../login_page.dart';
 
-const communityBlue = Color(0xFF2870F5);
-const communityBackground = Color(0xFFF4F7FC);
+// The community carried its own near-duplicate blue (#2870F5) and off-white
+// (#F4F7FC). Folded into the shared ramp so every module reads as one product.
+const communityBlue = AppColors.primary;
+const communityBackground = AppColors.background;
 
 void communityMessage(BuildContext context, String message) =>
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppToast(context, message);
 
 Future<bool> openAppAccount(BuildContext context) async {
   final previous = await AuthRepository().getCurrentUserProfile();
@@ -113,39 +115,34 @@ class CloudFutureView<T> extends StatelessWidget {
     builder: (context, s) {
       if (s.hasError) {
         return ListView(
-          padding: const EdgeInsets.all(28),
+          padding: const EdgeInsets.all(24),
           children: [
-            const SizedBox(height: 40),
-            const Icon(
-              Icons.cloud_off_outlined,
-              size: 44,
-              color: Colors.blueGrey,
-            ),
-            const SizedBox(height: 16),
-            Text(cloudError(s.error!), textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
-              onPressed: () async {
+            AppErrorState(
+              title: cloudError(s.error!),
+              description: '云端社区暂时不可用，可以稍后重试。',
+              icon: Icons.cloud_off_outlined,
+              retryLabel: '重新加载',
+              onRetry: () async {
                 if (!CloudBackend.instance.configured &&
                     CloudBackend.instance.failure != null) {
                   await CloudBackend.instance.initialize();
                 }
                 onRetry();
               },
-              child: const Text('重新加载'),
             ),
             if (!CloudBackend.instance.signedIn)
-              TextButton(
-                onPressed: () async {
-                  if (await openAppAccount(context)) onRetry();
-                },
-                child: const Text('登录智学帮'),
+              Center(
+                child: TextButton(
+                  onPressed: () async {
+                    if (await openAppAccount(context)) onRetry();
+                  },
+                  child: const Text('登录智学帮'),
+                ),
               ),
           ],
         );
       }
-      if (!s.hasData) return const Center(child: CircularProgressIndicator());
+      if (!s.hasData) return const AppSkeletonList(items: 4, height: 96);
       return builder(s.data as T);
     },
   );
@@ -254,10 +251,14 @@ class CommunityAvatar extends StatelessWidget {
             )
           : CircleAvatar(
               radius: size / 2,
-              backgroundColor: const Color(0xFFE5EEFF),
+              backgroundColor: AppColors.tintOf(AppColors.primary, 0.14),
               foregroundColor: communityBlue,
               child: Text(
                 (profile['nickname'] as String? ?? '同学').characters.first,
+                style: AppTextStyles.title(context).copyWith(
+                  color: communityBlue,
+                  fontSize: size * 0.4,
+                ),
               ),
             ),
     ),
@@ -273,27 +274,37 @@ class CommunityQuestionCard extends StatelessWidget {
   });
   final Json question;
   final VoidCallback onTap, onProfile;
+
   @override
   Widget build(BuildContext context) {
     final p = Json.from(question['profile'] as Map? ?? {});
-    final n = (question['answer_count'] as num?)?.toInt() ?? 0;
+    final answers = (question['answer_count'] as num?)?.toInt() ?? 0;
     final resolved = question['accepted_answer_id'] != null;
-    final state = resolved
-        ? '已解决'
-        : n == 0
-        ? '待解答'
-        : '讨论中';
-    final images = (question['image_paths'] as List? ?? []);
+    // Status carries its own accent instead of a flat tint, so "已解决 / 待解答 /
+    // 讨论中" is readable at a glance in a long feed.
+    final (stateLabel, stateAccent, stateIcon) = resolved
+        ? ('已解决', AppColors.success, Icons.check_circle_rounded)
+        : answers == 0
+        ? ('待解答', AppColors.accentAmber, Icons.pending_outlined)
+        : ('讨论中', AppColors.accentSky, Icons.forum_rounded);
+    final images = question['image_paths'] as List? ?? const [];
+    final tags = question['tags'] as List? ?? const [];
+    final bookmarkCount = question['bookmark_count'] ?? 0;
+    final bookmarked = question['bookmarked'] == true;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        color: AppColors.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          side: const BorderSide(color: AppColors.borderLight),
+        ),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(22),
           child: Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -309,65 +320,40 @@ class CommunityQuestionCard extends StatelessWidget {
                           children: [
                             Text(
                               p['nickname'] as String? ?? '同学',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.title(context),
                             ),
+                            const SizedBox(height: 1),
                             Text(
                               communityTime(question['created_at']),
-                              style: const TextStyle(
-                                color: Colors.blueGrey,
-                                fontSize: 12,
-                              ),
+                              style: AppTextStyles.caption(context),
                             ),
                           ],
                         ),
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: resolved
-                            ? const Color(0xFFE9FAF2)
-                            : const Color(0xFFFFF0F2),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        state,
-                        style: TextStyle(
-                          color: resolved
-                              ? const Color(0xFF12A777)
-                              : const Color(0xFFE85670),
-                          fontSize: 12,
-                        ),
-                      ),
+                    const SizedBox(width: 8),
+                    AppTag(
+                      label: stateLabel,
+                      accent: stateAccent,
+                      icon: stateIcon,
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 Text(
                   question['title'] as String,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF12213A),
-                    height: 1.45,
-                  ),
+                  style: AppTextStyles.h3(
+                    context,
+                  ).copyWith(fontWeight: FontWeight.w700, height: 1.45),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   question['body'] as String,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.6,
-                    color: Color(0xFF7D889B),
-                  ),
+                  style: AppTextStyles.bodySmall(context),
                 ),
                 if (images.isNotEmpty)
                   Padding(
@@ -378,59 +364,52 @@ class CommunityQuestionCard extends StatelessWidget {
                       height: 110,
                     ),
                   ),
-                if ((question['tags'] as List? ?? []).isNotEmpty)
+                if (tags.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 10),
                     child: Wrap(
                       spacing: 6,
                       runSpacing: 4,
                       children: [
-                        for (final tag in question['tags'] as List)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 9,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEDF4FF),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              tag.toString(),
-                              style: const TextStyle(
-                                color: communityBlue,
-                                fontSize: 11,
-                              ),
-                            ),
+                        for (final tag in tags)
+                          AppTag(
+                            label: tag.toString(),
+                            accent: AppColors.primary,
                           ),
                       ],
                     ),
                   ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
+                const Divider(height: 1, color: AppColors.borderLight),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     const Icon(
-                      Icons.chat_bubble_outline,
-                      size: 19,
-                      color: Colors.blueGrey,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$n 个回答',
-                      style: const TextStyle(color: Colors.blueGrey),
-                    ),
-                    const SizedBox(width: 22),
-                    Icon(
-                      question['bookmarked'] == true
-                          ? Icons.star
-                          : Icons.star_border,
-                      size: 21,
-                      color: Colors.blueGrey,
+                      Icons.chat_bubble_outline_rounded,
+                      size: 16,
+                      color: AppColors.textTertiary,
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      '${question['bookmark_count'] ?? 0} 人收藏',
-                      style: const TextStyle(color: Colors.blueGrey),
+                      '$answers 个回答',
+                      style: AppTextStyles.labelSmall(
+                        context,
+                      ).copyWith(color: AppColors.textTertiary),
+                    ),
+                    const SizedBox(width: 18),
+                    Icon(
+                      bookmarked ? Icons.star_rounded : Icons.star_border_rounded,
+                      size: 17,
+                      color: bookmarked
+                          ? AppColors.accentAmber
+                          : AppColors.textTertiary,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '$bookmarkCount 人收藏',
+                      style: AppTextStyles.labelSmall(
+                        context,
+                      ).copyWith(color: AppColors.textTertiary),
                     ),
                   ],
                 ),

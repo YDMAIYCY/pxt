@@ -175,7 +175,11 @@ class CommunityRepository {
     ].contains(table)) {
       throw ArgumentError('未知内容类型');
     }
-    await client.from(table).delete().eq('id', id);
+    final deleted = await client.rpc(
+      'delete_own_community_content',
+      params: {'content_table': table, 'content_id': id},
+    );
+    if (deleted != true) throw const CloudFailure('内容已不存在或无权删除，请刷新查看');
   });
   Future<void> editContent(
     String table,
@@ -253,7 +257,9 @@ class CommunityRepository {
     () async => rows(
       await client
           .from('community_answers')
-          .select('*, question:community_questions(title)')
+          .select(
+            '*, question:community_questions!community_answers_question_id_fkey(title)',
+          )
           .eq('author_id', id)
           .order('created_at', ascending: false)
           .order('id')
@@ -358,18 +364,19 @@ class CommunityRepository {
     required String token,
     required String body,
     String? image,
+    String? expectedSender,
   }) => _run(() async {
-    try {
-      await client.from('chat_messages').insert({
-        'conversation_id': conversation,
-        'client_token': token,
-        'kind': image == null ? 'text' : 'image',
-        'body': body.trim(),
-        'image_path': image,
-      });
-    } on PostgrestException catch (e) {
-      if (e.code != '23505') rethrow;
-    }
+    final sender = expectedSender ?? uid;
+    await client.rpc(
+      'send_chat_message',
+      params: {
+        'cid': conversation,
+        'token': token,
+        'message_body': body.trim(),
+        'image': image,
+        'expected_sender': sender,
+      },
+    );
   });
   Future<void> markRead(String conversation, String message) => _run(() async {
     await client.rpc(
@@ -403,6 +410,7 @@ class CommunityRepository {
     String extension, {
     String? conversation,
     String? token,
+    String? expectedOwner,
   }) => _run(() async {
     final ext = extension.toLowerCase();
     if (!['jpg', 'jpeg', 'png', 'webp'].contains(ext) ||
@@ -416,8 +424,10 @@ class CommunityRepository {
     ].contains(bucket)) {
       throw ArgumentError('未知附件类型');
     }
+    final owner = expectedOwner ?? uid;
+    if (owner != uid) throw const CloudFailure('登录账号已改变，请重新打开聊天');
     final path =
-        '${conversation == null ? '' : '$conversation/'}$uid/${token ?? const Uuid().v4()}.$ext';
+        '${conversation == null ? '' : '$conversation/'}$owner/${token ?? const Uuid().v4()}.$ext';
     try {
       await client.storage
           .from(bucket)

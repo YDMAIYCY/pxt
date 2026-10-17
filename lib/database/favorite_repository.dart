@@ -1,6 +1,9 @@
 import 'dart:convert';
 
 import 'app_database.dart';
+import 'models/favorite_annotation.dart';
+
+export 'models/favorite_annotation.dart';
 
 class FavoriteTargetType {
   const FavoriteTargetType._();
@@ -38,6 +41,7 @@ class FavoriteItemRecord {
     this.documentId,
     this.note,
     this.highlightText,
+    this.annotations = const [],
   });
 
   final int favoriteId;
@@ -49,6 +53,7 @@ class FavoriteItemRecord {
   final String body;
   final String? note;
   final String? highlightText;
+  final List<FavoriteAnnotation> annotations;
   final DateTime createdAt;
 }
 
@@ -191,6 +196,27 @@ class FavoriteRepository {
     );
   }
 
+  Future<void> saveAnnotations({
+    required int userId,
+    required int favoriteId,
+    required List<FavoriteAnnotation> annotations,
+  }) async {
+    await _database.ensureSchemaReady();
+    final db = await _database.database;
+    final changed = await db.update(
+      AppDatabase.tableFavorites,
+      {
+        'annotations_json': jsonEncode(
+          annotations.map((a) => a.toJson()).toList(),
+        ),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ? AND user_id = ?',
+      whereArgs: [favoriteId, userId],
+    );
+    if (changed == 0) throw StateError('收藏已不存在或账号已改变，请重新打开');
+  }
+
   Future<List<FavoriteCategorySummary>> fetchCategorySummaries(
     int userId,
   ) async {
@@ -313,6 +339,7 @@ class FavoriteRepository {
             ),
             note: (row['note'] as String?)?.trim(),
             highlightText: (row['highlight_text'] as String?)?.trim(),
+            annotations: _decodeAnnotations(row['annotations_json']),
             createdAt:
                 DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
           );
@@ -384,6 +411,7 @@ class FavoriteRepository {
             body: (row['body'] as String?)?.trim() ?? '',
             note: (row['note'] as String?)?.trim(),
             highlightText: (row['highlight_text'] as String?)?.trim(),
+            annotations: _decodeAnnotations(row['annotations_json']),
             createdAt:
                 DateTime.tryParse(createdAt)?.toLocal() ?? DateTime.now(),
           );
@@ -393,6 +421,16 @@ class FavoriteRepository {
 
   static String favoriteKey(String targetType, int targetId) =>
       '$targetType:$targetId';
+
+  static List<FavoriteAnnotation> _decodeAnnotations(Object? value) {
+    if (value is! String || value.isEmpty) return const [];
+    final decoded = jsonDecode(value);
+    if (decoded is! List) return const [];
+    return decoded
+        .map(FavoriteAnnotation.fromJson)
+        .whereType<FavoriteAnnotation>()
+        .toList();
+  }
 
   static String targetTypeForGeneratedContent(String contentType) {
     switch (contentType) {

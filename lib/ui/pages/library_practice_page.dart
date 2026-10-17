@@ -16,6 +16,7 @@ import '../../generator/wrong_question_training_service.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../learning/learning_events.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_kit.dart';
 import 'document_detail_page.dart';
 import 'ocr_result_page.dart';
 import 'source_version_page.dart';
@@ -232,154 +233,249 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
     final body = FutureBuilder<_PracticeData>(
       future: _future,
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
+        if (snapshot.hasError) {
+          return AppErrorState(
+            icon: Icons.error_outline_rounded,
+            title: '无法加载练习范围',
+            description: '${snapshot.error}',
+          );
+        }
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const AppLoadingState(label: '正在准备练习…');
         }
         final data = snapshot.data!;
         return ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
-            Text('围绕自己的知识练习', style: AppTextStyles.h2(context)),
-            const SizedBox(height: 8),
-            const Text('选择范围 → 作答 → 回看来源 → 变式 → 间隔复习。'),
-            const SizedBox(height: 20),
-            DropdownButtonFormField<int>(
-              initialValue: _libraryId ?? -1,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: '知识库'),
-              items: [
-                if (_libraryId == null)
-                  const DropdownMenuItem(value: -1, child: Text('所选题目的知识库')),
-                ...data.libraries
-                    .map(
-                      (l) => DropdownMenuItem(value: l.id, child: Text(l.name)),
-                    ),
-              ],
-              onChanged: _scopeLocked || _busy
-                  ? null
-                  : (id) {
-                      _libraryId = id;
-                      _recordId = null;
-                      _conceptId = null;
-                      _refresh();
-                    },
+            Text('围绕自己的知识练习', style: AppTextStyles.h1(context)),
+            const SizedBox(height: 6),
+            Text(
+              '选择范围 → 作答 → 回看来源 → 变式 → 间隔复习。',
+              style: AppTextStyles.bodySmall(context),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              key: ValueKey('record-$_libraryId'),
-              initialValue: _recordId ?? -1,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: '导入记录'),
-              items: [
-                const DropdownMenuItem(value: -1, child: Text('本库全部记录')),
-                ...data.records.map(
-                  (r) => DropdownMenuItem(value: r.id, child: Text(r.title)),
-                ),
-              ],
-              onChanged: _scopeLocked || _busy
-                  ? null
-                  : (id) {
-                      _recordId = id == -1 ? null : id;
-                      _conceptId = null;
-                      _refresh();
-                    },
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              key: ValueKey('concept-$_libraryId-$_recordId'),
-              initialValue: _conceptId ?? -1,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: '知识点'),
-              items: [
-                const DropdownMenuItem(value: -1, child: Text('全部知识点')),
-                ...data.concepts.map(
-                  (c) => DropdownMenuItem(
-                    value: c['id'] as int,
-                    child: Text(c['name'] as String),
+            const SizedBox(height: 18),
+
+            // ---- 练习范围 -------------------------------------------------
+            AppCard.plain(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const AppSectionHeader(
+                    title: '练习范围',
+                    subtitle: '不选就练整库',
+                    accent: AppColors.primary,
                   ),
-                ),
-              ],
-              onChanged: _scopeLocked || _busy
-                  ? null
-                  : (id) {
-                      _conceptId = id == -1 ? null : id;
-                      _refresh();
-                    },
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('只练错题和薄弱题'),
-              value: _wrongOnly,
-              onChanged: _questionIds != null || _busy
-                  ? null
-                  : (v) {
-                      _wrongOnly = v;
-                      _refresh();
-                    },
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('只看已到复习时间'),
-              value: _dueOnly,
-              onChanged: _questionIds != null || _busy
-                  ? null
-                  : (v) {
-                      _dueOnly = v;
-                      _refresh();
-                    },
-            ),
-            Text('当前范围：${data.questions.length} 道题'),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _busy || data.questions.isEmpty
-                  ? null
-                  : () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ScopedPracticeRunner(
-                            scope: data.scope,
-                            questions: data.questions,
-                            database: widget.database,
-                          ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<int>(
+                    initialValue: _libraryId ?? -1,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: '知识库'),
+                    items: [
+                      if (_libraryId == null)
+                        const DropdownMenuItem(
+                          value: -1,
+                          child: Text('所选题目的知识库'),
                         ),
-                      );
-                      if (mounted) _refresh();
-                    },
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('开始练习'),
+                      ...data.libraries.map(
+                        (l) => DropdownMenuItem(value: l.id, child: Text(l.name)),
+                      ),
+                    ],
+                    onChanged: _scopeLocked || _busy
+                        ? null
+                        : (id) {
+                            _libraryId = id;
+                            _recordId = null;
+                            _conceptId = null;
+                            _refresh();
+                          },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('record-$_libraryId'),
+                    initialValue: _recordId ?? -1,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: '导入记录'),
+                    items: [
+                      const DropdownMenuItem(
+                        value: -1,
+                        child: Text('本库全部记录'),
+                      ),
+                      ...data.records.map(
+                        (r) => DropdownMenuItem(value: r.id, child: Text(r.title)),
+                      ),
+                    ],
+                    onChanged: _scopeLocked || _busy
+                        ? null
+                        : (id) {
+                            _recordId = id == -1 ? null : id;
+                            _conceptId = null;
+                            _refresh();
+                          },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('concept-$_libraryId-$_recordId'),
+                    initialValue: _conceptId ?? -1,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: '知识点'),
+                    items: [
+                      const DropdownMenuItem(
+                        value: -1,
+                        child: Text('全部知识点'),
+                      ),
+                      ...data.concepts.map(
+                        (c) => DropdownMenuItem(
+                          value: c['id'] as int,
+                          child: Text(c['name'] as String),
+                        ),
+                      ),
+                    ],
+                    onChanged: _scopeLocked || _busy
+                        ? null
+                        : (id) {
+                            _conceptId = id == -1 ? null : id;
+                            _refresh();
+                          },
+                  ),
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('只练错题和薄弱题'),
+                    value: _wrongOnly,
+                    onChanged: _questionIds != null || _busy
+                        ? null
+                        : (v) {
+                            _wrongOnly = v;
+                            _refresh();
+                          },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('只看已到复习时间'),
+                    value: _dueOnly,
+                    onChanged: _questionIds != null || _busy
+                        ? null
+                        : (v) {
+                            _dueOnly = v;
+                            _refresh();
+                          },
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
-            Text('生成新的专项题', style: AppTextStyles.h3(context)),
             const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              initialValue: _count,
-              decoration: const InputDecoration(labelText: '题量'),
-              items: [5, 10, 20]
-                  .map((n) => DropdownMenuItem(value: n, child: Text('$n 道')))
-                  .toList(),
-              onChanged: _busy ? null : (n) => setState(() => _count = n!),
+
+            // ---- 就绪状态 + 主操作 ----------------------------------------
+            // The count and the primary action belong together: "N 道题" is the
+            // answer to "what am I about to start", so it is not a bare line.
+            AppCard.tinted(
+              accent: AppColors.primary,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.playlist_add_check_rounded,
+                        size: 20,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '当前范围：${data.questions.length} 道题',
+                          style: AppTextStyles.title(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton.icon(
+                    onPressed: _busy || data.questions.isEmpty
+                        ? null
+                        : () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ScopedPracticeRunner(
+                                  scope: data.scope,
+                                  questions: data.questions,
+                                  database: widget.database,
+                                ),
+                              ),
+                            );
+                            if (mounted) _refresh();
+                          },
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('开始练习'),
+                  ),
+                  if (data.questions.isEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      '这个范围里还没有题，可以先在下面生成一套专项题。',
+                      style: AppTextStyles.caption(context),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _difficulty,
-              decoration: const InputDecoration(labelText: '难度'),
-              items: [
-                '基础理解',
-                '综合应用',
-                '深入思考',
-              ].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-              onChanged: _busy ? null : (s) => setState(() => _difficulty = s!),
+            const SizedBox(height: 22),
+
+            // ---- 生成新的专项题 -------------------------------------------
+            AppCard.outlined(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const AppSectionHeader(
+                    title: '生成新的专项题',
+                    subtitle: '让 AI 按当前范围出一套新题',
+                    accent: AppColors.accentViolet,
+                  ),
+                  const SizedBox(height: 16),
+                  Text('题量', style: AppTextStyles.label(context)),
+                  const SizedBox(height: 8),
+                  AppSegmented<int>(
+                    value: _count,
+                    enabled: !_busy,
+                    onChanged: (n) => setState(() => _count = n),
+                    options: const [
+                      AppSegmentedOption(5, '5 道'),
+                      AppSegmentedOption(10, '10 道'),
+                      AppSegmentedOption(20, '20 道'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text('难度', style: AppTextStyles.label(context)),
+                  const SizedBox(height: 8),
+                  AppSegmented<String>(
+                    variant: AppSegmentedVariant.pill,
+                    value: _difficulty,
+                    enabled: !_busy,
+                    onChanged: (s) => setState(() => _difficulty = s),
+                    options: const [
+                      AppSegmentedOption('基础理解', '基础理解'),
+                      AppSegmentedOption('综合应用', '综合应用'),
+                      AppSegmentedOption('深入思考', '深入思考'),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  if (_busy) ...[
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 12),
+                  ],
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _generate(data),
+                    icon: const Icon(Icons.auto_awesome),
+                    label: const Text('基于所选范围组卷'),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            if (_busy) const LinearProgressIndicator(),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : () => _generate(data),
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('基于所选范围组卷'),
-            ),
-            const SizedBox(height: 120),
           ],
         );
       },

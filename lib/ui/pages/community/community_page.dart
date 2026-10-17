@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../community/cloud_backend.dart';
 import '../../../community/community_repository.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 import 'community_widgets.dart';
 import 'question_detail_page.dart';
 import 'publish_question_page.dart';
@@ -26,7 +28,7 @@ class _CommunityPageState extends State<CommunityPage> {
   final _scroll = ScrollController();
   late Future<List<Json>> _future;
   List<Json> _items = [];
-  int _mode = 0, _generation = 0;
+  int _mode = 0, _generation = 0, _nextOffset = 0;
   bool _more = true, _loadingMore = false;
   String? _pageError;
   static const _modes = ['recommended', 'latest', 'unanswered'];
@@ -55,6 +57,7 @@ class _CommunityPageState extends State<CommunityPage> {
     _more = true;
     _pageError = null;
     _loadingMore = false;
+    _nextOffset = 0;
     _future = _repo
         .feed(
           mode: _modes[_mode],
@@ -64,6 +67,7 @@ class _CommunityPageState extends State<CommunityPage> {
         .then((items) {
           if (generation == _generation) {
             _items = items;
+            _nextOffset = items.length;
             _more = items.length == 20;
           }
           return items;
@@ -89,11 +93,12 @@ class _CommunityPageState extends State<CommunityPage> {
       final items = await _repo.feed(
         mode: _modes[_mode],
         keyword: _search.text,
-        offset: _items.length,
+        offset: _nextOffset,
         bookmarks: widget.bookmarks,
       );
       if (mounted && generation == _generation) {
         setState(() {
+          _nextOffset += items.length;
           _items.addAll(
             items.where((i) => !_items.any((o) => o['id'] == i['id'])),
           );
@@ -129,56 +134,44 @@ class _CommunityPageState extends State<CommunityPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (!widget.bookmarks && !widget.search)
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '学习社区',
-                        style: Theme.of(context).textTheme.headlineMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: const Color(0xFF10213A),
-                            ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '搜索问题',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const CommunityPage(search: true),
-                        ),
-                      ),
-                      icon: const Icon(Icons.search, size: 27),
-                    ),
-                    const SizedBox(width: 6),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        await Navigator.push(
+                AppPageHeader(
+                  title: '学习社区',
+                  subtitle: '分享问题 · 交流经验 · 一起进步',
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: '搜索问题',
+                        onPressed: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const PublishQuestionPage(),
+                            builder: (_) => const CommunityPage(search: true),
                           ),
-                        );
-                        if (mounted) _refresh();
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: communityBlue,
-                        minimumSize: const Size(0, 44),
+                        ),
+                        icon: const Icon(Icons.search_rounded, size: 26),
                       ),
-                      icon: const Icon(Icons.edit_outlined, size: 18),
-                      label: const Text('发问题'),
-                    ),
-                  ],
-                ),
-              if (!widget.bookmarks && !widget.search)
-                const Padding(
-                  padding: EdgeInsets.only(top: 6, bottom: 18),
-                  child: Text(
-                    '分享问题 · 交流经验 · 一起进步',
-                    style: TextStyle(color: Color(0xFF8590A4), fontSize: 14),
+                      const SizedBox(width: 4),
+                      FilledButton.icon(
+                        onPressed: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const PublishQuestionPage(),
+                            ),
+                          );
+                          if (mounted) _refresh();
+                        },
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                        ),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('发问题'),
+                      ),
+                    ],
                   ),
                 ),
+              if (!widget.bookmarks && !widget.search)
+                const SizedBox(height: 18),
               if (widget.search)
                 TextField(
                   controller: _search,
@@ -195,28 +188,28 @@ class _CommunityPageState extends State<CommunityPage> {
                   onSubmitted: (_) => setState(_reload),
                 ),
               if (!widget.bookmarks && !widget.search)
-                Row(
-                  children: [
-                    for (var i = 0; i < 3; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 10),
-                        child: ChoiceChip(
-                          label: Text(['推荐', '最新', '待解答'][i]),
-                          selected: _mode == i,
-                          showCheckmark: false,
-                          selectedColor: communityBlue,
-                          labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: _mode == i
-                                ? Colors.white
-                                : const Color(0xFF7F8BA1),
-                            fontWeight: FontWeight.w600,
-                          ),
-                          onSelected: (_) => setState(() {
-                            _mode = i;
-                            _reload();
-                          }),
-                        ),
-                      ),
+                AppSegmented<int>(
+                  value: _mode,
+                  onChanged: (index) => setState(() {
+                    _mode = index;
+                    _reload();
+                  }),
+                  options: const [
+                    AppSegmentedOption(
+                      0,
+                      '推荐',
+                      segmentKey: ValueKey('community-filter-recommended'),
+                    ),
+                    AppSegmentedOption(
+                      1,
+                      '最新',
+                      segmentKey: ValueKey('community-filter-latest'),
+                    ),
+                    AppSegmentedOption(
+                      2,
+                      '待解答',
+                      segmentKey: ValueKey('community-filter-unanswered'),
+                    ),
                   ],
                 ),
             ],
@@ -240,22 +233,10 @@ class _CommunityPageState extends State<CommunityPage> {
                 itemCount: _items.isEmpty ? 1 : _items.length + 1,
                 itemBuilder: (context, i) {
                   if (_items.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 80),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.forum_outlined,
-                            size: 48,
-                            color: Colors.blueGrey,
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            '还没有相关问题',
-                            style: TextStyle(color: Colors.blueGrey),
-                          ),
-                        ],
-                      ),
+                    return const AppEmptyState(
+                      icon: Icons.forum_outlined,
+                      title: '还没有相关问题',
+                      description: '提一个问题，或者换个筛选条件看看。',
                     );
                   }
                   if (i == _items.length) {
@@ -271,7 +252,13 @@ class _CommunityPageState extends State<CommunityPage> {
                         ? const Center(
                             child: Padding(
                               padding: EdgeInsets.all(16),
-                              child: CircularProgressIndicator(),
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                ),
+                              ),
                             ),
                           )
                         : _more
@@ -279,12 +266,12 @@ class _CommunityPageState extends State<CommunityPage> {
                             onPressed: _next,
                             child: const Text('加载更多'),
                           )
-                        : const Center(
+                        : Center(
                             child: Text(
                               '已显示全部问题',
-                              style: TextStyle(
-                                color: Colors.blueGrey,
-                                fontSize: 12,
+                              style: AppTextStyles.labelSmall(context).copyWith(
+                                color: AppColors.textQuiet,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           );

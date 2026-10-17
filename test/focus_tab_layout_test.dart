@@ -168,7 +168,7 @@ void main() {
     );
     expect(find.text('专注打卡'), findsOneWidget);
     expect(find.text('2h15m'), findsOneWidget);
-    expect(find.text('12个'), findsOneWidget);
+    expect(find.text('12 个'), findsOneWidget);
     expect(find.text('1280'), findsOneWidget);
   });
 

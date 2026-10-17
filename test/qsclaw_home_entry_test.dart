@@ -27,9 +27,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(find.text('EClaw'), 120);
+    await tester.scrollUntilVisible(find.text('问 EClaw'), 120);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('EClaw'));
+    await tester.tap(find.text('问 EClaw'));
     await tester.pumpAndSettle();
 
     expect(find.text('qsclaw-opened'), findsOneWidget);
@@ -75,9 +75,8 @@ void main() {
     await tester.pumpAndSettle();
 
     const labels = [
-      '\u5f53\u524d\u4efb\u52a1',
+      '\u4eca\u5929\u7684\u5b66\u4e60',
       '\u5b66\u4e60\u6982\u89c8',
-      '\u5feb\u6377\u64cd\u4f5c',
       '\u62cd\u7167\u8bc6\u522b',
       '\u5bfc\u5165\u8d44\u6599',
       '\u4e3a\u4f60\u63a8\u8350',

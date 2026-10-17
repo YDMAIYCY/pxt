@@ -2,6 +2,13 @@ import 'package:sqflite/sqflite.dart';
 
 /// Extends the original task/session tables so their historical IDs remain valid.
 Future<void> createLearningSchema(Database db) async {
+  await db.execute('''CREATE TABLE IF NOT EXISTS study_activity_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day TEXT NOT NULL,
+    foreground_seconds INTEGER NOT NULL DEFAULT 0 CHECK(foreground_seconds >= 0),
+    PRIMARY KEY(user_id, day)
+  )''');
+
   Future<bool> hasTable(String table) async {
     final rows = await db.rawQuery(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",

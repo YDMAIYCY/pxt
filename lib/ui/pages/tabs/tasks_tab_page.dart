@@ -10,14 +10,18 @@ import '../../../database/source_document_repository.dart';
 import '../../../learning/learning_events.dart';
 import '../../../learning/learning_task_repository.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 import '../document_detail_page.dart';
 import '../learning_concept_page.dart';
 import '../library_practice_page.dart';
 import '../practice_review_page.dart';
 import '../wrong_question_page.dart';
 
-const _taskBlue = Color(0xFF3068E9);
-const _taskBackground = Color(0xFFF7F9FC);
+// This page used a near-duplicate blue (#3068E9) and off-white (#F7F9FC).
+// Two almost-identical values is inconsistency, not character, so the page now
+// inherits the shared ramp.
+const _taskBlue = AppColors.primary;
+const _taskBackground = AppColors.background;
 
 class TasksTabPage extends StatefulWidget {
   const TasksTabPage({
@@ -439,11 +443,11 @@ class _TasksTabPageState extends State<TasksTabPage> {
                         return const Center(child: CircularProgressIndicator());
                       }
                       if (snapshot.hasError) {
-                        return _StatePanel(
+                        return AppErrorState(
                           icon: Icons.error_outline,
                           title: '任务加载失败',
                           description: '请稍后重试。',
-                          onPressed: () async => setSheetState(() {
+                          onRetry: () async => setSheetState(() {
                             future = _taskRepository.tasks(
                               _userId!,
                               includeFinished: true,
@@ -453,7 +457,12 @@ class _TasksTabPageState extends State<TasksTabPage> {
                       }
                       final tasks = snapshot.data!;
                       if (tasks.isEmpty) {
-                        return const Center(child: Text('还没有任务，试试新建一个学习目标'));
+                        return const AppEmptyState(
+                          compact: true,
+                          icon: Icons.playlist_add_check_rounded,
+                          title: '还没有任务',
+                          description: '试试新建一个学习目标。',
+                        );
                       }
                       return ListView.builder(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
@@ -511,57 +520,31 @@ class _TasksTabPageState extends State<TasksTabPage> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 110),
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '任务中心',
-                            style: TextStyle(
-                              fontSize: 27,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '把每一次学习，变成看得见的进步',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
+                AppPageHeader(
+                  title: '任务中心',
+                  subtitle: '把每一次学习，变成看得见的进步',
+                  trailing: IconButton(
+                    tooltip: 'AI 处理列表',
+                    onPressed: () => _openTaskList(TaskListKind.activeFlow),
+                    icon: const Icon(
+                      Icons.auto_awesome_outlined,
+                      color: _taskBlue,
                     ),
-                    IconButton(
-                      tooltip: 'AI 处理列表',
-                      onPressed: () => _openTaskList(TaskListKind.activeFlow),
-                      icon: const Icon(
-                        Icons.auto_awesome_outlined,
-                        color: _taskBlue,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 24),
                 if (snapshot.connectionState == ConnectionState.waiting &&
                     data == null)
-                  const Padding(
-                    padding: EdgeInsets.all(48),
-                    child: Center(
-                      child: CircularProgressIndicator(color: _taskBlue),
-                    ),
+                  Semantics(
+                    label: '正在加载任务',
+                    child: const AppSkeletonList(items: 3, height: 96),
                   )
                 else if (snapshot.hasError)
-                  _StatePanel(
+                  AppErrorState(
                     icon: Icons.error_outline_rounded,
                     title: '任务中心加载失败',
                     description: '请检查登录状态后重试。',
-                    onPressed: _refresh,
+                    onRetry: _refresh,
                   )
                 else if (data != null) ...[
                   _LearningStats(
@@ -577,7 +560,12 @@ class _TasksTabPageState extends State<TasksTabPage> {
                   ),
                   const SizedBox(height: 12),
                   if (todayTasks.isEmpty)
-                    const _EmptyHint(text: '今天暂无待办任务\n新建一个学习目标，或从下方添加复习计划')
+                    const AppEmptyState(
+                      compact: true,
+                      icon: Icons.playlist_add_check_rounded,
+                      title: '今天暂无待办任务',
+                      description: '新建一个学习目标，或从下方添加复习计划。',
+                    )
                   else
                     ...todayTasks.map(
                       (task) => _LearningTaskCard(
@@ -611,7 +599,12 @@ class _TasksTabPageState extends State<TasksTabPage> {
                   ),
                   const SizedBox(height: 14),
                   if (data.recommendations.isEmpty)
-                    const _EmptyHint(text: '暂无推荐复习\n学习和答题后，会在这里推荐需要巩固的知识点')
+                    const AppEmptyState(
+                      compact: true,
+                      icon: Icons.lightbulb_outline_rounded,
+                      title: '暂无推荐复习',
+                      description: '学习和答题后，会在这里推荐需要巩固的知识点。',
+                    )
                   else
                     ...data.recommendations.map(
                       (item) => _ReviewRecommendationCard(
@@ -748,25 +741,20 @@ class _LearningSectionHeader extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: Text(
-          title,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w800,
-            color: AppColors.textPrimary,
+  Widget build(BuildContext context) => AppSectionHeader(
+    title: title,
+    trailing: action == null
+        ? null
+        : TextButton(
+            onPressed: onTap,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: AppTextStyles.label(context),
+            ),
+            child: Text(action!),
           ),
-        ),
-      ),
-      if (action != null)
-        TextButton(
-          onPressed: onTap,
-          style: TextButton.styleFrom(foregroundColor: _taskBlue),
-          child: Text(action!),
-        ),
-    ],
   );
 }
 
@@ -782,86 +770,40 @@ class _LearningStats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stats = [
-      (
-        '待刷练习',
-        data.pendingPractice,
-        Icons.edit_note_rounded,
-        _taskBlue,
-        () => onOpenList(TaskListKind.todayPractice),
+    return AppCard.plain(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+      child: AppStatRow(
+        tiles: [
+          AppStatTile(
+            icon: Icons.edit_note_rounded,
+            value: '${data.pendingPractice}',
+            label: '待刷练习',
+            accent: AppColors.primary,
+            onTap: () => onOpenList(TaskListKind.todayPractice),
+          ),
+          AppStatTile(
+            icon: Icons.event_busy_outlined,
+            value: '${data.overduePractice}',
+            label: '逾期练习',
+            accent: AppColors.accentAmber,
+            onTap: () => onOpenList(TaskListKind.overduePractice),
+          ),
+          AppStatTile(
+            icon: Icons.auto_stories_outlined,
+            value: '${data.wrongQuestions}',
+            label: '待处理错题',
+            accent: AppColors.accentRose,
+            onTap: () => onOpenList(TaskListKind.wrongQuestions),
+          ),
+          AppStatTile(
+            icon: Icons.timelapse_rounded,
+            value: '${data.inProgress}',
+            label: '进行中',
+            accent: AppColors.accentViolet,
+            onTap: onOpenTasks,
+          ),
+        ],
       ),
-      (
-        '逾期练习',
-        data.overduePractice,
-        Icons.event_busy_outlined,
-        const Color(0xFFE39135),
-        () => onOpenList(TaskListKind.overduePractice),
-      ),
-      (
-        '待处理错题',
-        data.wrongQuestions,
-        Icons.auto_stories_outlined,
-        const Color(0xFFE06476),
-        () => onOpenList(TaskListKind.wrongQuestions),
-      ),
-      (
-        '进行中',
-        data.inProgress,
-        Icons.timelapse_rounded,
-        const Color(0xFF6B62CE),
-        onOpenTasks,
-      ),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 560 ? 4 : 2;
-        final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: stats
-              .map(
-                (stat) => SizedBox(
-                  width: width,
-                  child: Material(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    child: InkWell(
-                      onTap: stat.$5,
-                      borderRadius: BorderRadius.circular(16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(stat.$3, color: stat.$4, size: 24),
-                            const SizedBox(height: 12),
-                            Text(
-                              '${stat.$2}',
-                              style: TextStyle(
-                                fontSize: 27,
-                                fontWeight: FontWeight.w800,
-                                color: stat.$4,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              stat.$1,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              )
-              .toList(),
-        );
-      },
     );
   }
 }
@@ -872,6 +814,7 @@ class _LearningTaskCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  @override
   Widget build(BuildContext context) {
     final due = task.dueAt?.toLocal();
     final overdue = task.active && due != null && due.isBefore(DateTime.now());
@@ -880,131 +823,117 @@ class _LearningTaskCard extends StatelessWidget {
       task.documentTitle,
     ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
     final progress = task.progress.clamp(0.0, 1.0);
+    final accent = overdue ? AppColors.error : AppColors.primary;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
+      child: AppCard.plain(
+        onTap: onTap,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEDF3FF),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        task.questionId != null
-                            ? Icons.quiz_outlined
-                            : task.conceptId != null
-                            ? Icons.psychology_outlined
-                            : Icons.checklist_rounded,
-                        size: 22,
-                        color: _taskBlue,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            task.title,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            source.isEmpty ? task.kindLabel : source,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(
-                      Icons.more_horiz_rounded,
-                      size: 20,
-                      color: AppColors.textTertiary,
-                    ),
-                  ],
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.tintOf(accent, 0.11),
+                    borderRadius: BorderRadius.circular(AppRadii.iconBox),
+                  ),
+                  child: Icon(
+                    task.questionId != null
+                        ? Icons.quiz_outlined
+                        : task.conceptId != null
+                        ? Icons.psychology_outlined
+                        : Icons.checklist_rounded,
+                    size: 21,
+                    color: accent,
+                  ),
                 ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 6,
-                  children: [
-                    Text(
-                      '${task.kindLabel} · ${task.statusLabel}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: _taskBlue,
-                        fontWeight: FontWeight.w600,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.title,
+                        style: AppTextStyles.title(
+                          context,
+                        ).copyWith(fontSize: 16),
                       ),
-                    ),
-                    Text(
-                      '已专注 ${task.focusedSeconds ~/ 60} 分钟 / 预计 ${task.estimatedPomodoros} 个番茄',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
+                      const SizedBox(height: 5),
+                      Text(
+                        source.isEmpty ? task.kindLabel : source,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.caption(context),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                LinearProgressIndicator(
-                  value: progress,
-                  minHeight: 5,
-                  borderRadius: BorderRadius.circular(8),
-                  color: _taskBlue,
-                  backgroundColor: const Color(0xFFEDF1F7),
-                ),
-                const SizedBox(height: 9),
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  spacing: 14,
-                  runSpacing: 6,
-                  children: [
-                    Text(
-                      task.totalUnits > 0
-                          ? '${task.completedUnits}/${task.totalUnits} · ${(progress * 100).round()}%'
-                          : '${(progress * 100).round()}%',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    Text(
-                      due == null
-                          ? '未设截止时间'
-                          : '${overdue ? '已逾期' : '截止'} ${_formatTime(due)}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: overdue
-                            ? AppColors.error
-                            : AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.more_horiz_rounded,
+                  size: 20,
+                  color: AppColors.textTertiary,
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                AppTag(label: task.kindLabel, accent: AppColors.primary),
+                AppTag(
+                  label: task.statusLabel,
+                  accent: overdue ? AppColors.error : AppColors.accentMint,
+                ),
+                if (overdue)
+                  AppTag(
+                    label: '已逾期',
+                    accent: AppColors.error,
+                    icon: Icons.event_busy_outlined,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            AppProgressBar(value: progress, accent: accent),
+            const SizedBox(height: 9),
+            // One metadata line instead of three stacked rows: with six-plus
+            // tasks on screen the extra lines cost real scannability.
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    task.totalUnits > 0
+                        ? '${task.completedUnits}/${task.totalUnits} · 已专注 ${task.focusedSeconds ~/ 60} 分钟'
+                        : '已专注 ${task.focusedSeconds ~/ 60} 分钟 · ${task.estimatedPomodoros} 个番茄',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.labelSmall(context).copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  due == null
+                      ? '未设截止时间'
+                      : '${overdue ? '已逾期' : '截止'} ${_formatTime(due)}',
+                  style: AppTextStyles.labelSmall(context).copyWith(
+                    color: overdue ? AppColors.error : AppColors.textQuiet,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -1240,14 +1169,14 @@ class _TaskListPageState extends State<TaskListPage> {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting &&
               snapshot.data == null) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppSkeletonList(items: 4, height: 72);
           }
           if (snapshot.hasError) {
-            return _StatePanel(
+            return AppErrorState(
               icon: Icons.error_outline_rounded,
               title: '列表加载失败',
               description: '请稍后重试。',
-              onPressed: _refresh,
+              onRetry: _refresh,
             );
           }
           final data = snapshot.data ?? const _TaskListData();
@@ -1268,7 +1197,14 @@ class _TaskListPageState extends State<TaskListPage> {
     switch (widget.kind) {
       case TaskListKind.todayPractice:
         if (data.questions.isEmpty) {
-          return [const _EmptyHint(text: '暂无待刷练习题。生成练习题后会出现在这里。')];
+          return [
+            const AppEmptyState(
+              compact: true,
+              icon: Icons.quiz_outlined,
+              title: '暂无待刷练习题',
+              description: '生成练习题后会出现在这里。',
+            ),
+          ];
         }
         return _buildQuestionGroups(
           data,
@@ -1277,7 +1213,15 @@ class _TaskListPageState extends State<TaskListPage> {
           onTap: (item) => _openPractice(item.question.id),
         );
       case TaskListKind.overduePractice:
-        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无逾期练习题。')];
+        if (data.questions.isEmpty) {
+          return [
+            const AppEmptyState(
+              compact: true,
+              icon: Icons.event_busy_outlined,
+              title: '暂无逾期练习题',
+            ),
+          ];
+        }
         return _buildQuestionGroups(
           data,
           status: '逾期',
@@ -1285,7 +1229,15 @@ class _TaskListPageState extends State<TaskListPage> {
           onTap: (item) => _openPractice(item.question.id),
         );
       case TaskListKind.wrongQuestions:
-        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无待处理错题。')];
+        if (data.questions.isEmpty) {
+          return [
+            const AppEmptyState(
+              compact: true,
+              icon: Icons.auto_stories_outlined,
+              title: '暂无待处理错题',
+            ),
+          ];
+        }
         return _buildQuestionGroups(
           data,
           status: '待处理',
@@ -1296,11 +1248,26 @@ class _TaskListPageState extends State<TaskListPage> {
       case TaskListKind.activeFlow:
         final groups = _buildActiveFlowGroups(data);
         if (groups.isEmpty) {
-          return [const _EmptyHint(text: '暂无进行中的 OCR 或 AI 任务。')];
+          return [
+            const AppEmptyState(
+              compact: true,
+              icon: Icons.timelapse_rounded,
+              title: '暂无进行中的任务',
+              description: 'OCR 或 AI 任务开始后会出现在这里。',
+            ),
+          ];
         }
         return groups;
       case TaskListKind.masteredQuestions:
-        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无已掌握题目。')];
+        if (data.questions.isEmpty) {
+          return [
+            const AppEmptyState(
+              compact: true,
+              icon: Icons.check_circle_outline_rounded,
+              title: '暂无已掌握题目',
+            ),
+          ];
+        }
         return _buildQuestionGroups(
           data,
           status: '已掌握',
@@ -1608,76 +1575,6 @@ class _TaskTile extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyHint extends StatelessWidget {
-  const _EmptyHint({required this.text});
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-      ),
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: AppTextStyles.bodySmall(context),
-      ),
-    );
-  }
-}
-
-class _StatePanel extends StatelessWidget {
-  const _StatePanel({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.onPressed,
-  });
-  final IconData icon;
-  final String title, description;
-  final Future<void> Function() onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: AppColors.textTertiary),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              description,
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            FilledButton(
-              onPressed: () => onPressed(),
-              style: FilledButton.styleFrom(backgroundColor: _taskBlue),
-              child: const Text('重试'),
-            ),
-          ],
         ),
       ),
     );

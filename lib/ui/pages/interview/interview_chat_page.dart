@@ -54,6 +54,7 @@ class _InterviewChatPageState extends State<InterviewChatPage>
   String? _loadError;
   bool _showTextInput = false;
   double? _downloadProgress;
+  String? _downloadError;
   bool _newMessages = false;
   int _messageCount = 0;
   bool _reportOpened = false;
@@ -190,7 +191,10 @@ class _InterviewChatPageState extends State<InterviewChatPage>
     final controller = _controller;
     if (controller == null) return;
     if (_downloadProgress != null) return;
-    setState(() => _downloadProgress = 0);
+    setState(() {
+      _downloadProgress = 0;
+      _downloadError = null;
+    });
     try {
       await controller.voice.ensureOfflineModel(
         onProgress: (progress) {
@@ -199,7 +203,13 @@ class _InterviewChatPageState extends State<InterviewChatPage>
       );
       if (mounted) _toast(controller.voice.modelReady ? '离线识别模型已就绪' : '模型尚未就绪');
     } catch (error) {
-      if (mounted) _toast(interviewFailure(error, fallback: '语音准备失败，请重试'));
+      if (mounted) {
+        if (error is VoiceCancelled) {
+          _toast(interviewModelDownloadFailure(error));
+        } else {
+          setState(() => _downloadError = interviewModelDownloadFailure(error));
+        }
+      }
     } finally {
       if (mounted) setState(() => _downloadProgress = null);
     }
@@ -477,6 +487,10 @@ class _InterviewChatPageState extends State<InterviewChatPage>
           ),
         ),
         if (controller.error != null) _ErrorBanner(message: controller.error!),
+        if (_downloadError != null) ...[
+          _ErrorBanner(message: _downloadError!),
+          TextButton(onPressed: _checkModel, child: const Text('重新下载语音模型')),
+        ],
         if (_downloadProgress != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -485,6 +499,8 @@ class _InterviewChatPageState extends State<InterviewChatPage>
                 Expanded(
                   child: LinearProgressIndicator(value: _downloadProgress),
                 ),
+                const SizedBox(width: 8),
+                Text('${(_downloadProgress! * 100).floor()}%'),
                 TextButton(
                   onPressed: () async {
                     try {

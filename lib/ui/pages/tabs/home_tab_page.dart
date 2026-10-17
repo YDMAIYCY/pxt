@@ -15,9 +15,9 @@ import '../../../learning/learning_events.dart';
 import '../../../learning/learning_task_repository.dart';
 import '../../../pipeline/document_ingest_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_kit.dart';
 import '../../widgets/create_knowledge_library_dialog.dart';
 import '../../widgets/knowledge_book_cover.dart';
-import '../../widgets/premium_app_chrome.dart';
 import '../document_detail_page.dart';
 import '../home_page.dart';
 import '../image_crop_selection_page.dart';
@@ -80,13 +80,17 @@ class _HomeTabPageState extends State<HomeTabPage> {
   @override
   void initState() {
     super.initState();
-    _authRepository = widget.authRepository ?? AuthRepository(database: widget.database);
+    _authRepository =
+        widget.authRepository ?? AuthRepository(database: widget.database);
     _sourceDocumentRepository =
-        widget.sourceDocumentRepository ?? SourceDocumentRepository(database: widget.database);
+        widget.sourceDocumentRepository ??
+        SourceDocumentRepository(database: widget.database);
     _knowledgeLibraryRepository =
-        widget.knowledgeLibraryRepository ?? KnowledgeLibraryRepository(database: widget.database);
+        widget.knowledgeLibraryRepository ??
+        KnowledgeLibraryRepository(database: widget.database);
     _learningTaskRepository =
-        widget.learningTaskRepository ?? LearningTaskRepository(database: widget.database);
+        widget.learningTaskRepository ??
+        LearningTaskRepository(database: widget.database);
     _documentIngestService =
         widget.documentIngestService ?? DocumentIngestService();
     LearningEvents.changed.addListener(_handleExternalRefresh);
@@ -455,10 +459,8 @@ class _HomeTabPageState extends State<HomeTabPage> {
     }
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => InterviewPreparePage(
-          userId: userId,
-          database: widget.database,
-        ),
+        builder: (_) =>
+            InterviewPreparePage(userId: userId, database: widget.database),
       ),
     );
     if (mounted) await _afterDataChanged();
@@ -698,14 +700,14 @@ class _HomeTabPageState extends State<HomeTabPage> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting &&
             snapshot.data == null) {
-          return const Center(child: CircularProgressIndicator());
+          return const AppSkeletonList(items: 3, height: 92);
         }
         if (snapshot.hasError) {
-          return _StatePanel(
+          return AppErrorState(
             icon: Icons.error_outline_rounded,
             title: '首页加载失败',
-            description: '请稍后重试。',
-            onPressed: _refresh,
+            description: '请检查网络后重试。',
+            onRetry: _refresh,
           );
         }
 
@@ -717,24 +719,33 @@ class _HomeTabPageState extends State<HomeTabPage> {
             cacheExtent: 5000,
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 104),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 104),
                 sliver: SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _HomeHeader(
+                      _HomeTopBar(
                         user: data.user,
                         onSearch: _openSearch,
                         onNotifications: () => _openNotifications(data),
-                        onOpenAgent: _openQsClaw,
                       ),
                       const SizedBox(height: 16),
-                      _CurrentTaskCard(
+                      // The one thing the user came for: what to do right now.
+                      _HomeHero(
                         task: data.dashboard.tasks.firstOrNull,
                         onContinue: _openLearningTask,
                         onOpenTasks: () => _openTab(3),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 18),
+                      _QuickActionsRow(
+                        isImporting: _isImporting,
+                        onCamera: () =>
+                            _handleImageImport(ImageInputSource.camera),
+                        onImport: _openImportSourceSheet,
+                        onInterview: _openInterview,
+                        onOpenAgent: _openQsClaw,
+                      ),
+                      const SizedBox(height: 20),
                       _StudyOverviewCard(
                         todayTaskCount: data.todayTaskCount,
                         wrongQuestions: data.dashboard.wrongQuestions,
@@ -746,22 +757,13 @@ class _HomeTabPageState extends State<HomeTabPage> {
                         onOpenOverdue: () =>
                             _openPracticeQuestions(data.user.id, 'overdue'),
                       ),
-                      const SizedBox(height: 12),
-                      _QuickActionsCard(
-                        isImporting: _isImporting,
-                        onCamera: () =>
-                            _handleImageImport(ImageInputSource.camera),
-                        onImport: _openImportSourceSheet,
-                        onInterview: _openInterview,
-                        onOpenAgent: _openQsClaw,
-                      ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       _RecommendationCard(
                         recommendations: data.recommendations,
                         onOpen: _openRecommendation,
                         onOpenTasks: () => _openTab(3),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       _MyLibrariesCard(
                         libraries: data.recentLibraries,
                         onOpenLibrary: () => _openTab(1),
@@ -778,67 +780,282 @@ class _HomeTabPageState extends State<HomeTabPage> {
   }
 }
 
-// ========== 顶部欢迎区 ==========
-class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({
+// ========== 顶部栏 ==========
+// Deliberately compact: the greeting is context, not the headline. The
+// headline is the hero below, so this stays one line plus two actions.
+class _HomeTopBar extends StatelessWidget {
+  const _HomeTopBar({
     required this.user,
     required this.onSearch,
     required this.onNotifications,
-    required this.onOpenAgent,
   });
 
   final UserProfile user;
   final VoidCallback onSearch;
   final VoidCallback onNotifications;
-  final VoidCallback onOpenAgent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _greeting(DateTime.now()),
+                style: AppTextStyles.overline(context),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                user.primaryName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                  letterSpacing: -0.4,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          icon: Icons.search_rounded,
+          tooltip: '搜索学习内容',
+          onTap: onSearch,
+        ),
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          icon: Icons.notifications_none_rounded,
+          tooltip: '学习提醒',
+          onTap: onNotifications,
+        ),
+      ],
+    );
+  }
+}
+
+// ========== 焦点区：当前任务 ==========
+// The single focal surface of the page. It absorbs the greeting block and the
+// old "当前任务" card so the page has one clear entry point instead of five
+// equal-weight white cards.
+class _HomeHero extends StatelessWidget {
+  const _HomeHero({
+    required this.task,
+    required this.onContinue,
+    required this.onOpenTasks,
+  });
+
+  final LearningTask? task;
+  final ValueChanged<LearningTask> onContinue;
+  final VoidCallback onOpenTasks;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = task;
+    return AppCard.ink(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+      child: Stack(
+        // The card's own rounded clip shapes the glow; a clipping Stack here
+        // would cut it to a hard-edged rectangle.
+        clipBehavior: Clip.none,
+        children: [
+          // A soft corner glow keeps the hero from reading as a flat colour
+          // block, positioned so it never sits behind the progress row.
+          Positioned(
+            right: -80,
+            top: -96,
+            child: Container(
+              width: 230,
+              height: 230,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: 0.20),
+                    Colors.white.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (current == null)
+            _HeroEmpty(onOpenTasks: onOpenTasks)
+          else
+            _HeroTask(task: current, onContinue: onContinue),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroTask extends StatelessWidget {
+  const _HeroTask({required this.task, required this.onContinue});
+
+  final LearningTask task;
+  final ValueChanged<LearningTask> onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final source = [
+      task.libraryName,
+      task.documentTitle,
+    ].where((value) => value.trim().isNotEmpty).join(' · ');
+    final minutes = task.focusedSeconds ~/ 60;
+    final target = task.estimatedPomodoros * 25;
+    final progress = target <= 0 ? 0.0 : (minutes / target).clamp(0.0, 1.0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '继续上次的学习',
+              style: AppTextStyles.overline(
+                context,
+              ).copyWith(color: AppColors.onImageMuted),
+            ),
+            const Spacer(),
+            AppTag(label: task.kindLabel, accent: Colors.white),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          task.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+            height: 1.32,
+            letterSpacing: -0.3,
+            color: AppColors.onImage,
+          ),
+        ),
+        if (source.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(
+                Icons.menu_book_rounded,
+                size: 14,
+                color: Colors.white.withValues(alpha: 0.72),
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  source,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.labelSmall(context).copyWith(
+                    color: AppColors.onImageMuted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 16),
+        AppProgressBar(
+          value: progress,
+          accent: Colors.white,
+          track: Colors.white.withValues(alpha: 0.22),
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                minutes == 0
+                    ? '尚未开始 · 预计 ${task.estimatedPomodoros} 个番茄'
+                    : '已专注 $minutes 分钟 · 预计 ${task.estimatedPomodoros} 个番茄',
+                style: AppTextStyles.labelSmall(context).copyWith(
+                  color: AppColors.onImageMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Text(
+              '${(progress * 100).round()}%',
+              style: AppTextStyles.labelSmall(
+                context,
+              ).copyWith(color: AppColors.onImage, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: () => onContinue(task),
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: const Text('继续学习'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.primaryDark,
+                  minimumSize: const Size.fromHeight(46),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _HeroEmpty extends StatelessWidget {
+  const _HeroEmpty({required this.onOpenTasks});
+
+  final VoidCallback onOpenTasks;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(
-                '${_greeting(DateTime.now())}，${user.primaryName}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  height: 1.25,
-                  letterSpacing: -0.4,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _HeaderIconButton(
-              icon: Icons.search_rounded,
-              tooltip: '搜索学习内容',
-              onTap: onSearch,
-            ),
-            const SizedBox(width: 4),
-            _HeaderIconButton(
-              icon: Icons.notifications_none_rounded,
-              tooltip: '学习提醒',
-              onTap: onNotifications,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
         Text(
-          '今天也要加油学习，先把最要紧的一件事做完。',
-          maxLines: 2,
-          style: AppTextStyles.bodySmall(context).copyWith(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
+          '今天的学习',
+          style: AppTextStyles.overline(
+            context,
+          ).copyWith(color: AppColors.onImageMuted),
         ),
         const SizedBox(height: 10),
-        _EclawPill(onTap: onOpenAgent),
+        const Text(
+          '还没有安排任务',
+          style: TextStyle(
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+            height: 1.3,
+            letterSpacing: -0.3,
+            color: AppColors.onImage,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '定一个今天要完成的小目标，专注时长会自动记进这里。',
+          style: AppTextStyles.bodySmall(
+            context,
+          ).copyWith(color: AppColors.onImageMuted, height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: onOpenTasks,
+          icon: const Icon(Icons.add_rounded, size: 20),
+          label: const Text('新建学习任务'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: AppColors.primaryDark,
+            minimumSize: const Size.fromHeight(46),
+          ),
+        ),
       ],
     );
   }
@@ -878,220 +1095,6 @@ class _HeaderIconButton extends StatelessWidget {
   }
 }
 
-class _EclawPill extends StatelessWidget {
-  const _EclawPill({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadii.chip),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.chip),
-        child: Ink(
-          padding: const EdgeInsets.fromLTRB(6, 5, 10, 5),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.chip),
-            border: Border.all(color: AppColors.primaryLight),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Image.asset(
-                  'assets/images/eclaw_robot_avatar.png',
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => const Icon(
-                    Icons.smart_toy_rounded,
-                    size: 17,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'EClaw',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  '随时陪你学习',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.caption(context).copyWith(fontSize: 11),
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 16,
-                color: AppColors.textTertiary,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ========== 当前任务 ==========
-class _CurrentTaskCard extends StatelessWidget {
-  const _CurrentTaskCard({
-    required this.task,
-    required this.onContinue,
-    required this.onOpenTasks,
-  });
-
-  final LearningTask? task;
-  final ValueChanged<LearningTask> onContinue;
-  final VoidCallback onOpenTasks;
-
-  @override
-  Widget build(BuildContext context) {
-    final current = task;
-    return _SectionCard(
-      title: '当前任务',
-      actionLabel: '查看全部',
-      onAction: onOpenTasks,
-      child: current == null
-          ? _EmptyHint(
-              icon: Icons.playlist_add_check_rounded,
-              text: '今天还没有安排任务，先去任务中心定一个学习目标。',
-              actionLabel: '新建学习任务',
-              onAction: onOpenTasks,
-            )
-          : _CurrentTaskBody(task: current, onContinue: onContinue),
-    );
-  }
-}
-
-class _CurrentTaskBody extends StatelessWidget {
-  const _CurrentTaskBody({required this.task, required this.onContinue});
-
-  final LearningTask task;
-  final ValueChanged<LearningTask> onContinue;
-
-  @override
-  Widget build(BuildContext context) {
-    final source = [task.libraryName, task.documentTitle]
-        .where((value) => value.trim().isNotEmpty)
-        .join(' · ');
-    final minutes = task.focusedSeconds ~/ 60;
-    final target = task.estimatedPomodoros * 25;
-    final progress = target <= 0 ? 0.0 : (minutes / target).clamp(0.0, 1.0);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(
-                task.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w800,
-                  height: 1.35,
-                  letterSpacing: -0.2,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            FilledButton(
-              onPressed: () => onContinue(task),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(0, 44),
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              child: const Text('继续学习'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            _Tag(label: task.kindLabel, tone: _TagTone.primary),
-            if (source.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              const Icon(
-                Icons.menu_book_rounded,
-                size: 14,
-                color: AppColors.textTertiary,
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  source,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.caption(context).copyWith(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 14),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: progress,
-            minHeight: 7,
-            color: AppColors.primary,
-            backgroundColor: AppColors.surfaceMuted,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                minutes == 0
-                    ? '尚未开始专注 · 预计 ${task.estimatedPomodoros} 个番茄'
-                    : '已专注 $minutes 分钟 · 预计 ${task.estimatedPomodoros} 个番茄',
-                style: AppTextStyles.caption(context).copyWith(fontSize: 12),
-              ),
-            ),
-            Text(
-              '${(progress * 100).round()}%',
-              style: AppTextStyles.caption(context).copyWith(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppColors.primary,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
 // ========== 学习概览 ==========
 class _StudyOverviewCard extends StatelessWidget {
   const _StudyOverviewCard({
@@ -1110,109 +1113,73 @@ class _StudyOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final metrics = <Widget>[
-      _OverviewMetric(
-        label: '今日任务',
-        value: '$todayTaskCount',
-        onTap: onOpenTasks,
-      ),
-      _OverviewMetric(
-        label: '待处理错题',
-        value: '$wrongQuestions',
-        emphasis: wrongQuestions > 0 ? AppColors.error : null,
-        onTap: onOpenWrong,
-      ),
-      _OverviewMetric(
-        label: '复习到期',
-        value: '$overduePractice',
-        emphasis: overduePractice > 0 ? AppColors.accentOrange : null,
-        onTap: onOpenOverdue,
-      ),
-      _OverviewMetric(
-        label: '整体掌握度',
-        value: masteryPercent == null ? '—' : '$masteryPercent%',
-      ),
-    ];
-
-    return _SectionCard(
-      title: '学习概览',
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var index = 0; index < metrics.length; index++) ...[
-            if (index > 0)
-              Container(
-                width: 1,
-                height: 42,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                color: AppColors.borderLight,
-              ),
-            Expanded(child: metrics[index]),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewMetric extends StatelessWidget {
-  const _OverviewMetric({
-    required this.label,
-    required this.value,
-    this.emphasis,
-    this.onTap,
-  });
-
-  final String label, value;
-  final Color? emphasis;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final content = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+    final needsAttention = wrongQuestions > 0 || overduePractice > 0;
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            value,
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 23,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
-              letterSpacing: -0.5,
-              color: emphasis ?? AppColors.textPrimary,
+          AppSectionHeader(
+            title: '\u5b66\u4e60\u6982\u89c8',
+            subtitle: needsAttention
+                ? '\u6709\u9700\u8981\u5904\u7406\u7684\u5185\u5bb9'
+                : '\u4fdd\u6301\u5f53\u524d\u8282\u594f',
+            trailing: TextButton(
+              onPressed: onOpenTasks,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: AppTextStyles.label(context),
+              ),
+              child: const Text('\u4efb\u52a1\u4e2d\u5fc3'),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            maxLines: 2,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.caption(context).copyWith(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
-            ),
+          const SizedBox(height: 16),
+          AppStatRow(
+            tiles: [
+              AppStatTile(
+                icon: Icons.today_rounded,
+                value: '$todayTaskCount',
+                label: '\u4eca\u65e5\u4efb\u52a1',
+                accent: AppColors.primary,
+                muted: todayTaskCount == 0,
+                onTap: onOpenTasks,
+              ),
+              AppStatTile(
+                icon: Icons.report_problem_rounded,
+                value: '$wrongQuestions',
+                label: '\u5f85\u5904\u7406\u9519\u9898',
+                accent: AppColors.error,
+                muted: wrongQuestions == 0,
+                onTap: onOpenWrong,
+              ),
+              AppStatTile(
+                icon: Icons.schedule_rounded,
+                value: '$overduePractice',
+                label: '\u590d\u4e60\u5230\u671f',
+                accent: AppColors.accentAmber,
+                muted: overduePractice == 0,
+                onTap: onOpenOverdue,
+              ),
+              AppStatTile(
+                icon: Icons.insights_rounded,
+                value: masteryPercent == null ? '\u2014' : '$masteryPercent%',
+                label: '\u6574\u4f53\u638c\u63e3\u5ea6',
+                accent: AppColors.accentMint,
+                muted: masteryPercent == null,
+              ),
+            ],
           ),
         ],
-      ),
-    );
-    if (onTap == null) return content;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: content,
       ),
     );
   }
 }
 
 // ========== 快捷操作 ==========
-class _QuickActionsCard extends StatelessWidget {
-  const _QuickActionsCard({
+class _QuickActionsRow extends StatelessWidget {
+  const _QuickActionsRow({
     required this.isImporting,
     required this.onCamera,
     required this.onImport,
@@ -1225,41 +1192,47 @@ class _QuickActionsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SectionCard(
-      title: '快捷操作',
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: _QuickActionTile(
-              iconAsset: AppAssets.iconCamera,
-              label: '拍照识别',
-              onTap: isImporting ? null : onCamera,
-            ),
+    // Deliberately no card wrapper. These are the page's primary verbs, and a
+    // bare row stops the home page from being five stacked white boxes.
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _QuickActionTile(
+            imageAsset: AppAssets.quickCamera,
+            iconAsset: AppAssets.iconCamera,
+            label: '\u62cd\u7167\u8bc6\u522b',
+            accent: AppColors.accentSky,
+            onTap: isImporting ? null : onCamera,
           ),
-          Expanded(
-            child: _QuickActionTile(
-              iconAsset: AppAssets.iconAlbum,
-              label: '导入资料',
-              onTap: isImporting ? null : onImport,
-            ),
+        ),
+        Expanded(
+          child: _QuickActionTile(
+            imageAsset: AppAssets.quickImport,
+            iconAsset: AppAssets.iconAlbum,
+            label: '\u5bfc\u5165\u8d44\u6599',
+            accent: AppColors.accentMint,
+            onTap: isImporting ? null : onImport,
           ),
-          Expanded(
-            child: _QuickActionTile(
-              iconAsset: AppAssets.iconAi,
-              label: 'AI 面试',
-              onTap: onInterview,
-            ),
+        ),
+        Expanded(
+          child: _QuickActionTile(
+            imageAsset: AppAssets.quickInterview,
+            iconAsset: AppAssets.iconAi,
+            label: 'AI \u9762\u8bd5',
+            accent: AppColors.accentAmber,
+            onTap: onInterview,
           ),
-          Expanded(
-            child: _QuickActionTile(
-              avatarAsset: 'assets/images/eclaw_robot_avatar.png',
-              label: '问 EClaw',
-              onTap: onOpenAgent,
-            ),
+        ),
+        Expanded(
+          child: _QuickActionTile(
+            avatarAsset: 'assets/images/eclaw_robot_avatar.png',
+            label: '\u95ee EClaw',
+            accent: AppColors.accentViolet,
+            onTap: onOpenAgent,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1267,57 +1240,58 @@ class _QuickActionsCard extends StatelessWidget {
 class _QuickActionTile extends StatelessWidget {
   const _QuickActionTile({
     required this.label,
+    required this.accent,
     required this.onTap,
+    this.imageAsset,
     this.iconAsset,
     this.avatarAsset,
   });
 
   final String label;
+  final Color accent;
   final VoidCallback? onTap;
-  final String? iconAsset, avatarAsset;
+
+  /// Full-colour 3D icon art that already carries its own rounded background.
+  /// Preferred when present, so all four tiles share one icon language.
+  final String? imageAsset;
+
+  /// Flat vector fallback, used only if [imageAsset] is missing.
+  final String? iconAsset;
+  final String? avatarAsset;
+
+  static const double _artSize = 52;
 
   @override
   Widget build(BuildContext context) {
+    final enabled = onTap != null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
           child: Column(
             children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                alignment: Alignment.center,
-                clipBehavior: Clip.antiAlias,
-                child: avatarAsset != null
-                    ? Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Image.asset(
-                          avatarAsset!,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) => const Icon(
-                            Icons.smart_toy_rounded,
-                            size: 21,
-                            color: AppColors.primary,
+              SizedBox(
+                width: _artSize,
+                height: _artSize,
+                child: Opacity(
+                  opacity: enabled ? 1 : 0.4,
+                  child: imageAsset != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(
+                            AppRadii.cardSmall,
                           ),
-                        ),
-                      )
-                    : SvgPicture.asset(
-                        iconAsset!,
-                        width: 22,
-                        height: 22,
-                        colorFilter: const ColorFilter.mode(
-                          AppColors.primary,
-                          BlendMode.srcIn,
-                        ),
-                      ),
+                          child: Image.asset(
+                            imageAsset!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _flatFallback(enabled),
+                          ),
+                        )
+                      : _flatFallback(enabled),
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -1325,16 +1299,45 @@ class _QuickActionTile extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+                style: AppTextStyles.labelSmall(context).copyWith(
+                  color: enabled
+                      ? AppColors.textPrimary
+                      : AppColors.textTertiary,
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// The pre-existing look: a tinted rounded square holding either the EClaw
+  /// avatar or a flat vector glyph.
+  Widget _flatFallback(bool enabled) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.tintOf(accent, enabled ? 0.13 : 0.06),
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        border: Border.all(color: AppColors.tintOf(accent, 0.20)),
+      ),
+      alignment: Alignment.center,
+      child: avatarAsset != null
+          ? Padding(
+              padding: const EdgeInsets.all(5),
+              child: Image.asset(
+                avatarAsset!,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) =>
+                    Icon(Icons.smart_toy_rounded, size: 22, color: accent),
+              ),
+            )
+          : SvgPicture.asset(
+              iconAsset!,
+              width: 23,
+              height: 23,
+              colorFilter: ColorFilter.mode(accent, BlendMode.srcIn),
+            ),
     );
   }
 }
@@ -1364,23 +1367,32 @@ class _RecommendationCardState extends State<_RecommendationCard> {
         ? widget.recommendations.where((item) => item.weak).take(3).toList()
         : widget.recommendations.take(3).toList();
 
-    return _SectionCard(
-      title: '为你推荐',
-      subtitle: _weakOnly ? '掌握度偏低的内容，优先补上' : '按掌握情况和复习到期时间排序',
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _SegmentedTabs(
-            selectedIndex: _weakOnly ? 1 : 0,
-            labels: const ['今日推荐', '薄弱提升'],
-            onSelect: (index) => setState(() => _weakOnly = index == 1),
+          AppSectionHeader(
+            title: '为你推荐',
+            subtitle: _weakOnly ? '掌握度偏低的内容，优先补上' : '按掌握情况和复习到期时间排序',
+          ),
+          const SizedBox(height: 14),
+          AppSegmented<int>(
+            value: _weakOnly ? 1 : 0,
+            onChanged: (index) => setState(() => _weakOnly = index == 1),
+            options: const [
+              AppSegmentedOption(0, '今日推荐'),
+              AppSegmentedOption(1, '薄弱提升'),
+            ],
           ),
           const SizedBox(height: 14),
           if (items.isEmpty)
-            _EmptyHint(
+            AppEmptyState(
+              compact: true,
               icon: Icons.lightbulb_outline_rounded,
-              text: _weakOnly
-                  ? '目前没有明显薄弱的内容，保持现在的节奏就好。'
+              title: _weakOnly ? '没有明显薄弱的内容' : '还没有学习建议',
+              description: _weakOnly
+                  ? '保持现在的节奏就好。'
                   : '完成练习或设置复习计划后，这里会给出下一步建议。',
               actionLabel: '查看任务中心',
               onAction: widget.onOpenTasks,
@@ -1407,14 +1419,15 @@ class _RecommendationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isPractice = item.kind == _RecommendationKind.practice;
+    final accent = isPractice ? AppColors.accentAmber : AppColors.accentViolet;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
-        color: AppColors.surfaceAlt.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(16),
+        color: AppColors.tintOf(accent, 0.07),
+        borderRadius: BorderRadius.circular(AppRadii.tile),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadii.tile),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
             child: LayoutBuilder(
@@ -1423,19 +1436,15 @@ class _RecommendationTile extends StatelessWidget {
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    color: isPractice
-                        ? const Color(0xFFFEF3E7)
-                        : AppColors.primarySoft,
-                    borderRadius: BorderRadius.circular(12),
+                    color: AppColors.tintOf(accent, 0.16),
+                    borderRadius: BorderRadius.circular(AppRadii.chipSmall),
                   ),
                   child: Icon(
                     isPractice
                         ? Icons.edit_note_rounded
                         : Icons.psychology_alt_rounded,
                     size: 20,
-                    color: isPractice
-                        ? AppColors.accentOrange
-                        : AppColors.primary,
+                    color: accent,
                   ),
                 );
                 final body = Column(
@@ -1448,20 +1457,11 @@ class _RecommendationTile extends StatelessWidget {
                             item.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary,
-                            ),
+                            style: AppTextStyles.title(context),
                           ),
                         ),
                         const SizedBox(width: 6),
-                        _Tag(
-                          label: item.badge,
-                          tone: isPractice
-                              ? _TagTone.warning
-                              : _TagTone.primary,
-                        ),
+                        AppTag(label: item.badge, accent: accent),
                       ],
                     ),
                     const SizedBox(height: 5),
@@ -1483,10 +1483,9 @@ class _RecommendationTile extends StatelessWidget {
                     minimumSize: const Size(0, 36),
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     side: const BorderSide(color: AppColors.primaryLight),
-                    textStyle: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    textStyle: AppTextStyles.label(
+                      context,
+                    ).copyWith(fontWeight: FontWeight.w700),
                   ),
                   child: Text(isPractice ? '开始练习' : '开始复习'),
                 );
@@ -1505,10 +1504,7 @@ class _RecommendationTile extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: action,
-                      ),
+                      Align(alignment: Alignment.centerRight, child: action),
                     ],
                   );
                 }
@@ -1531,62 +1527,6 @@ class _RecommendationTile extends StatelessWidget {
   }
 }
 
-class _SegmentedTabs extends StatelessWidget {
-  const _SegmentedTabs({
-    required this.labels,
-    required this.selectedIndex,
-    required this.onSelect,
-  });
-
-  final List<String> labels;
-  final int selectedIndex;
-  final ValueChanged<int> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.chip),
-      ),
-      child: Row(
-        children: [
-          for (var index = 0; index < labels.length; index++)
-            Expanded(
-              child: Material(
-                color: index == selectedIndex
-                    ? AppColors.surface
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppRadii.chip),
-                child: InkWell(
-                  onTap: () => onSelect(index),
-                  borderRadius: BorderRadius.circular(AppRadii.chip),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      labels[index],
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: index == selectedIndex
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: index == selectedIndex
-                            ? AppColors.primaryDark
-                            : AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 // ========== 我的知识库 ==========
 class _MyLibrariesCard extends StatelessWidget {
   const _MyLibrariesCard({
@@ -1599,121 +1539,101 @@ class _MyLibrariesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SectionCard(
-      title: '我的知识库',
-      actionLabel: '全部知识库',
-      onAction: onOpenLibrary,
-      child: libraries.isEmpty
-          ? _EmptyHint(
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppSectionHeader(
+            title: '我的知识库',
+            trailing: TextButton(
+              onPressed: onOpenLibrary,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: const Text('全部'),
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (libraries.isEmpty)
+            AppEmptyState(
+              compact: true,
               icon: Icons.collections_bookmark_rounded,
-              text: '还没有知识库，导入资料时会自动建立。',
+              title: '还没有知识库',
+              description: '导入资料时会自动建立。',
               actionLabel: '去知识库',
               onAction: onOpenLibrary,
             )
-          : Column(
-              children: [
-                for (var index = 0; index < libraries.length; index++) ...[
-                  if (index > 0) const SizedBox(height: 12),
-                  _LibrarySummaryTile(
-                    summary: libraries[index],
-                    onTap: onOpenLibrary,
-                  ),
-                ],
-              ],
+          else
+            // A horizontal strip of the real book covers. This is the app's
+            // signature visual, so the home page surfaces it rather than
+            // hiding it behind a tab.
+            SizedBox(
+              height: 166,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: libraries.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 14),
+                itemBuilder: (context, index) => _LibraryBookTile(
+                  summary: libraries[index],
+                  onTap: onOpenLibrary,
+                ),
+              ),
             ),
+        ],
+      ),
     );
   }
 }
 
-class _LibrarySummaryTile extends StatelessWidget {
-  const _LibrarySummaryTile({required this.summary, required this.onTap});
+class _LibraryBookTile extends StatelessWidget {
+  const _LibraryBookTile({required this.summary, required this.onTap});
 
   final KnowledgeLibraryStudySummary summary;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 46,
-                child: KnowledgeBookCover(
-                  title: '',
-                  theme: summary.coverTheme,
-                  color: summary.coverColor,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      summary.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      summary.hasContent
-                          ? '${summary.conceptCount} 个知识点 · ${summary.questionCount} 道题'
-                          : '还没有学习内容',
-                      style: AppTextStyles.caption(context).copyWith(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (summary.hasContent) ...[
-                      const SizedBox(height: 9),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(999),
-                              child: LinearProgressIndicator(
-                                value: (summary.progress / 100).clamp(0.0, 1.0),
-                                minHeight: 5,
-                                color: AppColors.primary,
-                                backgroundColor: AppColors.surfaceMuted,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${summary.progress}%',
-                            style: AppTextStyles.caption(context).copyWith(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: AppColors.textTertiary,
-              ),
-            ],
+    return SizedBox(
+      width: 78,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Reuses the existing cover widget untouched.
+          KnowledgeBookCover(
+            title: '',
+            theme: summary.coverTheme,
+            color: summary.coverColor,
+            onTap: onTap,
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(
+            summary.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.labelSmall(
+              context,
+            ).copyWith(color: AppColors.textPrimary, height: 1.3),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            summary.hasContent
+                ? '${summary.conceptCount} 知识点 · ${summary.progress}%'
+                : '还没有学习内容',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.labelSmall(
+              context,
+            ).copyWith(color: AppColors.textQuiet, fontWeight: FontWeight.w500),
+          ),
+        ],
       ),
     );
   }
@@ -1817,7 +1737,10 @@ class _StudySearchSheetState extends State<_StudySearchSheet> {
           );
         }
         if (snapshot.hasError) {
-          return Text('搜索失败：${snapshot.error}', style: AppTextStyles.bodySmall(context));
+          return Text(
+            '搜索失败：${snapshot.error}',
+            style: AppTextStyles.bodySmall(context),
+          );
         }
         final hits = snapshot.data ?? const <StudySearchHit>[];
         if (hits.isEmpty) {
@@ -1865,193 +1788,6 @@ class _StudySearchSheetState extends State<_StudySearchSheet> {
           },
         );
       },
-    );
-  }
-}
-
-// ========== 共用组件 ==========
-enum _TagTone { primary, warning }
-
-class _Tag extends StatelessWidget {
-  const _Tag({required this.label, required this.tone});
-
-  final String label;
-  final _TagTone tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final (background, foreground) = switch (tone) {
-      _TagTone.warning => (const Color(0xFFFEF3E7), AppColors.accentOrange),
-      _TagTone.primary => (AppColors.primarySoft, AppColors.primaryDark),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(AppRadii.chip),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: foreground,
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({
-    required this.title,
-    required this.child,
-    this.subtitle,
-    this.actionLabel,
-    this.onAction,
-  });
-
-  final String title;
-  final String? subtitle;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return PremiumSurface(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: PremiumSectionHeader(title: title, subtitle: subtitle),
-              ),
-              if (actionLabel != null)
-                TextButton(
-                  onPressed: onAction,
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    textStyle: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  child: Text(actionLabel!),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyHint extends StatelessWidget {
-  const _EmptyHint({
-    required this.icon,
-    required this.text,
-    this.actionLabel,
-    this.onAction,
-  });
-
-  final IconData icon;
-  final String text;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, size: 26, color: AppColors.textTertiary),
-          const SizedBox(height: 8),
-          Text(
-            text,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.bodySmall(context).copyWith(fontSize: 13),
-          ),
-          if (actionLabel != null) ...[
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: onAction,
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 40),
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                side: const BorderSide(color: AppColors.primaryLight),
-                textStyle: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              child: Text(actionLabel!),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _StatePanel extends StatelessWidget {
-  const _StatePanel({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.onPressed,
-  });
-  final IconData icon;
-  final String title;
-  final String description;
-  final Future<void> Function() onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: AppColors.textTertiary),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              description,
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            FilledButton(
-              onPressed: () => onPressed(),
-              child: const Text('重试'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -2108,9 +1844,7 @@ class _HomeRecommendation {
       kind: _RecommendationKind.practice,
       title: title,
       badge: '练习',
-      reason: parts.isEmpty
-          ? '集中练习这批题，巩固当前进度。'
-          : '${parts.join('，')}，建议集中突破。',
+      reason: parts.isEmpty ? '集中练习这批题，巩固当前进度。' : '${parts.join('，')}，建议集中突破。',
       mastery: 0,
       documentId: item.documentId,
       questionIds: item.questionIds,

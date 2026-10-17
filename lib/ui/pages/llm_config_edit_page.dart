@@ -6,10 +6,8 @@ import '../../database/models/llm_provider_config.dart';
 import '../../llm/llm_model_catalog.dart';
 import '../../llm/llm_request_support.dart';
 import '../../llm/minimax_client.dart';
+import '../theme/app_theme.dart';
 
-const _blue = Color(0xFF3068E9);
-const _background = Color(0xFFF7F9FC);
-const _muted = Color(0xFF73819B);
 
 class LlmConfigEditPage extends StatefulWidget {
   const LlmConfigEditPage({
@@ -300,30 +298,30 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
     final selected = _models.where((m) => m.id == _model.text).firstOrNull;
     return Theme(
       data: Theme.of(context).copyWith(
-        colorScheme: ColorScheme.fromSeed(seedColor: _blue, primary: _blue),
+        colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primary, primary: AppColors.primary),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFFF7F9FE),
+          fillColor: AppColors.surfaceAlt,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,
             vertical: 14,
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE1E8F5)),
+            borderSide: const BorderSide(color: AppColors.border),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE1E8F5)),
+            borderSide: const BorderSide(color: AppColors.border),
           ),
         ),
       ),
       child: Scaffold(
-        backgroundColor: _background,
+        backgroundColor: AppColors.background,
         appBar: AppBar(
-          backgroundColor: _background,
+          backgroundColor: AppColors.background,
           surfaceTintColor: Colors.transparent,
-          foregroundColor: const Color(0xFF111D34),
+          foregroundColor: AppColors.textPrimary,
           centerTitle: true,
           title: const Text(
             'AI 模型配置',
@@ -353,7 +351,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                   child: Text(
                     '连接你的模型服务，用于知识生成、问答与 EClaw 助手。',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: _muted, fontSize: 13),
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                   ),
                 ),
                 if (_loading) const LinearProgressIndicator(),
@@ -414,15 +412,15 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF0F6FF),
+                          color: AppColors.primarySoft,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFFBDD8FF)),
+                          border: Border.all(color: AppColors.primaryLight),
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const CircleAvatar(
-                              backgroundColor: _blue,
+                              backgroundColor: AppColors.primary,
                               child: Icon(
                                 Icons.auto_awesome_outlined,
                                 color: Colors.white,
@@ -449,7 +447,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                                         ? '支持从列表选择或手动填写'
                                         : _model.text,
                                     style: const TextStyle(
-                                      color: _blue,
+                                      color: AppColors.primary,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -458,7 +456,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                                     selected?.description ??
                                         '手动配置的模型，使用前请测试连接。',
                                     style: const TextStyle(
-                                      color: _muted,
+                                      color: AppColors.textSecondary,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -470,7 +468,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                                 padding: EdgeInsets.only(left: 6),
                                 child: Icon(
                                   Icons.check_circle,
-                                  color: _blue,
+                                  color: AppColors.primary,
                                   size: 22,
                                 ),
                               ),
@@ -485,7 +483,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                       _field('模型 ID', _model, hint: '也可以手动填写模型 ID'),
                       Text(
                         _modelMessage ?? '预设仅供选择；刷新后显示接口返回的模型。',
-                        style: const TextStyle(color: _muted, fontSize: 12),
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                       ),
                     ],
                   ),
@@ -501,7 +499,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                     shape: const Border(),
                     title: const Text(
                       '温度、最大 Tokens、连接测试与响应格式',
-                      style: TextStyle(fontSize: 13, color: _muted),
+                      style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                     ),
                     children: [_advanced()],
                   ),
@@ -509,12 +507,12 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                 const Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, size: 17, color: _muted),
+                    Icon(Icons.info_outline, size: 17, color: AppColors.textSecondary),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         '支持通过 OpenAI-compatible 接口接入更多模型服务。',
-                        style: TextStyle(fontSize: 12, color: _muted),
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                       ),
                     ),
                   ],
@@ -531,10 +529,13 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
     builder: (context, constraints) {
       final columns = constraints.maxWidth >= 330 ? 3 : 2;
       final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
-      // Index-aligned with the provider order in _presets.
+      // Index-aligned with the provider order in _presets. These literals are
+      // deliberate: each provider keeps its own brand hue so the grid reads as
+      // a set of logos, not as app chrome. Everything else on this page uses
+      // the shared AppColors tokens.
       const colors = [
         Color(0xFF22B8D6),
-        _blue,
+        AppColors.primary,
         Color(0xFF9255EB),
         Color(0xFFEA73A5),
         Color(0xFFD9A521),
@@ -542,7 +543,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
         Color(0xFFF48454),
         Color(0xFF7955EF),
         Color(0xFF5876CB),
-        _muted,
+        AppColors.textSecondary,
       ];
       return Wrap(
         spacing: 8,
@@ -564,11 +565,11 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                   padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
                   decoration: BoxDecoration(
                     color: selected
-                        ? const Color(0xFFEEF4FF)
-                        : const Color(0xFFFAFBFE),
+                        ? AppColors.primarySoft
+                        : AppColors.surfaceAlt,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: selected ? _blue : const Color(0xFFE4EAF5),
+                      color: selected ? AppColors.primary : AppColors.border,
                       width: selected ? 1.5 : 1,
                     ),
                   ),
@@ -603,8 +604,8 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: selected
-                                      ? _blue
-                                      : const Color(0xFF17223A),
+                                      ? AppColors.primary
+                                      : AppColors.textPrimary,
                                   fontWeight: selected
                                       ? FontWeight.w700
                                       : FontWeight.w500,
@@ -620,7 +621,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                           right: 0,
                           child: Icon(
                             Icons.check_circle,
-                            color: _blue,
+                            color: AppColors.primary,
                             size: 14,
                           ),
                         ),
@@ -647,7 +648,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
       builder: (context, constraints) {
         final title = Text(
           label,
-          style: const TextStyle(color: _muted, fontSize: 13),
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
         );
         final input = TextField(
           key: ValueKey('field_$label'),
@@ -668,7 +669,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                       _visible
                           ? Icons.visibility_off_outlined
                           : Icons.visibility_outlined,
-                      color: _muted,
+                      color: AppColors.textSecondary,
                       size: 21,
                     ),
                   )
@@ -747,7 +748,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
         const SizedBox(height: 12),
         Text(
           '温度  ${temperature.toStringAsFixed(1)}',
-          style: const TextStyle(color: _muted, fontSize: 13),
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
         ),
         Slider(
           value: temperature.clamp(0, 2),
@@ -765,7 +766,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
         if (_config.isKimi || current.effectiveApiMode == LlmApiMode.responses)
           const Text(
             '该模型的温度由服务商协议控制。',
-            style: TextStyle(color: _muted, fontSize: 12),
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
           ),
         _field('最大 Tokens', _tokens, numeric: true, hint: '4096'),
         DropdownButtonFormField<String>(
@@ -786,7 +787,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
         const SizedBox(height: 8),
         const Text(
           '知识生成、面试评分等结构化任务始终使用 JSON；部分模型通过提示词约束。',
-          style: TextStyle(color: _muted, fontSize: 12),
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
         ),
         const SizedBox(height: 14),
         OutlinedButton.icon(
@@ -802,8 +803,8 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
               style: TextStyle(
                 fontSize: 13,
                 color: _testSucceeded
-                    ? const Color(0xFF159977)
-                    : Colors.red.shade700,
+                    ? AppColors.success
+                    : AppColors.error,
               ),
             ),
           ),
@@ -824,7 +825,7 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
       borderRadius: BorderRadius.circular(20),
       boxShadow: [
         BoxShadow(
-          color: _blue.withValues(alpha: 0.035),
+          color: AppColors.primary.withValues(alpha: 0.035),
           blurRadius: 20,
           offset: const Offset(0, 4),
         ),
@@ -837,8 +838,8 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
           children: [
             CircleAvatar(
               radius: 20,
-              backgroundColor: const Color(0xFFEDF5FF),
-              child: Icon(icon, color: _blue, size: 23),
+              backgroundColor: AppColors.primarySoft,
+              child: Icon(icon, color: AppColors.primary, size: 23),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -850,13 +851,13 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF111D34),
+                      color: AppColors.textPrimary,
                     ),
                   ),
                   if (subtitle != null)
                     Text(
                       subtitle,
-                      style: const TextStyle(color: _muted, fontSize: 12),
+                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                     ),
                 ],
               ),
@@ -929,7 +930,7 @@ class _ModelPickerState extends State<_ModelPicker> {
                           title: Text(model.label),
                           subtitle: Text('${model.id}\n${model.description}'),
                           trailing: model.id == widget.selected
-                              ? const Icon(Icons.check_circle, color: _blue)
+                              ? const Icon(Icons.check_circle, color: AppColors.primary)
                               : null,
                           onTap: () => Navigator.pop(context, model.id),
                         );

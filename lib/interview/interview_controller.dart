@@ -400,6 +400,7 @@ class InterviewController extends ChangeNotifier {
       return;
     }
     final operation = _operation;
+    _error = null;
     _phase = InterviewPhase.speaking;
     notifyListeners();
     try {

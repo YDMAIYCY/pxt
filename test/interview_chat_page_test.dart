@@ -451,6 +451,89 @@ void main() {
     expect(find.text('知识卡片'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('voice download failure shows retry and preserves text answers', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = InterviewRepository(database: app);
+    final session = (await tester.runAsync(
+      () => repository.createSession(
+        userId: 1,
+        libraryId: 1,
+        recordId: 1,
+        scopeName: '函数与极限',
+        mode: 'basic',
+        difficulty: 'medium',
+        targetQuestionCount: 1,
+        voiceEnabled: false,
+        autoPlay: false,
+      ),
+    ))!;
+    await tester.runAsync(
+      () => repository.saveQuestions(1, session.id, [
+        InterviewQuestionDraft(
+          questionText: '请解释极限。',
+          referencePoints: const ['趋近'],
+          knowledgePoint: '极限',
+          sourceRecordId: 1,
+          sourcePageId: 1,
+          evidenceText: '极限内容',
+          sourceKind: 'ocr',
+          orderIndex: 0,
+        ),
+      ]),
+    );
+    final voice = _DownloadVoice();
+    final controller = InterviewController(
+      userId: 1,
+      session: session,
+      repository: repository,
+      voice: voice,
+      llmConfig: _config,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: testTheme,
+        home: InterviewChatPage(
+          userId: 1,
+          sessionId: session.id,
+          controller: controller,
+        ),
+      ),
+    );
+    await _settle(tester);
+    await tester.tap(find.byKey(const ValueKey('interview-mic')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.tap(find.text('下载'));
+    await _settle(tester, frames: 4);
+    expect(find.text('40%'), findsOneWidget);
+    voice.pending.complete();
+    await _settle(tester, frames: 4);
+    expect(find.text('语音模型下载源暂不可用，请稍后重试'), findsOneWidget);
+    expect(find.text('请检查 AI 模型配置'), findsNothing);
+    expect(find.text('重新下载语音模型'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    voice.fail = false;
+    await tester.tap(find.text('重新下载语音模型'));
+    await _settle(tester, frames: 4);
+    expect(voice.modelReady, isTrue);
+    expect(find.text('重新下载语音模型'), findsNothing);
+    await tester.tap(find.byTooltip('文字回答'));
+    await _settle(tester);
+    await tester.enterText(find.byType(TextField), '极限表示趋近的值');
+    await tester.pump();
+    expect(controller.canSubmit, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(() async {
+      await controller.savePendingAnswer();
+      controller.dispose();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+  });
 }
 
 const _evidence = InterviewEvidence(
@@ -558,5 +641,21 @@ class _FakeVoice implements InterviewVoicePort {
     await _controller.close();
     _phase.dispose();
     _mouth.dispose();
+  }
+}
+
+class _DownloadVoice extends _FakeVoice {
+  final pending = Completer<void>();
+  bool fail = true;
+  bool _ready = false;
+  @override
+  bool get modelReady => _ready;
+  @override
+  Future<void> ensureOfflineModel({void Function(double)? onProgress}) async {
+    onProgress?.call(0.4);
+    await pending.future;
+    if (fail) throw const HttpException('HTTP 403');
+    _ready = true;
+    onProgress?.call(1);
   }
 }

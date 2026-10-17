@@ -17,7 +17,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 24;
+  static const int databaseVersion = 27;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -99,7 +99,7 @@ class AppDatabase {
   Future<void> _configureDatabase(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON;');
     final previous = await db.getVersion();
-    if (previous > 0 && previous < 24 && db.path != inMemoryDatabasePath) {
+    if (previous > 0 && previous < databaseVersion && db.path != inMemoryDatabasePath) {
       // No repository receives this connection until configuration/upgrade ends.
       // Flush WAL before copying; a busy/failed backup aborts the upgrade.
       final backup = '${db.path}.before-community-v$previous-${DateTime.now().microsecondsSinceEpoch}.bak';
@@ -504,8 +504,14 @@ class AppDatabase {
     if (oldVersion < 23) {
       await createLearningSchema(db);
     }
-    if (oldVersion < 24) {
+    if (oldVersion < 25) {
       await createCommunityLocalSchema(db);
+    }
+    if (oldVersion < 26) {
+      await createLearningSchema(db);
+    }
+    if (oldVersion < 27) {
+      await _createFavoriteTables(db);
     }
   }
 
@@ -1189,12 +1195,16 @@ class AppDatabase {
         target_id INTEGER NOT NULL,
         note TEXT,
         highlight_text TEXT,
+        annotations_json TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(user_id, target_type, target_id),
         FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
       );
     ''');
+    await _addColumnIfMissing(
+      db, tableFavorites, 'annotations_json', "TEXT NOT NULL DEFAULT '[]'",
+    );
   }
 
   Future<void> _createFavoriteIndexes(Database db) async {

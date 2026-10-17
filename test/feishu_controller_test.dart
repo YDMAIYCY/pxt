@@ -197,7 +197,7 @@ void main() {
       });
       for (
         var i = 0;
-        i < 100 && find.text('任务 1 · 已完成').evaluate().isEmpty;
+        i < 100 && find.text('已完成').evaluate().isEmpty;
         i++
       ) {
         await tester.runAsync(() async {
@@ -206,7 +206,10 @@ void main() {
         await tester.pump();
       }
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('任务 1 · 已完成'), findsOneWidget);
+      // The status is now a tag beside the job number rather than a suffix of
+      // the same string, so assert both halves.
+      expect(find.text('任务 1'), findsOneWidget);
+      expect(find.text('已完成'), findsOneWidget);
       expect(find.text('成功 1 / 1 篇'), findsOneWidget);
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(tester.takeException(), isNull);

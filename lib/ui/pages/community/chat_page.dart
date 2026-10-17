@@ -8,21 +8,34 @@ import '../../../community/chat_outbox_repository.dart';
 import 'community_widgets.dart';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({required this.conversationId, super.key});
+  const ChatPage({
+    required this.conversationId,
+    this.repository,
+    this.outbox,
+    this.authChanges,
+    super.key,
+  });
   final String conversationId;
+  final CommunityRepository? repository;
+  final ChatOutboxRepository? outbox;
+  final Listenable? authChanges;
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  final _repo = CommunityRepository(),
-      _outbox = ChatOutboxRepository(),
-      _text = TextEditingController();
+  late final CommunityRepository _repo;
+  late final ChatOutboxRepository _outbox;
+  late final Listenable _authChanges;
+  final _text = TextEditingController();
   late Future<bool> _future;
   RealtimeChannel? _channel;
   Timer? _poll;
   List<Json> _messages = [], _pending = [];
-  final Set<String> _failed = {};
+  final Map<String, String> _sendErrors = {};
+  int _generation = 0;
+  String? _authUuid;
+  bool _ready = false;
   bool _queuing = false;
   bool _sending = false,
       _paging = false,
@@ -34,32 +47,78 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _repo = widget.repository ?? CommunityRepository();
+    _outbox = widget.outbox ?? ChatOutboxRepository(community: _repo);
+    _authChanges = widget.authChanges ?? CloudBackend.instance;
     WidgetsBinding.instance.addObserver(this);
-    _future = _start();
-    CloudBackend.instance.addListener(_authChanged);
+    _authChanges.addListener(_authChanged);
+    _future = _start()..ignore();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    CloudBackend.instance.removeListener(_authChanged);
-    _poll?.cancel();
-    if (_channel != null) _repo.client.removeChannel(_channel!);
+    _authChanges.removeListener(_authChanged);
+    _generation++;
+    _stopListening();
     _text.dispose();
     super.dispose();
   }
 
-  void _authChanged() {
-    if (!mounted) return;
-    if (!CloudBackend.instance.signedIn) {
-      _poll?.cancel();
-      if (_channel != null) _repo.client.removeChannel(_channel!);
-      setState(() {
-        _messages = [];
-        _pending = [];
-        _syncError = '云端会话已过期，请返回账号与安全重新登录';
-      });
+  String? get _currentUuid {
+    try {
+      return _repo.uid;
+    } on CloudFailure {
+      return null;
     }
+  }
+
+  bool _isCurrent(int generation, String? uuid) =>
+      mounted &&
+      generation == _generation &&
+      uuid == _authUuid &&
+      uuid == _currentUuid;
+
+  void _stopListening() {
+    _poll?.cancel();
+    _poll = null;
+    final channel = _channel;
+    _channel = null;
+    if (channel != null) _repo.client.removeChannel(channel);
+  }
+
+  void _clear() {
+    _ready = false;
+    _messages = [];
+    _pending = [];
+    _sendErrors.clear();
+    _text.clear();
+    _sending = _queuing = _paging = _syncing = false;
+    _more = false;
+    _title = '私聊';
+    _syncError = null;
+  }
+
+  void _authChanged() {
+    if (!mounted || _currentUuid == _authUuid) return;
+    setState(() {
+      _future = _start()..ignore();
+    });
+  }
+
+  bool _accessError(Object error) =>
+      error is AuthException ||
+      error is PostgrestException &&
+          (error.code == '42501' || error.code == 'PGRST301');
+
+  void _loseAccess(String message) {
+    _generation++;
+    _stopListening();
+    setState(() {
+      _clear();
+      _status = '会话不可用';
+      _syncError = message;
+    });
   }
 
   @override
@@ -72,58 +131,92 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<bool> _start() async {
-    await _repo.identity.requireLinked();
-    final inbox = await _repo.inbox();
-    final info = inbox
-        .where((i) => i['id'] == widget.conversationId)
-        .firstOrNull;
-    if (info == null) throw const CloudFailure('会话不存在，或好友关系已变化');
-    _title = (info['profile'] as Map)['nickname'] as String;
-    _messages = await _repo.messages(widget.conversationId);
-    _more = _messages.length == 30;
-    _pending = await _outbox.pending(widget.conversationId);
-    _channel ??= _repo.client
-        .channel('chat-${widget.conversationId}-${_repo.uid}')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'chat_messages',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'conversation_id',
-            value: widget.conversationId,
-          ),
-          callback: (_) => _sync(),
-        )
-        .subscribe((status, error) {
-          if (!mounted) return;
-          setState(
-            () => _status = status == RealtimeSubscribeStatus.subscribed
-                ? '已连接'
-                : status == RealtimeSubscribeStatus.channelError ||
-                      status == RealtimeSubscribeStatus.timedOut
-                ? '连接中断，正在重连…'
-                : '正在连接…',
-          );
-          if (status == RealtimeSubscribeStatus.subscribed) {
-            _sync();
-            _deliver();
-          }
-        });
-    // Also reconcile while foregrounded if the socket silently drops an event.
-    _poll ??= Timer.periodic(const Duration(seconds: 20), (_) {
-      if (_foreground && mounted && ModalRoute.of(context)?.isCurrent == true) {
-        _sync();
+    final generation = ++_generation;
+    final uuid = _authUuid = _currentUuid;
+    _stopListening();
+    _clear();
+    _status = '正在连接…';
+    try {
+      if (uuid == null) {
+        throw const CloudFailure('云端会话已过期，请返回账号与安全重新登录');
       }
-    });
-    await _markRead();
-    if (mounted) setState(() {});
-    return true;
+      final linked = await _repo.identity.requireLinked();
+      if (!_isCurrent(generation, uuid)) return false;
+      if (linked != uuid) throw const CloudFailure('登录状态需要更新，请重新登录智学帮');
+      final inbox = await _repo.inbox();
+      if (!_isCurrent(generation, uuid)) return false;
+      final info = inbox
+          .where((i) => i['id'] == widget.conversationId)
+          .firstOrNull;
+      if (info == null) throw const CloudFailure('会话不存在，或好友关系已变化');
+      final messages = await _repo.messages(widget.conversationId);
+      if (!_isCurrent(generation, uuid)) return false;
+      final pending = await _outbox.pending(widget.conversationId);
+      if (!_isCurrent(generation, uuid)) return false;
+      _title = (info['profile'] as Map)['nickname'] as String;
+      _messages = messages;
+      _more = messages.length == 30;
+      _pending = pending;
+      _ready = true;
+      try {
+    _channel ??= _repo.client
+            .channel('chat-${widget.conversationId}-$uuid')
+            .onPostgresChanges(
+              event: PostgresChangeEvent.insert,
+              schema: 'public',
+              table: 'chat_messages',
+              filter: PostgresChangeFilter(
+                type: PostgresChangeFilterType.eq,
+                column: 'conversation_id',
+                value: widget.conversationId,
+              ),
+              callback: (_) {
+                if (_isCurrent(generation, uuid)) _sync();
+              },
+            )
+            .subscribe((status, error) {
+              if (!_isCurrent(generation, uuid)) return;
+              setState(
+                () => _status = status == RealtimeSubscribeStatus.subscribed
+                    ? '已连接'
+                    : status == RealtimeSubscribeStatus.channelError ||
+                          status == RealtimeSubscribeStatus.timedOut
+                    ? '连接中断，正在重连…'
+                    : '正在连接…',
+              );
+              if (status == RealtimeSubscribeStatus.subscribed) {
+                _sync();
+                _deliver();
+              }
+            });
+      } catch (_) {
+        // Realtime is an enhancement, not a dependency: if the channel
+        // cannot be created, the page still shows what it already fetched.
+      }
+      // Also reconcile while foregrounded if the socket silently drops an event.
+      _poll ??= Timer.periodic(const Duration(seconds: 20), (_) {
+        if (_isCurrent(generation, uuid) &&
+            _foreground &&
+            ModalRoute.of(context)?.isCurrent == true) {
+          _sync();
+        }
+      });
+      await _markRead(generation, uuid);
+      if (!_isCurrent(generation, uuid)) return false;
+      setState(() {});
+      return true;
+    } catch (e) {
+      if (!_isCurrent(generation, uuid)) return false;
+      _generation++;
+      _stopListening();
+      _clear();
+      rethrow;
+    }
   }
 
-  Future<void> _markRead() async {
-    if (_messages.isNotEmpty &&
-        mounted &&
+  Future<void> _markRead(int generation, String? uuid) async {
+    if (_isCurrent(generation, uuid) &&
+        _messages.isNotEmpty &&
         _foreground &&
         ModalRoute.of(context)?.isCurrent == true) {
       await _repo.markRead(
@@ -149,9 +242,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _sync() async {
-    if (_syncing || !mounted) return;
+    final generation = _generation, uuid = _authUuid;
+    if (!_ready || _syncing || !_isCurrent(generation, uuid)) return;
     _syncing = true;
     try {
+      // RLS may return an empty message list after friendship/access is revoked.
+      final inbox = await _repo.inbox();
+      if (!_isCurrent(generation, uuid)) return;
+      if (!inbox.any((i) => i['id'] == widget.conversationId)) {
+        _loseAccess('会话不存在，或好友关系已变化');
+        return;
+      }
       // Catch up every missing page, even after a long offline interval.
       final previous = _messages.firstOrNull?['id'];
       Json? cursor;
@@ -161,7 +262,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           widget.conversationId,
           before: cursor,
         );
-        if (!mounted) return;
+        if (!_isCurrent(generation, uuid)) return;
         if (incoming.any((m) => m['id'] == previous)) found = true;
         setState(() {
           if (_messages.isEmpty && incoming.length == 30) _more = true;
@@ -170,48 +271,68 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (found || incoming.length < 30) break;
         cursor = incoming.last;
       }
-      await _markRead();
-      if (mounted) {
+      await _markRead(generation, uuid);
+      if (_isCurrent(generation, uuid)) {
         setState(() {
           _status = '已同步';
           _syncError = null;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (_isCurrent(generation, uuid)) {
+        if (_accessError(e)) {
+          _loseAccess(cloudError(e));
+          return;
+        }
         setState(() {
           _status = '连接暂不可用';
           _syncError = cloudError(e);
         });
       }
     } finally {
-      _syncing = false;
+      if (_isCurrent(generation, uuid)) _syncing = false;
     }
   }
 
   Future<void> _history() async {
-    if (_paging || !_more || _messages.isEmpty) return;
+    final generation = _generation, uuid = _authUuid;
+    if (!_ready ||
+        !_isCurrent(generation, uuid) ||
+        _paging ||
+        !_more ||
+        _messages.isEmpty) {
+      return;
+    }
     setState(() => _paging = true);
     try {
       final rows = await _repo.messages(
         widget.conversationId,
         before: _messages.last,
       );
-      if (mounted) {
+      if (_isCurrent(generation, uuid)) {
         setState(() {
           _merge(rows);
           _more = rows.length == 30;
         });
       }
     } catch (e) {
-      if (mounted) communityMessage(context, cloudError(e));
+      if (_isCurrent(generation, uuid)) {
+        if (_accessError(e)) {
+          _loseAccess(cloudError(e));
+        } else if (mounted) {
+          communityMessage(context, cloudError(e));
+        }
+      }
     } finally {
-      if (mounted) setState(() => _paging = false);
+      if (_isCurrent(generation, uuid)) setState(() => _paging = false);
     }
   }
 
   Future<void> _queue({ImageSource? image}) async {
-    if (_queuing || _sending) return;
+    final generation = _generation, uuid = _authUuid;
+    if (!_ready || !_isCurrent(generation, uuid) || _queuing || _sending) {
+      return;
+    }
     setState(() => _queuing = true);
     try {
       if (image != null) {
@@ -220,8 +341,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           maxWidth: 1800,
           imageQuality: 85,
         );
-        if (file == null) return;
+        if (!_isCurrent(generation, uuid) || file == null) return;
         final bytes = await file.readAsBytes();
+        if (!_isCurrent(generation, uuid)) return;
         final ext = file.name.split('.').last.toLowerCase();
         if (bytes.length > 8 * 1024 * 1024 ||
             !['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
@@ -238,46 +360,70 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (body.isEmpty) return;
         if (body.length > 8000) throw const CloudFailure('每条消息最多 8000 字');
         await _outbox.enqueue(widget.conversationId, body);
+        if (!_isCurrent(generation, uuid)) return;
         _text.clear();
       }
+      if (!_isCurrent(generation, uuid)) return;
       final pending = await _outbox.pending(widget.conversationId);
-      if (mounted) setState(() => _pending = pending);
+      if (!_isCurrent(generation, uuid)) return;
+      setState(() => _pending = pending);
       await _deliver();
     } catch (e) {
-      if (mounted) communityMessage(context, cloudError(e));
+      if (_isCurrent(generation, uuid)) {
+        if (_accessError(e)) {
+          _loseAccess(cloudError(e));
+        } else if (mounted) {
+          communityMessage(context, cloudError(e));
+        }
+      }
     } finally {
-      if (mounted) setState(() => _queuing = false);
+      if (_isCurrent(generation, uuid)) setState(() => _queuing = false);
     }
   }
 
   Future<void> _deliver() async {
-    if (_sending || !mounted) return;
+    final generation = _generation, uuid = _authUuid;
+    if (!_ready || _sending || !_isCurrent(generation, uuid)) return;
     setState(() => _sending = true);
     try {
       final pending = await _outbox.pending(widget.conversationId);
-      if (mounted) setState(() => _pending = pending);
+      if (!_isCurrent(generation, uuid)) return;
+      setState(() => _pending = pending);
       for (final item in pending) {
-        if (!mounted) return;
+        if (!_isCurrent(generation, uuid)) return;
+        final token = item['token'] as String;
         try {
           await _outbox.deliver(item);
-          _failed.remove(item['token']);
+          if (!_isCurrent(generation, uuid)) return;
+          setState(() => _sendErrors.remove(token));
         } catch (e) {
-          _failed.add(item['token'] as String);
-          if (mounted) setState(() => _syncError = cloudError(e));
+          if (!_isCurrent(generation, uuid)) return;
+          if (_accessError(e)) {
+            _loseAccess(cloudError(e));
+            return;
+          }
+          setState(() => _sendErrors[token] = cloudError(e));
         }
       }
       final remaining = await _outbox.pending(widget.conversationId);
-      if (mounted) setState(() => _pending = remaining);
+      if (!_isCurrent(generation, uuid)) return;
+      setState(() => _pending = remaining);
       await _sync();
     } catch (e) {
-      if (mounted) setState(() => _syncError = cloudError(e));
+      if (_isCurrent(generation, uuid)) {
+        if (_accessError(e)) {
+          _loseAccess(cloudError(e));
+        } else {
+          setState(() => _syncError = cloudError(e));
+        }
+      }
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (_isCurrent(generation, uuid)) setState(() => _sending = false);
     }
   }
 
   Widget _bubble(Json item, {bool pending = false}) {
-    final mine = pending || item['sender_id'] == _repo.uid;
+    final mine = pending || item['sender_id'] == _authUuid;
     final token = item['token'] as String?;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -324,11 +470,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 child: Text(
                   _sending
                       ? '发送中…'
-                      : _failed.contains(token)
+                      : _sendErrors.containsKey(token)
                       ? '发送失败，点击重试'
                       : '等待发送，点击重试',
                   style: const TextStyle(fontSize: 11),
                 ),
+              ),
+            if (pending && _sendErrors.containsKey(token))
+              Text(
+                _sendErrors[token]!,
+                style: const TextStyle(fontSize: 11, color: Colors.red),
               ),
             if (!pending && mine)
               const Text(
@@ -339,6 +490,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  void _retry() {
+    if (!_ready) {
+      setState(() {
+        _future = _start()..ignore();
+      });
+      return;
+    }
+    _sync();
+    _deliver();
   }
 
   @override
@@ -358,31 +520,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       actions: [
         IconButton(
           tooltip: '重新同步',
-          onPressed: () {
-            _sync();
-            _deliver();
-          },
+          onPressed: _retry,
           icon: const Icon(Icons.sync),
         ),
       ],
     ),
     body: CloudFutureView<bool>(
       future: _future,
-      onRetry: () => setState(() => _future = _start()),
+      onRetry: () => setState(() {
+        _future = _start()..ignore();
+      }),
       builder: (_) => Column(
         children: [
           if (_syncError != null)
             MaterialBanner(
               content: Text(_syncError!),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    _sync();
-                    _deliver();
-                  },
-                  child: const Text('重试'),
-                ),
-              ],
+              actions: [TextButton(onPressed: _retry, child: const Text('重试'))],
             ),
           Expanded(
             child: ListView(

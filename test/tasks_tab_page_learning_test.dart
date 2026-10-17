@@ -2,9 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/app_database.dart';
 import 'package:pxt1/database/auth_repository.dart';
+import 'package:pxt1/database/models/ai_result_records.dart';
+import 'package:pxt1/database/models/source_document_record.dart';
 import 'package:pxt1/database/models/user_profile.dart';
+import 'package:pxt1/database/source_document_repository.dart';
 import 'package:pxt1/learning/learning_events.dart';
 import 'package:pxt1/learning/learning_task_repository.dart';
 import 'package:pxt1/ui/pages/library_practice_page.dart';
@@ -28,6 +32,40 @@ class _Auth extends AuthRepository {
   Future<UserProfile?> getCurrentUserProfile() async => _profile;
 }
 
+class _Documents extends SourceDocumentRepository {
+  @override
+  Future<List<SourceDocumentRecord>> fetchAllSourceDocuments({
+    required int userId,
+    int? libraryId,
+    int limit = 100,
+  }) async => [];
+}
+
+class _AiTasks extends AiGenerationRepository {
+  int? requestedUserId;
+
+  @override
+  Future<List<AiTaskWithDocument>> fetchAiTasksByUser({
+    required int userId,
+    int? libraryId,
+    int limit = 40,
+  }) async {
+    requestedUserId = userId;
+    return [
+      AiTaskWithDocument(
+        id: 7,
+        documentId: 12,
+        documentTitle: '线性代数资料',
+        taskType: 'knowledge_cards',
+        taskLabel: '知识卡片',
+        status: 'failed',
+        errorMessage: '生成失败，请重试',
+        updatedAt: DateTime(2026, 10, 15),
+      ),
+    ];
+  }
+}
+
 class _Tasks extends LearningTaskRepository {
   _Tasks({this.items = const [], this.recommendationsList = const []});
   List<LearningTask> items;
@@ -36,6 +74,7 @@ class _Tasks extends LearningTaskRepository {
   bool fail = false;
   int loads = 0;
   int? reviewedConcept;
+  bool? requestedIncludeFinished;
   final statuses = <String>[];
 
   @override
@@ -57,7 +96,10 @@ class _Tasks extends LearningTaskRepository {
   Future<List<LearningTask>> tasks(
     int userId, {
     bool includeFinished = false,
-  }) async => items;
+  }) async {
+    requestedIncludeFinished = includeFinished;
+    return items;
+  }
 
   @override
   Future<void> setStatus(
@@ -118,6 +160,7 @@ Future<void> _pump(
   ValueChanged<int>? onStartFocus,
   ValueNotifier<int>? refresh,
   ValueNotifier<int>? active,
+  AiGenerationRepository? aiGenerationRepository,
   double scale = 1,
 }) async {
   await tester.binding.setSurfaceSize(const Size(320, 850));
@@ -133,6 +176,8 @@ Future<void> _pump(
       home: Scaffold(
         body: TasksTabPage(
           authRepository: _Auth(),
+          sourceDocumentRepository: _Documents(),
+          aiGenerationRepository: aiGenerationRepository ?? _AiTasks(),
           learningTaskRepository: repository,
           onStartFocus: onStartFocus,
           refreshListenable: refresh,
@@ -274,6 +319,7 @@ void main() {
   testWidgets(
     'all tasks includes finished and future tasks; AI header retains legacy list',
     (tester) async {
+      final aiTasks = _AiTasks();
       final repo = _Tasks(
         items: [
           _personal,
@@ -294,26 +340,33 @@ void main() {
           ),
         ],
       );
-      await _pump(tester, repo);
+      await _pump(tester, repo, aiGenerationRepository: aiTasks);
       await tester.pumpAndSettle();
       expect(find.text('已完成的阅读'), findsNothing);
       expect(find.text('下周预习'), findsNothing);
       await _tap(tester, '全部任务');
+      expect(repo.requestedIncludeFinished, isTrue);
       expect(find.text('已完成的阅读'), findsOneWidget);
       expect(find.text('下周预习'), findsOneWidget);
       await tester.tap(find.byTooltip('关闭'));
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.byTooltip('AI 处理列表'),
-        -200,
-        scrollable: find.byType(Scrollable).first,
+      final aiEntry = find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == 'AI 处理列表',
       );
-      await tester.tap(find.byTooltip('AI 处理列表'));
+      await tester.ensureVisible(aiEntry);
       await tester.pumpAndSettle();
+      expect(aiEntry.hitTestable(), findsOneWidget);
+      await tester.tap(aiEntry.hitTestable());
+      await tester.pumpAndSettle();
+      expect(find.byType(TaskListPage), findsOneWidget);
       expect(
         tester.widget<TaskListPage>(find.byType(TaskListPage)).kind,
         TaskListKind.activeFlow,
       );
+      expect(aiTasks.requestedUserId, _profile.id);
+      await _tap(tester, '线性代数资料');
+      expect(find.text('线性代数资料 -> 知识卡片'), findsOneWidget);
+      expect(find.text('生成失败，请重试'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -321,24 +374,40 @@ void main() {
   testWidgets('loading, failure with retry, empty states and learning events', (
     tester,
   ) async {
-    final repo = _Tasks()..pending = Completer<LearningDashboard>();
-    await _pump(tester, repo);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    repo.pending!.completeError(StateError('offline'));
-    await tester.pumpAndSettle();
-    expect(find.text('任务中心加载失败'), findsOneWidget);
-    repo.pending = null;
-    await _tap(tester, '重试');
-    expect(find.textContaining('今天暂无待办任务'), findsOneWidget);
-    expect(find.textContaining('暂无推荐复习'), findsOneWidget);
-    final loads = repo.loads;
-    LearningEvents.notify();
-    await tester.pumpAndSettle();
-    expect(repo.loads, loads + 1);
-    await tester.pumpWidget(const SizedBox());
-    LearningEvents.notify();
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+    final semantics = tester.ensureSemantics();
+    try {
+      final repo = _Tasks()..pending = Completer<LearningDashboard>();
+      await _pump(tester, repo);
+      final loading = find.bySemanticsLabel('正在加载任务');
+      expect(repo.loads, 1);
+      expect(loading, findsOneWidget);
+      expect(find.text('今天暂无待办任务'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(loading, findsOneWidget);
+      repo.pending!.completeError(StateError('offline'));
+      await tester.pumpAndSettle();
+      expect(loading, findsNothing);
+      expect(find.text('任务中心加载失败'), findsOneWidget);
+      repo.pending = null;
+      await _tap(tester, '重试');
+      expect(repo.loads, 2);
+      expect(find.text('任务中心加载失败'), findsNothing);
+      expect(find.textContaining('今天暂无待办任务'), findsOneWidget);
+      expect(find.textContaining('暂无推荐复习'), findsOneWidget);
+      final loads = repo.loads;
+      repo.items = [_personal];
+      LearningEvents.notify();
+      await tester.pumpAndSettle();
+      expect(repo.loads, loads + 1);
+      expect(find.text(_personal.title), findsOneWidget);
+      expect(find.textContaining('今天暂无待办任务'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      LearningEvents.notify();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets(

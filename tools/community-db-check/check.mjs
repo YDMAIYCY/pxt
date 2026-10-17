@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
 // Executes actual PostgreSQL SQL and RLS in PGlite; Supabase Auth/Storage
@@ -9,7 +9,7 @@ const db = new PGlite();
 await db.exec(`
   create role anon; create role authenticated;
   create schema auth; create schema storage;
-  create table auth.users(id uuid primary key);
+  create table auth.users(id uuid primary key,raw_user_meta_data jsonb);
   create function auth.uid() returns uuid language sql stable as
     $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
   grant usage on schema auth,storage to authenticated;
@@ -22,7 +22,17 @@ await db.exec(`
     $$ select string_to_array(regexp_replace($1,'/[^/]+$',''),'/') $$;
   grant execute on function storage.foldername(text) to authenticated;
 `);
-await db.exec(readFileSync(new URL('../../supabase/migrations/202610160001_learning_community.sql', import.meta.url), 'utf8'));
+const migrations = new URL('../../supabase/migrations/', import.meta.url);
+const repaired='40000000-0000-4000-8000-000000000004';
+const customized='50000000-0000-4000-8000-000000000005';
+for (const name of readdirSync(migrations).filter(name => name.endsWith('.sql')).sort()) {
+  if (name === '202610170001_registration_nickname.sql') {
+    await db.query("insert into auth.users(id,raw_user_meta_data) values($1,$3),($2,$3)",
+      [repaired,customized,JSON.stringify({nickname:'yk'})]);
+    await db.query("update public.profiles set nickname='已修改昵称' where id=$1",[customized]);
+  }
+  await db.exec(readFileSync(new URL(name, migrations), 'utf8'));
+}
 const A='10000000-0000-4000-8000-000000000001', B='20000000-0000-4000-8000-000000000002', C='30000000-0000-4000-8000-000000000003';
 for (const id of [A,B,C]) await db.query('insert into auth.users(id) values($1)',[id]);
 let checks=0;
@@ -33,6 +43,12 @@ async function user(id,sql,args=[]){
   return db.query(sql,args);
 }
 function ok(condition,label){assert.ok(condition,label);checks++;console.log(`PASS ${label}`);}
+ok((await user(A,'select nickname from public.profiles where id=$1',[repaired])).rows[0].nickname==='yk','migration repairs untouched default nickname from registration metadata');
+ok((await user(A,'select nickname from public.profiles where id=$1',[customized])).rows[0].nickname==='已修改昵称','nickname repair preserves customized profiles');
+await db.exec('reset role');
+const registered='60000000-0000-4000-8000-000000000006';
+await db.query('insert into auth.users(id,raw_user_meta_data) values($1,$2)',[registered,JSON.stringify({nickname:'yk'})]);
+ok((await user(A,"select id from public.profiles where nickname ilike '%YK%'")).rows.some(row=>row.id===registered),'registered nickname is searchable before first login, case insensitive');
 async function denied(id,sql,args,label){
   let rejected=false;
   try{const res=await user(id,sql,args);rejected=res.affectedRows===0||res.rows.length===0;}
@@ -70,7 +86,11 @@ ok((await user(B,'select public.open_direct_conversation($1) id',[A])).rows[0].i
 await denied(C,'select * from public.conversations where id=$1',[cid],'third user cannot see conversation');
 await denied(C,'insert into public.conversation_members(conversation_id,user_id) values($1,$2) returning user_id',[cid,C],'third user cannot add self to conversation');
 const token='99999999-0000-4000-8000-000000000001';
-const msg=(await user(A,"insert into public.chat_messages(conversation_id,client_token,body) values($1,$2,'你好') returning id",[cid,token])).rows[0].id;
+const msg=(await user(A,"select public.send_chat_message($1,$2,'你好',null,$3) id",[cid,token,A])).rows[0].id;
+ok((await user(A,"select public.send_chat_message($1,$2,'你好',null,$3) id",[cid,token,A])).rows[0].id===msg,'RPC retry returns the same message');
+await denied(A,"select public.send_chat_message($1,$2,'changed',null,$3)",[cid,token,A],'same message token cannot silently replace its body');
+await denied(B,"select public.send_chat_message($1,gen_random_uuid(),'old outbox',null,$2)",[cid,A],'account switch cannot send original owner outbox');
+await denied(C,"select public.send_chat_message($1,gen_random_uuid(),'intrusion',null,$2)",[cid,C],'third user cannot send through message RPC');
 ok((await user(B,'select * from public.chat_messages where conversation_id=$1',[cid])).rows.length===1,'recipient reads persisted message');
 await denied(C,'select * from public.chat_messages where conversation_id=$1',[cid],'third user cannot read messages');
 await denied(C,"insert into public.chat_messages(conversation_id,client_token,body) values($1,gen_random_uuid(),'入侵') returning id",[cid],'third user cannot send messages');
@@ -91,6 +111,8 @@ await denied(A,'insert into public.saved_community_knowledge(question_id,answer_
 await user(A,'insert into public.saved_community_knowledge(question_id,answer_id) values($1,$2)',[q,answer]);
 await denied(B,'select * from public.saved_community_knowledge',[],'personal saved references remain private');
 const comment=(await user(A,"insert into public.community_comments(answer_id,body,client_token) values($1,'谢谢',gen_random_uuid()) returning id",[answer])).rows[0].id;
+const reply=(await user(B,"insert into public.community_comments(answer_id,parent_id,body,client_token) values($1,$2,'不客气',gen_random_uuid()) returning id",[answer,comment])).rows[0].id;
+ok((await user(A,'select parent_id from public.community_comments where id=$1',[reply])).rows[0].parent_id===comment,'another user can reply to a visible comment');
 await denied(B,"insert into public.community_comments(answer_id,parent_id,body,client_token) values($1,$2,'wrong parent',gen_random_uuid()) returning id",[otherAnswer,comment],'comment parent must belong to same answer');
 await user(A,"update public.profiles set nickname='甲同学' where id=$1",[A]);
 await user(B,'select public.block_user($1)',[A]);
@@ -103,6 +125,11 @@ await denied(A,'select * from storage.objects where name=$1',[image],'blocking r
 ok((await user(B,'select * from public.friendships')).rows.length===0,'blocking removes friendship atomically');
 await denied(A,'select public.send_friend_request($1)',[B],'blocked pair cannot reapply');
 await denied(A,'select * from public.user_blocks',[],'other users cannot read block identities');
+await denied(A,"select public.send_chat_message($1,gen_random_uuid(),'blocked',null,$2)",[cid,A],'blocking also revokes transaction message sends');
+ok((await user(A,"select public.delete_own_community_content('community_answers',$1) removed",[answer])).rows[0].removed===false,'delete RPC cannot remove another author content');
+ok((await user(B,"select public.delete_own_community_content('community_comments',$1) removed",[reply])).rows[0].removed===true,'blocked author can withdraw own hidden comment');
+ok((await user(B,"select public.delete_own_community_content('community_answers',$1) removed",[answer])).rows[0].removed===true,'blocked author can withdraw own hidden answer');
+await denied(null,"select public.delete_own_community_content('community_questions',$1)",[q],'anonymous cannot invoke content deletion');
 await user(B,'delete from public.user_blocks where blocked_id=$1',[A]);
 await denied(A,'select public.open_direct_conversation($1)',[B],'unblocking does not silently recreate friendship');
 await db.exec('reset role');

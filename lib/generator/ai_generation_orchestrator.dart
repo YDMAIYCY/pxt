@@ -43,7 +43,8 @@ class AiGenerationOrchestrator {
            knowledgeGraphRepository ?? KnowledgeGraphRepository(),
        _knowledgeGraphExtractionService =
            knowledgeGraphExtractionService ?? KnowledgeGraphExtractionService(),
-       _knowledgeGraphBuilder = knowledgeGraphBuilder ?? KnowledgeGraphBuilder();
+       _knowledgeGraphBuilder =
+           knowledgeGraphBuilder ?? KnowledgeGraphBuilder();
 
   final MiniMaxClient _miniMaxClient;
   final AiGenerationRepository _aiGenerationRepository;
@@ -418,22 +419,36 @@ class AiGenerationOrchestrator {
       'items',
     ]);
     if (rootTopic.isNotEmpty && branches is List && branches.isNotEmpty) {
-      final branchLines = branches
-          .map((item) {
-            if (item is Map) {
-              return _pickFirstString(item.cast<String, Object?>(), const [
-                'topic',
-                'title',
-                'name',
-                'text',
-                'content',
-              ]);
-            }
-            return item.toString().trim();
-          })
-          .where((item) => item.isNotEmpty)
-          .map((item) => '- $item')
-          .join('\n');
+      final lines = <String>[];
+      void addBranches(List items, int depth) {
+        for (final item in items) {
+          final map = item is Map ? item.cast<String, Object?>() : null;
+          final title = map == null
+              ? item.toString().trim()
+              : _pickFirstString(map, const [
+                  'topic',
+                  'title',
+                  'name',
+                  'text',
+                  'content',
+                ]);
+          if (title.isEmpty) continue;
+          lines.add(
+            '${'  ' * depth}- ${title.replaceAll(RegExp(r'\s+'), ' ')}',
+          );
+          if (map != null) {
+            final children = _pickFirstList(map, const [
+              'children',
+              'branches',
+              'items',
+            ]);
+            if (children is List) addBranches(children, depth + 1);
+          }
+        }
+      }
+
+      addBranches(branches, 0);
+      final branchLines = lines.join('\n');
 
       if (branchLines.isNotEmpty) {
         return '$rootTopic\n$branchLines';
@@ -577,6 +592,16 @@ class AiGenerationOrchestrator {
     String? feedback,
   }) {
     final taskSchema = _schemaOf(taskType);
+    final mindmapInstructions = taskType == AiTaskType.mindmapText
+        ? '''
+思维导图结构要求：
+- 首行只写一个中心主题；围绕中心主题组织并列的一级分支，资料充足时建议 3 至 8 个，不要把所有知识点串在单一分支下。
+- 每个一级分支按内容分成 2 至 5 个二级要点，必要时增加第三级，通常保持 2 至 4 层。资料较少时按实际内容组织，不凑数量、不编造知识。
+- 每个节点用简洁关键词或短句，通常 4 至 18 个字；概念、公式、例子、易错点分成独立子节点，不把整段说明塞进一个节点，但不要遗漏关键条件和公式。
+- mindmap_text 使用缩进列表：中心主题不加符号，一级分支以“- ”开头，二级分支以“  - ”开头，每深入一级增加两个空格。一行一个节点，同级分支保持相同缩进。
+- 不要输出 Mermaid、坐标、颜色代码或 Markdown 代码围栏。界面会按一级分支向左右展开，并为不同分支使用不同颜色。
+'''
+        : '';
     final refinementBlock = _buildRefinementBlock(
       currentResultText: currentResultText,
       feedback: feedback,
@@ -590,6 +615,7 @@ class AiGenerationOrchestrator {
 2. JSON 必须严格符合下面 schema。
 3. 内容使用中文，准确、清晰、便于学习复习。
 4. 如果 question_kind 是 multiple_choice，必须提供 4 个 options，且每个选项必须带 A./B./C./D. 前缀，answer_text 必须能对应其中一个选项。
+$mindmapInstructions
 
 Schema:
 $taskSchema
@@ -630,7 +656,7 @@ $userFeedback
       case AiTaskType.reviewOutline:
         return '{"title":"提纲标题","outline_text":"- 要点1\\n- 要点2"}';
       case AiTaskType.mindmapText:
-        return '{"mindmap_text":"中心主题\\n- 分支1\\n- 分支2"}';
+        return '{"mindmap_text":"中心主题\\n- 核心概念\\n  - 定义与条件\\n  - 关键公式\\n- 方法与步骤\\n  - 适用情形\\n  - 操作步骤\\n- 例子与易错点\\n  - 典型例子\\n  - 常见误区"}';
       case AiTaskType.practiceQuestions:
         return '{"questions":[{"question_text":"题目","answer_text":"参考答案","analysis_text":"解析","difficulty":"easy|medium|hard"}]}';
       default:

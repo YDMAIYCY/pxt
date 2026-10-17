@@ -105,6 +105,13 @@ class AppAccountRepository {
     await _supabase.auth.resetPasswordForEmail(email.trim());
   }
 
+  Future<void> resendConfirmation(String email) async {
+    if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.trim())) {
+      throw const CloudFailure('请输入有效邮箱地址');
+    }
+    await _supabase.auth.resend(type: OtpType.signup, email: email.trim());
+  }
+
   Future<UserProfile?> register({
     required String email,
     required String password,

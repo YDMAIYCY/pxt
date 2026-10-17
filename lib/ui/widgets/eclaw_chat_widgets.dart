@@ -4,8 +4,14 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import '../../agent/eclaw_task.dart';
 import '../../database/models/ai_chat_records.dart';
 import '../../database/models/knowledge_context_source.dart';
+import '../theme/app_theme.dart';
 
 const eclawBlue = Color(0xFF2870F5);
+
+// EClaw keeps its own navy ink so the assistant reads as its own surface, while
+// every container below still comes from the shared radius/spacing tokens.
+const _eclawInk = Color(0xFF132D53);
+const _eclawMuted = Color(0xFF69809D);
 
 class EClawAvatar extends StatelessWidget {
   const EClawAvatar({this.size = 34, super.key});
@@ -27,65 +33,165 @@ class EClawAvatar extends StatelessWidget {
 class EClawWelcome extends StatelessWidget {
   const EClawWelcome({required this.onPrompt, super.key});
   final ValueChanged<String> onPrompt;
+
+  /// name / one-line payoff / icon / accent / the prompt actually sent.
+  static const _capabilities = <(String, String, IconData, Color, String)>[
+    ('整理资料', '把 PDF 归档到知识库', Icons.folder_copy_outlined, AppColors.accentSky,
+     '帮我整理关于【主题】的 PDF 到【名称】知识库'),
+    ('生成练习', '按知识库出题', Icons.edit_note_rounded, AppColors.accentMint,
+     '帮我根据当前知识库生成 10 道练习题'),
+    ('分析错题', '看掌握与薄弱点', Icons.bar_chart_rounded, AppColors.accentFlame,
+     '帮我分析当前范围的错题和知识掌握情况'),
+    ('学习规划', '安排一段复习', Icons.calendar_month_outlined, AppColors.accentViolet,
+     '帮我根据当前知识库安排一小时复习'),
+  ];
+
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-      children: [
-        const SizedBox(height: 16),
-        const Center(child: EClawAvatar(size: 130)),
-        const SizedBox(height: 24),
-        const Text(
-          '有什么可以帮你？',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF132D53),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          '可以问我知识问题，也可以让我帮你整理资料、创建练习或安排学习。',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, height: 1.7, color: Color(0xFF69809D)),
-        ),
-        const SizedBox(height: 28),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            for (final item in [
-              ('整理资料', Icons.folder_copy_outlined, '帮我整理关于【主题】的 PDF 到【名称】知识库'),
-              ('生成练习', Icons.edit_note_rounded, '帮我根据当前知识库生成 10 道练习题'),
-              ('分析错题', Icons.bar_chart_rounded, '帮我分析当前范围的错题和知识掌握情况'),
-              ('学习规划', Icons.calendar_month_outlined, '帮我根据当前知识库安排一小时复习'),
-            ])
-              SizedBox(
-                width: (constraints.maxWidth - 58) / 2,
-                child: OutlinedButton.icon(
-                  onPressed: () => onPrompt(item.$3),
-                  icon: Icon(item.$2, size: 20),
-                  label: Text(item.$1),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: eclawBlue,
-                    backgroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 15,
-                      horizontal: 8,
-                    ),
-                    side: const BorderSide(color: Color(0xFFDDE9FC)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const horizontal = 20.0;
+        const gap = 12.0;
+        final cardWidth =
+            (constraints.maxWidth - horizontal * 2 - gap) / 2;
+        // Centre the block when there is room, still scroll on short screens.
+        final minHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight - 56
+            : 0.0;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(horizontal, 28, horizontal, 28),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: minHeight),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(child: _badge()),
+                const SizedBox(height: 24),
+                Text(
+                  '有什么可以帮你？',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.h1(context).copyWith(color: _eclawInk),
                 ),
-              ),
-          ],
+                const SizedBox(height: 10),
+                Text(
+                  '可以直接提问，也可以选一件事让我开始。',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodySmall(
+                    context,
+                  ).copyWith(color: _eclawMuted, height: 1.6),
+                ),
+                const SizedBox(height: 26),
+                Wrap(
+                  spacing: gap,
+                  runSpacing: gap,
+                  children: [
+                    for (final item in _capabilities)
+                      SizedBox(
+                        width: cardWidth,
+                        child: _CapabilityCard(
+                          title: item.$1,
+                          hint: item.$2,
+                          icon: item.$3,
+                          accent: item.$4,
+                          onTap: () => onPrompt(item.$5),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// The brand anchor for an otherwise empty chat: the mascot sitting in a soft
+  /// blue halo, which gives the page a focal point instead of a bare image.
+  Widget _badge() => Container(
+    width: 132,
+    height: 132,
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          eclawBlue.withValues(alpha: 0.18),
+          AppColors.accentViolet.withValues(alpha: 0.10),
+          Colors.white.withValues(alpha: 0.6),
+        ],
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: eclawBlue.withValues(alpha: 0.16),
+          blurRadius: 30,
+          offset: const Offset(0, 12),
         ),
       ],
     ),
+    child: const EClawAvatar(size: 88),
   );
+}
+
+class _CapabilityCard extends StatelessWidget {
+  const _CapabilityCard({
+    required this.title,
+    required this.hint,
+    required this.icon,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String title;
+  final String hint;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.tile),
+        side: const BorderSide(color: AppColors.borderLight),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.tintOf(accent, 0.14),
+                  borderRadius: BorderRadius.circular(AppRadii.iconBox),
+                ),
+                child: Icon(icon, size: 19, color: accent),
+              ),
+              const SizedBox(height: 10),
+              Text(title, style: AppTextStyles.title(context)),
+              const SizedBox(height: 2),
+              Text(
+                hint,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption(context),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class EClawRichText extends StatelessWidget {
