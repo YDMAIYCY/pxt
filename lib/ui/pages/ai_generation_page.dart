@@ -322,7 +322,7 @@ class _AiGenerationPageState extends State<AiGenerationPage> {
           minLines: 3,
           maxLines: 6,
           decoration: const InputDecoration(
-            hintText: '新版本会追加保存。请输入修改要求，例如补充易错点',
+            hintText: '说明要调整的地方，例如补充易错点',
           ),
         ),
         actions: [

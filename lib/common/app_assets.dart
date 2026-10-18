@@ -5,7 +5,7 @@ class AppAssets {
 
   static const String guideImage = 'assets/images/1.png';
   static const String homeBackdropImage = 'assets/images/2.png';
-  static const String logoIcon = 'assets/icons/icon_20260629213007(1).png';
+  static const String logoIcon = 'assets/icons/zhixuebang_app_icon.png';
   static const String knowledgeHeaderIllustration =
       'assets/images/knowledge_header_illustration.png';
   static const String tasksHeaderIllustration =

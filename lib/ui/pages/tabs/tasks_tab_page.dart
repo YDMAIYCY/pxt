@@ -522,7 +522,6 @@ class _TasksTabPageState extends State<TasksTabPage> {
               children: [
                 AppPageHeader(
                   title: '任务中心',
-                  subtitle: '把每一次学习，变成看得见的进步',
                   trailing: IconButton(
                     tooltip: 'AI 处理列表',
                     onPressed: () => _openTaskList(TaskListKind.activeFlow),

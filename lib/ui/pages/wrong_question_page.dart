@@ -274,7 +274,6 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
                   children: [
                     const AppSectionHeader(
                       title: '作答对照',
-                      subtitle: '先看清错在哪一步，再做相似题',
                       accent: AppColors.accentRose,
                     ),
                     const SizedBox(height: 12),
@@ -423,7 +422,6 @@ class _TrainingCard extends StatelessWidget {
           children: [
             const AppSectionHeader(
               title: '强化训练',
-              subtitle: '用 AI 找出错因，再生成同类题',
               accent: AppColors.accentViolet,
             ),
             const SizedBox(height: 12),
@@ -446,7 +444,7 @@ class _TrainingCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    '还没有错因标签和相似题。生成后会给出错因分析，并出几道同类型的题让你确认是否真的掌握。',
+                    '生成后会给出错因分析，并补充几道同类型题。',
                     style: AppTextStyles.bodySmall(context),
                   ),
                 ),

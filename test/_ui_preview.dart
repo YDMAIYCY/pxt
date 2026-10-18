@@ -21,6 +21,7 @@ import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/document_batch_repository.dart';
 import 'package:pxt1/database/favorite_repository.dart';
+import 'package:pxt1/database/practice_session_repository.dart';
 import 'package:pxt1/database/import_record_repository.dart';
 import 'package:pxt1/database/knowledge_graph_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
@@ -38,6 +39,7 @@ import 'package:pxt1/feishu/feishu_controller.dart';
 import 'package:pxt1/learning/learning_task_repository.dart';
 import 'package:pxt1/ui/pages/book_library_page.dart';
 import 'package:pxt1/ui/pages/community/account_security_page.dart';
+import 'package:pxt1/ui/pages/community/community_widgets.dart';
 import 'package:pxt1/ui/pages/community/chat_page.dart';
 import 'package:pxt1/ui/pages/community/community_page.dart';
 import 'package:pxt1/ui/pages/community/publish_question_page.dart';
@@ -1168,6 +1170,58 @@ void main() {
       'favorites',
       FavoritesPage(userId: 1, favoriteRepository: FavoriteRepository(database: app)),
     );
+  });
+
+  testWidgets('favorites-populated', (tester) async {
+    final repo = FavoriteRepository(database: app);
+    await tester.runAsync(() async {
+      await repo.toggleFavorite(userId: 1, targetType: FavoriteTargetType.knowledgeCard, targetId: 91);
+      await repo.toggleFavorite(userId: 1, targetType: FavoriteTargetType.practiceQuestion, targetId: 900);
+    });
+    await shootDevice(tester, 'favorites-populated', FavoritesPage(userId: 1, favoriteRepository: repo));
+  });
+
+  testWidgets('favorites-category', (tester) async {
+    final repo = FavoriteRepository(database: app);
+    final category = (await tester.runAsync(() async {
+      await repo.toggleFavorite(userId: 1, targetType: FavoriteTargetType.knowledgeCard, targetId: 91);
+      return (await repo.fetchCategorySummaries(1)).first;
+    }))!;
+    await shootDevice(tester, 'favorites-category', FavoriteCategoryPage(userId: 1, category: category, favoriteRepository: repo));
+  });
+
+  testWidgets('scoped-practice-selected', (tester) async {
+    final question = (await tester.runAsync(() async {
+      await db.update('practice_questions', {'question_kind': 'multiple_choice', 'options_json': '["面向接口编程","依赖具体实现"]', 'answer_text': 'A'}, where: 'id=900');
+      return AiGenerationRepository(database: app).fetchPracticeQuestionByUserAndId(userId: 1, questionId: 900);
+    }))!;
+    await shootDevice(tester, 'scoped-practice-selected', ScopedPracticeRunner(
+      scope: const PracticeScope(userId: 1, libraryId: 1), questions: [question], database: app,
+    ), interact: (tester) async {
+      await tester.tap(find.text('面向接口编程'));
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'A');
+    });
+  });
+
+  testWidgets('friends-profile-navigation', (tester) async {
+    final repo = _PreviewCommunity();
+    await shootDevice(tester, 'friends-profile-navigation', FriendsChatPage(repository: repo), interact: (tester) async {
+      await tester.tap(find.byType(CommunityAvatar).first);
+      await flush(tester);
+      expect(find.byType(CommunityUserPage), findsOneWidget);
+    });
+  });
+
+  testWidgets('publish-question-keyboard', (tester) async {
+    await shootDevice(tester, 'publish-question-keyboard', PublishQuestionPage(repository: _PreviewCommunity()), interact: (tester) async {
+      tester.view.viewInsets = FakeViewPadding(bottom: 280 * tester.view.devicePixelRatio);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.showKeyboard(find.byType(TextField).at(1));
+      await tester.pump();
+      expect(find.widgetWithText(FilledButton, '发布问题'), findsOneWidget);
+      expect(tester.getRect(find.widgetWithText(FilledButton, '发布问题')).bottom, lessThanOrEqualTo(_deviceHeight - 280));
+    });
   });
 
   // Icon sheet for the bottom dock: five tabs must read as one family.

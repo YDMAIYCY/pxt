@@ -229,6 +229,21 @@ class _PublishQuestionPageState extends State<PublishQuestionPage> {
     }
   }
 
+  /// Hide the character counter until it is actually useful; a permanent
+  /// "0/160" under the title is noise on an empty form.
+  Widget? _counterWhenNearLimit(
+    BuildContext context, {
+    required int currentLength,
+    required bool isFocused,
+    required int? maxLength,
+  }) {
+    if (maxLength == null || currentLength < maxLength * 0.8) return null;
+    return Text(
+      '$currentLength / $maxLength',
+      style: AppTextStyles.caption(context),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: communityBackground,
@@ -270,80 +285,78 @@ class _PublishQuestionPageState extends State<PublishQuestionPage> {
         ),
       ],
     ),
+    bottomNavigationBar: Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          child: FilledButton(
+            onPressed: _busy ? null : _submit,
+            style: FilledButton.styleFrom(
+              backgroundColor: communityBlue,
+              minimumSize: const Size.fromHeight(52),
+            ),
+            child: Text(
+              _busy
+                  ? '正在上传并发布…'
+                  : _pending != null
+                  ? '重试确认'
+                  : '发布问题',
+            ),
+          ),
+        ),
+      ),
+    ),
     body: ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
       children: [
-        // A blank composer is intimidating; three concrete prompts are enough
-        // to lift the quality of what gets posted.
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          decoration: BoxDecoration(
-            color: AppColors.tintOf(AppColors.primary, 0.06),
-            borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-            border: Border.all(color: AppColors.tintOf(AppColors.primary, 0.14)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(
-                Icons.lightbulb_outline_rounded,
-                size: 18,
-                color: AppColors.primary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '一个好问题通常说清三件事：你现在的理解、具体卡在哪一步、已经试过什么。',
-                  style: AppTextStyles.caption(
-                    context,
-                  ).copyWith(color: AppColors.slate, height: 1.5),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-
         // ---- 问题内容 ----
+        // One editor surface: the two fields are separated by a hairline, not
+        // by two different containers, so the draft reads as a single document.
         AppCard.plain(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const AppSectionHeader(
-                title: '问题内容',
-                subtitle: '标题一句话说清问题，描述补充前因后果',
-                accent: AppColors.primary,
-              ),
-              const SizedBox(height: 14),
               TextField(
                 controller: _title,
+                minLines: 1,
+                maxLines: 3,
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
                 maxLength: 160,
+                buildCounter: _counterWhenNearLimit,
                 decoration: const InputDecoration(
                   labelText: '问题标题',
-                  hintText: '写清楚你想解决的问题',
+                  hintText: '一句话说清问题',
+                  filled: false,
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
                 ),
                 enabled: !_locked,
               ),
-              const SizedBox(height: 8),
+              const Divider(height: 1, color: AppColors.borderLight),
               TextField(
                 controller: _body,
-                minLines: 7,
+                minLines: 5,
                 maxLines: 18,
                 maxLength: 20000,
+                buildCounter: _counterWhenNearLimit,
                 enabled: !_locked,
                 decoration: const InputDecoration(
                   labelText: '问题描述',
-                  hintText: '描述思路与困惑，可使用 Markdown、代码块和数学公式',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _tags,
-                enabled: !_locked,
-                decoration: const InputDecoration(
-                  labelText: '知识标签',
-                  hintText: '例如：高等数学，极限（最多 8 个）',
+                  hintText: '具体卡在哪一步？已经试过什么？',
+                  filled: false,
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
                 ),
               ),
             ],
@@ -351,15 +364,33 @@ class _PublishQuestionPageState extends State<PublishQuestionPage> {
         ),
         const SizedBox(height: AppSpacing.md),
 
-        // ---- 补充材料 ----
+        // ---- 标签 ----
         AppCard.plain(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+          child: TextField(
+            controller: _tags,
+            enabled: !_locked,
+            decoration: const InputDecoration(
+              labelText: '知识标签',
+              hintText: '用逗号分隔，例如 数据结构, 算法',
+              filled: false,
+              floatingLabelBehavior: FloatingLabelBehavior.always,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+
+        // ---- 补充材料 ----
+        AppCard.outlined(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const AppSectionHeader(
                 title: '补充材料',
-                subtitle: '截图和来源能让别人更快看懂',
                 accent: AppColors.accentSky,
               ),
               const SizedBox(height: 12),
@@ -381,9 +412,7 @@ class _PublishQuestionPageState extends State<PublishQuestionPage> {
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(0, 44),
                     ),
-                    onPressed: _locked
-                        ? null
-                        : () => _pick(ImageSource.camera),
+                    onPressed: _locked ? null : () => _pick(ImageSource.camera),
                     icon: const Icon(Icons.camera_alt_outlined, size: 18),
                     label: const Text('拍照'),
                   ),
@@ -398,7 +427,7 @@ class _PublishQuestionPageState extends State<PublishQuestionPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '已引用本地资料。仅发布上方草稿文字，原文档及其他学习资料仍保存在本地。',
+                    '仅发布草稿文字，原文档仍保存在本地。',
                     style: AppTextStyles.caption(context),
                   ),
                 ),
@@ -478,20 +507,6 @@ class _PublishQuestionPageState extends State<PublishQuestionPage> {
             ),
           ),
         const SizedBox(height: 20),
-        FilledButton(
-          onPressed: _busy ? null : _submit,
-          style: FilledButton.styleFrom(
-            backgroundColor: communityBlue,
-            minimumSize: const Size.fromHeight(52),
-          ),
-          child: Text(
-            _busy
-                ? '正在上传并发布…'
-                : _pending != null
-                ? '重试确认'
-                : '发布问题',
-          ),
-        ),
       ],
     ),
   );

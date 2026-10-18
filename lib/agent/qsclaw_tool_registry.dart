@@ -30,7 +30,7 @@ class QsClawToolRegistry {
         name: QsClawToolNames.createKnowledgeLibrary,
         description: 'Create or reuse a knowledge library.',
         handler: (context) async {
-          final name = context.stringArg('libraryName', fallback: '学习资料知识库');
+          final name = context.stringArg('libraryName', fallback: '知识库');
           final existing = await libraries.fetchLibraries(context.userId);
           final matched = existing.cast<KnowledgeLibraryRecord?>().firstWhere(
             (library) => library?.name == name,

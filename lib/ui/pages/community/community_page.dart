@@ -136,7 +136,6 @@ class _CommunityPageState extends State<CommunityPage> {
               if (!widget.bookmarks && !widget.search)
                 AppPageHeader(
                   title: '学习社区',
-                  subtitle: '分享问题 · 交流经验 · 一起进步',
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -177,7 +176,7 @@ class _CommunityPageState extends State<CommunityPage> {
                   controller: _search,
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
-                    hintText: '搜索问题标题或正文',
+                    hintText: '搜索',
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: IconButton(
                       tooltip: '搜索',

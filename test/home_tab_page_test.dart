@@ -146,7 +146,11 @@ void main() {
     }
   }
 
-  Future<void> render(WidgetTester tester, double width, {bool save = false}) async {
+  Future<void> render(
+    WidgetTester tester,
+    double width, {
+    bool save = false,
+  }) async {
     await tester.binding.setSurfaceSize(Size(width, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final boundary = GlobalKey();
@@ -194,7 +198,7 @@ void main() {
       await render(tester, width);
       // The hero replaced the old "当前任务" card and absorbed the greeting, so
       // the current task is now the page's focal surface.
-      expect(find.text('继续上次的学习'), findsOneWidget);
+      expect(find.text('继续上次学习'), findsOneWidget);
       expect(find.text('学习概览'), findsOneWidget);
       // Quick actions are a bare row of tiles now, not a titled card.
       expect(find.text('拍照识别'), findsOneWidget);
@@ -202,7 +206,7 @@ void main() {
       expect(find.text('为你推荐'), findsOneWidget);
       expect(find.text('我的知识库'), findsOneWidget);
       expect(find.text('完成设计模式练习'), findsOneWidget);
-      expect(find.text('继续学习'), findsOneWidget);
+      expect(find.byTooltip('继续学习'), findsOneWidget);
       expect(find.text('今日推荐'), findsOneWidget);
       expect(find.text('薄弱提升'), findsOneWidget);
     });

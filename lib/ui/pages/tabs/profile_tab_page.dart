@@ -261,7 +261,8 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
       }
       final streak = await (widget.focusRepository ?? FocusRepository())
           .fetchLearningStreak(userId);
-      final activity = widget.studyActivityRepository ?? StudyActivityRepository();
+      final activity =
+          widget.studyActivityRepository ?? StudyActivityRepository();
       final todaySeconds = await activity.todaySeconds(userId);
       if (mounted && _profile?.id == userId) {
         setState(() {
@@ -1030,14 +1031,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('我的学习空间', style: AppTextStyles.h2(context)),
-                const SizedBox(height: 6),
-                Text(
-                  '管理学习资料、社交互动与个性化设置。',
-                  style: AppTextStyles.bodySmall(context),
-                ),
-              ],
+              children: [Text('我的学习空间', style: AppTextStyles.h2(context))],
             ),
           ),
           const SizedBox(height: 18),
@@ -1072,14 +1066,13 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
               _SettingRowData(
                 icon: Icons.menu_book_rounded,
                 title: '我的知识资产',
-                subtitle: '学习资料、知识卡片与学习成果',
                 onTap: _openKnowledgeEntry,
               ),
               _SettingRowData(
                 icon: Icons.collections_bookmark_rounded,
                 accent: AppColors.accentAmber,
                 title: '收藏',
-                subtitle: stats == null ? '待同步' : '知识卡片、错题和 AI 学习成果集中查看',
+                subtitle: stats == null ? '待同步' : '知识卡片与学习成果',
                 onTap: _openFavoritesEntry,
               ),
             ],
@@ -1092,7 +1085,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
                 icon: Icons.people_rounded,
                 accent: AppColors.accentMint,
                 title: '好友与聊天',
-                subtitle: '管理好友、查看申请与私聊',
                 onTap: () => _openSocial(const FriendsChatPage()),
               ),
               _SettingRowData(
@@ -1133,7 +1125,6 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
                 icon: Icons.info_outline_rounded,
                 accent: AppColors.slate,
                 title: '账号与安全',
-                subtitle: '账号信息、登录邮箱与隐私设置',
                 onTap: _showAccountInfo,
               ),
             ],
@@ -1246,30 +1237,139 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 snapshot.data == null) {
               return const AppSkeletonList(items: 4, height: 68);
             }
+            if (snapshot.hasError) {
+              return AppErrorState(
+                title: '收藏加载失败',
+                description: '请稍后重试',
+                onRetry: _refresh,
+              );
+            }
             final categories = snapshot.data ?? const [];
             if (categories.isEmpty) {
               return const AppEmptyState(
                 icon: Icons.star_border_rounded,
                 title: '还没有收藏内容',
-                description: '学习过程中收藏的知识卡片、错题和成果会集中在这里。',
               );
             }
+            const accents = [
+              AppColors.primary,
+              AppColors.accentViolet,
+              AppColors.accentMint,
+              AppColors.accentFlame,
+              AppColors.accentAmber,
+            ];
             return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
               children: [
-                AppCard.outlined(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Column(
+                Row(
+                  children: [
+                    Text(
+                      '全部收藏',
+                      style: AppTextStyles.label(context).copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '共 ${categories.fold<int>(0, (total, item) => total + item.count)} 条',
+                      style: AppTextStyles.caption(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                LayoutBuilder(
+                  builder: (context, constraints) => Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
                     children: [
-                      for (var i = 0; i < categories.length; i++) ...[
-                        if (i > 0) const Divider(height: 1, indent: 62),
-                        AppListRow(
-                          icon: _favoriteIconFor(categories[i].iconName),
-                          title: categories[i].title,
-                          subtitle: '${categories[i].count} 条收藏',
-                          onTap: () => _openCategory(categories[i]),
+                      for (var i = 0; i < categories.length; i++)
+                        SizedBox(
+                          width: (constraints.maxWidth - 12) / 2,
+                          child: AppCard.tinted(
+                            accent: accents[i % accents.length],
+                            padding: const EdgeInsets.fromLTRB(16, 15, 16, 14),
+                            onTap: () => _openCategory(categories[i]),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.surface,
+                                        borderRadius: BorderRadius.circular(
+                                          AppRadii.chipSmall,
+                                        ),
+                                        border: Border.all(
+                                          color: accents[i % accents.length]
+                                              .withValues(alpha: 0.22),
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: accents[i % accents.length]
+                                                .withValues(alpha: 0.14),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(10),
+                                        child: SvgPicture.asset(
+                                          _favoriteSvgFor(
+                                            categories[i].iconName,
+                                          ),
+                                          width: 20,
+                                          height: 20,
+                                        ),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      '${categories[i].count}',
+                                      style: AppTextStyles.h1(context).copyWith(
+                                        fontSize: 26,
+                                        height: 1,
+                                        fontWeight: FontWeight.w700,
+                                        color: accents[i % accents.length],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  categories[i].title,
+                                  style: AppTextStyles.title(
+                                    context,
+                                  ).copyWith(fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 3),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '查看全部',
+                                        style: AppTextStyles.caption(context),
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_forward_rounded,
+                                      size: 14,
+                                      color: accents[i % accents.length]
+                                          .withValues(alpha: 0.75),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ],
                     ],
                   ),
                 ),
@@ -1418,7 +1518,6 @@ class _FavoriteCategoryPageState extends State<FavoriteCategoryPage> {
                     (item) => _FavoriteItemTile(
                       item: item,
                       onTap: () => _showDetail(item),
-                      onRemove: () => _removeFavorite(item),
                     ),
                   )
                   .toList(growable: false),
@@ -1431,63 +1530,143 @@ class _FavoriteCategoryPageState extends State<FavoriteCategoryPage> {
 }
 
 class _FavoriteItemTile extends StatelessWidget {
-  const _FavoriteItemTile({
-    required this.item,
-    required this.onTap,
-    required this.onRemove,
-  });
-
+  const _FavoriteItemTile({required this.item, required this.onTap});
   final FavoriteItemRecord item;
   final VoidCallback onTap;
-  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
+    final hasNotes =
+        item.annotations.isNotEmpty || (item.note?.trim().isNotEmpty ?? false);
+    final accent = _favoriteAccentFor(item.targetType);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppCard.outlined(
+        padding: EdgeInsets.zero,
         onTap: onTap,
-        leading: const Icon(Icons.star_rounded, color: Color(0xFFF59E0B)),
-        title: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Text(item.subtitle),
-            const SizedBox(height: 6),
-            Text(item.body, maxLines: 5, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 6),
-            const Text(
-              '点击查看完整内容',
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w800,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // One colour rail per category: the list stays scannable when
+              // mixed types are open at once, without a coloured card each.
+              Container(width: 3, color: accent.withValues(alpha: 0.65)),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(15, 14, 14, 13),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.title(context).copyWith(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.bookmark_rounded,
+                            color: AppColors.accentAmber,
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                      if (item.subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          item.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.caption(context),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Text(
+                        item.body,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall(
+                          context,
+                        ).copyWith(height: 1.55),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          if (hasNotes)
+                            const AppTag(
+                              label: '有笔记',
+                              icon: Icons.edit_note_rounded,
+                              accent: AppColors.accentViolet,
+                            )
+                          else
+                            Text(
+                              '无笔记',
+                              style: AppTextStyles.caption(context),
+                            ),
+                          const Spacer(),
+                          Text(
+                            '查看',
+                            style: AppTextStyles.labelSmall(context).copyWith(
+                              color: accent,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(width: 1),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 16,
+                            color: accent,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
-        trailing: IconButton(
-          tooltip: '取消收藏',
-          onPressed: onRemove,
-          icon: const Icon(Icons.star_border_rounded),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-IconData _favoriteIconFor(String name) {
+Color _favoriteAccentFor(String type) {
+  switch (type) {
+    case FavoriteTargetType.wrongQuestion:
+      return AppColors.accentRose;
+    case FavoriteTargetType.knowledgeCard:
+      return AppColors.accentMint;
+    case FavoriteTargetType.reviewOutline:
+      return AppColors.accentViolet;
+    case FavoriteTargetType.mindmapText:
+      return AppColors.accentSky;
+    default:
+      return AppColors.primary;
+  }
+}
+
+String _favoriteSvgFor(String name) {
   switch (name) {
     case 'wrong':
-      return Icons.report_problem_rounded;
+      return AppAssets.wrongExplain;
     case 'outline':
-      return Icons.list_alt_rounded;
+      return AppAssets.outline;
     case 'mindmap':
-      return Icons.account_tree_rounded;
+      return AppAssets.mindmap;
     case 'quiz':
-      return Icons.quiz_rounded;
+      return AppAssets.practiceQuestion;
     default:
-      return Icons.style_rounded;
+      return AppAssets.knowledgeCard;
   }
 }
 
@@ -1711,7 +1890,7 @@ class _SettingRowData {
   const _SettingRowData({
     required this.icon,
     required this.title,
-    required this.subtitle,
+    this.subtitle = '',
     required this.onTap,
     this.accent = AppColors.primary,
   });

@@ -151,10 +151,15 @@ class _RecordResultsPageState extends State<RecordResultsPage> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          Text(widget.record.title, style: AppTextStyles.h3(context)),
+          Text(
+            widget.record.title,
+            style: AppTextStyles.h2(
+              context,
+            ).copyWith(fontWeight: FontWeight.w700, height: 1.35),
+          ),
           const SizedBox(height: 12),
           KnowledgeSearchField(
-            hint: '搜索本次记录的${widget.title}…',
+            hint: '搜索',
             onChanged: (v) {
               _query = v;
               if (widget.type == 'mindmap_texts') {
@@ -287,32 +292,43 @@ class _StartPracticeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.tintOf(AppColors.primary, 0.10),
-            AppColors.tintOf(AppColors.accentSky, 0.10),
-          ],
-        ),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-        border: Border.all(color: AppColors.tintOf(AppColors.primary, 0.18)),
+        border: Border.all(color: AppColors.borderLight),
+        boxShadow: [AppShadows.cardTight],
       ),
       child: Row(
         children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.tintOf(AppColors.primary, 0.10),
+              borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+            ),
+            child: const Icon(
+              Icons.playlist_play_rounded,
+              size: 21,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   '共 $count 题',
-                  style: AppTextStyles.title(context),
+                  style: AppTextStyles.title(context).copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '按掌握度排序，从最该复习的开始',
+                  '按掌握度排序',
                   style: AppTextStyles.caption(context),
                 ),
               ],
@@ -320,7 +336,12 @@ class _StartPracticeBar extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 44),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.button),
+              ),
+            ),
             onPressed: onStart,
             child: Text(label),
           ),

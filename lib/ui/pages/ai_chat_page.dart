@@ -716,7 +716,7 @@ class _AiChatPageState extends State<AiChatPage> {
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _send(),
                           decoration: InputDecoration(
-                            hintText: '问知识点，或让 EClaw 帮你完成任务...',
+                            hintText: '发消息或提问',
                             hintStyle: const TextStyle(fontSize: 13),
                             filled: true,
                             fillColor: const Color(0xFFF4F7FC),

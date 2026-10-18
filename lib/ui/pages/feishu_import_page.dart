@@ -359,7 +359,7 @@ class _FeishuImportPageState extends State<FeishuImportPage>
           child: TextField(
             onChanged: (v) => setState(() => query = v),
             decoration: InputDecoration(
-              hintText: '搜索已加载的飞书资料',
+              hintText: '搜索',
               prefixIcon: const Icon(Icons.search),
               filled: true,
               fillColor: Colors.white,

@@ -82,7 +82,7 @@ class _GraphLibraryPickerSheetState extends State<_GraphLibraryPickerSheet> {
               child: TextField(
                 onChanged: (value) => setState(() => _query = value.trim()),
                 decoration: const InputDecoration(
-                  hintText: '搜索知识库',
+                  hintText: '搜索',
                   prefixIcon: Icon(Icons.search_rounded, size: 20),
                   isDense: true,
                 ),

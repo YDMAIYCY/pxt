@@ -237,6 +237,20 @@ class CommunityAvatar extends StatelessWidget {
   final Json profile;
   final double size;
   final VoidCallback? onTap;
+  Color get _accent {
+    const palette = [
+      AppColors.primary,
+      AppColors.accentViolet,
+      AppColors.accentMint,
+      AppColors.accentFlame,
+    ];
+    final identity =
+        (profile['id'] ?? profile['public_id'] ?? profile['nickname'] ?? '')
+            .toString();
+    return palette[identity.runes.fold<int>(0, (sum, rune) => sum + rune) %
+        palette.length];
+  }
+
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: onTap,
@@ -251,14 +265,13 @@ class CommunityAvatar extends StatelessWidget {
             )
           : CircleAvatar(
               radius: size / 2,
-              backgroundColor: AppColors.tintOf(AppColors.primary, 0.14),
-              foregroundColor: communityBlue,
+              backgroundColor: AppColors.tintOf(_accent, 0.12),
+              foregroundColor: _accent,
               child: Text(
                 (profile['nickname'] as String? ?? '同学').characters.first,
-                style: AppTextStyles.title(context).copyWith(
-                  color: communityBlue,
-                  fontSize: size * 0.4,
-                ),
+                style: AppTextStyles.title(
+                  context,
+                ).copyWith(color: _accent, fontSize: size * 0.4),
               ),
             ),
     ),
@@ -398,7 +411,9 @@ class CommunityQuestionCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 18),
                     Icon(
-                      bookmarked ? Icons.star_rounded : Icons.star_border_rounded,
+                      bookmarked
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
                       size: 17,
                       color: bookmarked
                           ? AppColors.accentAmber

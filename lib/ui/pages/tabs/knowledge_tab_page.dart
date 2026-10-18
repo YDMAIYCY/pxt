@@ -881,7 +881,7 @@ class _KnowledgeSearchPageState extends State<_KnowledgeSearchPage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _runSearch(),
               decoration: InputDecoration(
-                hintText: '例如：二次函数顶点、错题、某份资料标题',
+                hintText: '搜索',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: IconButton(
                   tooltip: '搜索',

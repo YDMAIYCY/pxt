@@ -431,19 +431,19 @@ class _OcrResultPageState extends State<OcrResultPage> {
               const SizedBox(height: 16),
               _TextEditorCard(
                 title: '原始识别文本 rawText',
-                hintText: '点击“开始 OCR”后会展示原始文本；你也可手动输入。',
+                hintText: '原始识别文本',
                 controller: _rawTextController,
               ),
               const SizedBox(height: 14),
               _TextEditorCard(
                 title: '清洗后文本 cleanText',
-                hintText: '建议保留结构清晰的可读版本，作为后续 AI 生成输入。',
+                hintText: '整理后的可读文本',
                 controller: _cleanTextController,
               ),
               const SizedBox(height: 14),
               _TextEditorCard(
                 title: '确认文本 finalText',
-                hintText: 'AI 生成会优先使用这里的最终文本；为空时使用清洗后文本。',
+                hintText: 'AI 生成使用的最终文本',
                 controller: _finalTextController,
               ),
               if (data.ocrRecord == null) ...[
@@ -455,7 +455,7 @@ class _OcrResultPageState extends State<OcrResultPage> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Text(
-                    '当前尚无 OCR 入库记录。完成识别或保存后，这里会进入数据库并同步首页状态。',
+                    '完成识别并保存后，这里会显示入库记录。',
                     style: TextStyle(
                       color: Color(0xFF854D0E),
                       fontWeight: FontWeight.w600,

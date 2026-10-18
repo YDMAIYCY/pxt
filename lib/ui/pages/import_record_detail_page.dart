@@ -563,7 +563,7 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                   ),
                   const SizedBox(height: 14),
                   KnowledgeSearchField(
-                    hint: '搜索本次记录生成内容…',
+                    hint: '搜索',
                     onChanged: (v) => setState(() => _query = v),
                   ),
                   FutureBuilder(

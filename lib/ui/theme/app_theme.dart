@@ -27,7 +27,7 @@ class AppColors {
 
   static const Color textPrimary = Color(0xFF0F172A);
   static const Color textSecondary = Color(0xFF64748B);
-  static const Color textTertiary = Color(0xFF94A3B8);
+  static const Color textTertiary = Color(0xFF68768B);
   static const Color textOnPrimary = Color(0xFFFFFFFF);
 
   static const Color success = Color(0xFF059669);
@@ -227,10 +227,10 @@ class AppSpacing {
 class AppRadii {
   AppRadii._();
 
-  static const double card = 22;
-  static const double cardSmall = 18;
+  static const double card = 20;
+  static const double cardSmall = 16;
   static const double cardLarge = 26;
-  static const double button = 16;
+  static const double button = 14;
   static const double tile = 16;
   static const double input = 14;
   static const double chipSmall = 12;
@@ -244,9 +244,9 @@ class AppShadows {
   AppShadows._();
 
   static BoxShadow get cardSoft => BoxShadow(
-    color: const Color(0xFF0F172A).withValues(alpha: 0.07),
-    blurRadius: 30,
-    offset: const Offset(0, 14),
+    color: const Color(0xFF0F172A).withValues(alpha: 0.035),
+    blurRadius: 20,
+    offset: const Offset(0, 5),
   );
 
   static BoxShadow get cardMedium => BoxShadow(
@@ -270,9 +270,9 @@ class AppShadows {
   /// Tight shadow for dense list rows and inline tiles, where `cardSoft`
   /// would look loose and muddy.
   static BoxShadow get cardTight => BoxShadow(
-    color: const Color(0xFF0F172A).withValues(alpha: 0.05),
-    blurRadius: 16,
-    offset: const Offset(0, 6),
+    color: const Color(0xFF0F172A).withValues(alpha: 0.025),
+    blurRadius: 12,
+    offset: const Offset(0, 3),
   );
 
   /// Brand-tinted lift for the single hero surface at the top of a page.
@@ -361,6 +361,11 @@ class AppTheme {
           borderSide: const BorderSide(color: AppColors.error),
         ),
         labelStyle: const TextStyle(color: AppColors.textSecondary),
+        hintStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+          color: AppColors.textTertiary,
+        ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(

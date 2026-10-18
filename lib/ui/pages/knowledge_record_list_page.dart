@@ -303,15 +303,17 @@ class _BookDetailPageState extends State<BookDetailPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _library.name.endsWith('知识库')
-                                  ? _library.name
-                                  : '${_library.name}知识库',
+                              _library.name,
                               maxLines: 3,
                               style: AppTextStyles.h1(context),
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              '${all.length} 条记录 · ${_library.description?.isNotEmpty == true ? _library.description : '让知识成为你自己的宝贵财富'}',
+                              [
+                                '${all.length} 条记录',
+                                if (_library.description?.isNotEmpty == true)
+                                  _library.description!,
+                              ].join(' · '),
                               style: const TextStyle(
                                 fontSize: 12,
                                 color: AppColors.textSecondary,
@@ -329,7 +331,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   ),
                   const SizedBox(height: 14),
                   KnowledgeSearchField(
-                    hint: '搜索记录、知识点…',
+                    hint: '搜索',
                     onChanged: (v) {
                       _query = v;
                       _refresh();

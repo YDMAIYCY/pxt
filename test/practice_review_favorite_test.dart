@@ -23,7 +23,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('刷练习题'), findsOneWidget);
+    expect(find.text('练习'), findsOneWidget);
     expect(find.byTooltip('收藏'), findsOneWidget);
 
     await tester.tap(find.byTooltip('收藏'));

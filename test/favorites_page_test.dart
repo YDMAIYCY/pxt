@@ -23,8 +23,8 @@ void main() {
     await tester.tap(find.text('练习题'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('点击查看完整内容'), findsOneWidget);
-    await tester.tap(find.textContaining('点击查看完整内容'));
+    expect(find.text('函数单调性如何判断？'), findsOneWidget);
+    await tester.tap(find.text('函数单调性如何判断？'));
     await tester.pumpAndSettle();
 
     expect(find.text('完整内容'), findsOneWidget);

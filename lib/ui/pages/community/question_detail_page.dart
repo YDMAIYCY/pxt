@@ -445,7 +445,6 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
                   children: [
                     const AppSectionHeader(
                       title: '写下你的回答',
-                      subtitle: '支持 Markdown、代码块和数学公式',
                       accent: AppColors.accentSky,
                     ),
                     const SizedBox(height: 12),
@@ -457,7 +456,7 @@ class _QuestionDetailPageState extends State<QuestionDetailPage> {
                       enabled: !_busy && _pendingReply == null,
                       decoration: const InputDecoration(
                         labelText: '写下你的回答',
-                        hintText: '先说结论，再说你的推导过程',
+                        hintText: '写回答',
                       ),
                     ),
                     if (_replyError != null)

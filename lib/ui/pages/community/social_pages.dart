@@ -10,11 +10,7 @@ import 'question_detail_page.dart';
 import 'chat_page.dart';
 
 class CommunityUserPage extends StatefulWidget {
-  const CommunityUserPage({
-    required this.userId,
-    this.repository,
-    super.key,
-  });
+  const CommunityUserPage({required this.userId, this.repository, super.key});
   final String userId;
   final CommunityRepository? repository;
   @override
@@ -73,6 +69,85 @@ class _CommunityUserPageState extends State<CommunityUserPage> {
     }
   }
 
+  VoidCallback? get _primaryAction => switch (_friend) {
+    'friend' => _chat,
+    'received' => () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const FriendsChatPage(initialIndex: 2),
+      ),
+    ),
+    'sent' => null,
+    _ => () => _action(() => _repo.sendRequest(widget.userId)),
+  };
+
+  Future<void> _block() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('屏蔽用户'),
+        content: const Text('屏蔽后将解除好友关系，并停止互相查看内容和私聊。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('屏蔽'),
+          ),
+        ],
+      ),
+    );
+    if (yes == true) {
+      await _action(() async {
+        await _repo.block(widget.userId);
+        if (mounted) Navigator.pop(context);
+      });
+    }
+  }
+
+  Future<void> _loadMoreQuestions() async {
+    setState(() => _busy = true);
+    try {
+      final rows = await _repo.feed(
+        author: widget.userId,
+        offset: _questions.length,
+      );
+      if (mounted) {
+        setState(() {
+          _questions.addAll(rows);
+          _moreQuestions = rows.length == 20;
+        });
+      }
+    } catch (e) {
+      if (mounted) communityMessage(context, cloudError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _loadMoreAnswers() async {
+    setState(() => _busy = true);
+    try {
+      final rows = await _repo.userAnswers(
+        widget.userId,
+        offset: _answers.length,
+      );
+      if (mounted) {
+        setState(() {
+          _answers.addAll(rows);
+          _moreAnswers = rows.length == 20;
+        });
+      }
+    } catch (e) {
+      if (mounted) communityMessage(context, cloudError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: communityBackground,
@@ -86,32 +161,7 @@ class _CommunityUserPageState extends State<CommunityUserPage> {
               if (value == 'remove') {
                 await _action(() => _repo.removeFriend(widget.userId));
               } else if (value == 'block') {
-                final yes = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('屏蔽用户'),
-                    content: const Text('屏蔽后将解除好友关系，并停止互相查看内容和私聊。'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('取消'),
-                      ),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 44),
-                        ),
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('屏蔽'),
-                      ),
-                    ],
-                  ),
-                );
-                if (yes == true) {
-                  await _action(() async {
-                    await _repo.block(widget.userId);
-                    if (context.mounted) Navigator.pop(context);
-                  });
-                }
+                await _block();
               }
             },
             itemBuilder: (context) => [
@@ -126,219 +176,321 @@ class _CommunityUserPageState extends State<CommunityUserPage> {
       future: _future,
       onRetry: _reload,
       builder: (p) => ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        padding: const EdgeInsets.only(bottom: 28),
         children: [
-          // ---- 身份卡 ----
-          AppCard.plain(
-            padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
+          _ProfileHeader(
+            profile: p,
+            friend: _friend,
+            busy: _busy,
+            questionCount: _questions.length,
+            answerCount: _answers.length,
+            onPrimary: _primaryAction,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CommunityAvatar(profile: p, size: 76),
+                AppSectionHeader(
+                  title: '公开问题',
+                  subtitle: _questions.isEmpty ? null : '最近 ${_questions.length} 条',
+                  accent: AppColors.primary,
+                ),
                 const SizedBox(height: 12),
-                Text(
-                  p['nickname'] as String,
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.h2(context),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  'ID：${p['public_id']}',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.caption(context),
-                ),
-                if ((p['bio'] as String? ?? '').trim().isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    p['bio'] as String,
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.bodySmall(context),
-                  ),
+                if (_questions.isEmpty)
+                  const AppEmptyState(
+                    compact: true,
+                    icon: Icons.forum_outlined,
+                    title: '还没有公开问题',
+                    description: '这位同学还没有发布过问题。',
+                  )
+                else ...[
+                  for (final q in _questions)
+                    CommunityQuestionCard(
+                      question: q,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              QuestionDetailPage(questionId: q['id'] as String),
+                        ),
+                      ),
+                      onProfile: () {},
+                    ),
+                  if (_moreQuestions)
+                    Center(
+                      child: TextButton(
+                        onPressed: _busy ? null : _loadMoreQuestions,
+                        child: const Text('更多公开问题'),
+                      ),
+                    ),
                 ],
-                if (_friend != 'self') ...[
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 46),
-                    ),
-                    onPressed: _busy || _friend == 'sent'
-                        ? null
-                        : _friend == 'friend'
-                        ? _chat
-                        : _friend == 'received'
-                        ? () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const FriendsChatPage(initialIndex: 2),
+                const SizedBox(height: AppSpacing.sectionGap),
+                AppSectionHeader(
+                  title: '公开回答',
+                  subtitle: _answers.isEmpty ? null : '最近 ${_answers.length} 条',
+                  accent: AppColors.accentSky,
+                ),
+                const SizedBox(height: 12),
+                if (_answers.isEmpty)
+                  const AppEmptyState(
+                    compact: true,
+                    icon: Icons.chat_bubble_outline_rounded,
+                    title: '还没有公开回答',
+                    description: '这位同学还没有回答过别人的问题。',
+                  )
+                else ...[
+                  AppCard.outlined(
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: [
+                        for (final (i, a) in _answers.indexed) ...[
+                          if (i > 0)
+                            const Divider(
+                              height: 1,
+                              indent: 14,
+                              color: AppColors.borderLight,
                             ),
-                          )
-                        : () => _action(() => _repo.sendRequest(widget.userId)),
-                    icon: Icon(
-                      _friend == 'friend'
-                          ? Icons.chat_bubble_outline_rounded
-                          : _friend == 'received'
-                          ? Icons.mark_email_unread_outlined
-                          : Icons.person_add_alt_1_rounded,
-                      size: 18,
-                    ),
-                    label: Text(
-                      {
-                            'friend': '发消息',
-                            'sent': '已发送申请',
-                            'received': '查看好友申请',
-                            'none': '添加好友',
-                          }[_friend] ??
-                          '添加好友',
+                          AppListRow(
+                            icon: Icons.subdirectory_arrow_right_rounded,
+                            accent: AppColors.accentSky,
+                            title:
+                                (a['question'] as Map?)?['title'] as String? ??
+                                '问题',
+                            subtitle: a['body'] as String,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => QuestionDetailPage(
+                                  questionId: a['question_id'] as String,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
+                  if (_moreAnswers)
+                    Center(
+                      child: TextButton(
+                        onPressed: _busy ? null : _loadMoreAnswers,
+                        child: const Text('更多公开回答'),
+                      ),
+                    ),
                 ],
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.sectionGap),
-
-          // ---- 公开问题 ----
-          AppSectionHeader(
-            title: '公开问题',
-            subtitle: _questions.isEmpty ? null : '最近 ${_questions.length} 条',
-            accent: AppColors.primary,
-          ),
-          const SizedBox(height: 12),
-          if (_questions.isEmpty)
-            const AppEmptyState(
-              compact: true,
-              icon: Icons.forum_outlined,
-              title: '还没有公开问题',
-              description: '这位同学还没有发布过问题。',
-            )
-          else ...[
-            for (final q in _questions)
-              CommunityQuestionCard(
-                question: q,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        QuestionDetailPage(questionId: q['id'] as String),
-                  ),
-                ),
-                onProfile: () {},
-              ),
-            if (_moreQuestions)
-              TextButton(
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        setState(() => _busy = true);
-                        try {
-                          final rows = await _repo.feed(
-                            author: widget.userId,
-                            offset: _questions.length,
-                          );
-                          if (mounted) {
-                            setState(() {
-                              _questions.addAll(rows);
-                              _moreQuestions = rows.length == 20;
-                            });
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            communityMessage(context, cloudError(e));
-                          }
-                        } finally {
-                          if (mounted) setState(() => _busy = false);
-                        }
-                      },
-                child: const Text('更多公开问题'),
-              ),
-          ],
-          const SizedBox(height: AppSpacing.sectionGap),
-
-          // ---- 公开回答 ----
-          AppSectionHeader(
-            title: '公开回答',
-            subtitle: _answers.isEmpty ? null : '最近 ${_answers.length} 条',
-            accent: AppColors.accentSky,
-          ),
-          const SizedBox(height: 12),
-          if (_answers.isEmpty)
-            const AppEmptyState(
-              compact: true,
-              icon: Icons.chat_bubble_outline_rounded,
-              title: '还没有公开回答',
-              description: '这位同学还没有回答过别人的问题。',
-            )
-          else ...[
-            AppCard.outlined(
-              padding: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  for (final (i, a) in _answers.indexed) ...[
-                    if (i > 0)
-                      const Divider(
-                        height: 1,
-                        indent: 14,
-                        color: AppColors.borderLight,
-                      ),
-                    AppListRow(
-                      icon: Icons.subdirectory_arrow_right_rounded,
-                      accent: AppColors.accentSky,
-                      title:
-                          (a['question'] as Map?)?['title'] as String? ?? '问题',
-                      subtitle: a['body'] as String,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => QuestionDetailPage(
-                            questionId: a['question_id'] as String,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (_moreAnswers)
-              TextButton(
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        setState(() => _busy = true);
-                        try {
-                          final rows = await _repo.userAnswers(
-                            widget.userId,
-                            offset: _answers.length,
-                          );
-                          if (mounted) {
-                            setState(() {
-                              _answers.addAll(rows);
-                              _moreAnswers = rows.length == 20;
-                            });
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            communityMessage(context, cloudError(e));
-                          }
-                        } finally {
-                          if (mounted) setState(() => _busy = false);
-                        }
-                      },
-                child: const Text('更多公开回答'),
-              ),
-          ],
         ],
       ),
     ),
   );
 }
 
-class FriendsChatPage extends StatefulWidget {
-  const FriendsChatPage({
-    this.initialIndex = 0,
-    this.repository,
-    super.key,
+/// The identity block of a classmate page.
+///
+/// A centred white card made every profile look like a placeholder business
+/// card. This one borrows the language of a social profile: a tinted cover with
+/// oversized ring marks, the avatar breaking out of it, then left-aligned
+/// identity, counts and one action.
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({
+    required this.profile,
+    required this.friend,
+    required this.busy,
+    required this.questionCount,
+    required this.answerCount,
+    required this.onPrimary,
   });
+
+  final Json profile;
+  final String friend;
+  final bool busy;
+  final int questionCount;
+  final int answerCount;
+  final VoidCallback? onPrimary;
+
+  @override
+  Widget build(BuildContext context) {
+    final bio = (profile['bio'] as String? ?? '').trim();
+    final self = friend == 'self';
+    final label = {
+          'friend': '发消息',
+          'sent': '已发送申请',
+          'received': '查看好友申请',
+          'none': '添加好友',
+        }[friend] ??
+        '添加好友';
+    final icon = friend == 'friend'
+        ? Icons.chat_bubble_rounded
+        : friend == 'received'
+        ? Icons.mark_email_unread_rounded
+        : Icons.person_add_alt_1_rounded;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            AppColors.tintOf(AppColors.primary, 0.15),
+            AppColors.tintOf(AppColors.accentViolet, 0.07),
+            communityBackground,
+          ],
+          stops: const [0, 0.58, 1],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -52,
+            top: -64,
+            child: IgnorePointer(
+              child: Container(
+                width: 176,
+                height: 176,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: AppColors.surface.withValues(alpha: 0.6),
+                    width: 22,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 104,
+            top: 30,
+            child: IgnorePointer(
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primary.withValues(alpha: 0.22),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 26, 20, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.surface,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.ink.withValues(alpha: 0.10),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: CommunityAvatar(profile: profile, size: 72),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 5),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              profile['nickname'] as String,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.h1(
+                                context,
+                              ).copyWith(fontSize: 22, fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'ID ${profile['public_id']}',
+                              style: AppTextStyles.caption(
+                                context,
+                              ).copyWith(letterSpacing: 0.2),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                _ProfileStat(count: questionCount, label: '问题'),
+                                const SizedBox(width: 16),
+                                _ProfileStat(count: answerCount, label: '回答'),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (bio.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    bio,
+                    style: AppTextStyles.bodySmall(
+                      context,
+                    ).copyWith(height: 1.55),
+                  ),
+                ],
+                if (!self) ...[
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                      padding: const EdgeInsets.symmetric(horizontal: 22),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.button),
+                      ),
+                    ),
+                    onPressed: busy ? null : onPrimary,
+                    icon: Icon(icon, size: 18),
+                    label: Text(label),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileStat extends StatelessWidget {
+  const _ProfileStat({required this.count, required this.label});
+  final int count;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.baseline,
+    textBaseline: TextBaseline.alphabetic,
+    children: [
+      Text(
+        '$count',
+        style: AppTextStyles.label(
+          context,
+        ).copyWith(color: AppColors.ink, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(width: 3),
+      Text(label, style: AppTextStyles.caption(context)),
+    ],
+  );
+}
+
+class FriendsChatPage extends StatefulWidget {
+  const FriendsChatPage({this.initialIndex = 0, this.repository, super.key});
   final int initialIndex;
   final CommunityRepository? repository;
   @override
@@ -346,8 +498,9 @@ class FriendsChatPage extends StatefulWidget {
 }
 
 class _FriendsChatPageState extends State<FriendsChatPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late final _repo = widget.repository ?? CommunityRepository();
+  late final TabController _tabs;
   late Future<Json> _future;
   RealtimeChannel? _channel;
   Timer? _debounce;
@@ -356,12 +509,24 @@ class _FriendsChatPageState extends State<FriendsChatPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _tabs = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialIndex,
+    )..addListener(_onTabChanged);
     _future = _load()..ignore();
+  }
+
+  void _onTabChanged() {
+    if (!_tabs.indexIsChanging && mounted) setState(() {});
+    if (_tabs.indexIsChanging && mounted) setState(() {});
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _tabs.removeListener(_onTabChanged);
+    _tabs.dispose();
     _debounce?.cancel();
     final ch = _channel;
     if (ch != null) _repo.client.removeChannel(ch);
@@ -376,7 +541,7 @@ class _FriendsChatPageState extends State<FriendsChatPage>
   Future<Json> _load() async {
     await _repo.identity.requireLinked();
     try {
-    _channel ??= _repo.client
+      _channel ??= _repo.client
           .channel('friends-${_repo.uid}')
           .onPostgresChanges(
             event: PostgresChangeEvent.insert,
@@ -396,7 +561,9 @@ class _FriendsChatPageState extends State<FriendsChatPage>
             callback: (_) => _scheduleReload(),
           )
           .subscribe((status, error) {
-            if (status == RealtimeSubscribeStatus.subscribed) _scheduleReload();
+            if (status == RealtimeSubscribeStatus.subscribed) {
+              _scheduleReload();
+            }
           });
     } catch (_) {
       // Realtime is an enhancement, not a dependency: if the channel
@@ -452,6 +619,21 @@ class _FriendsChatPageState extends State<FriendsChatPage>
     }
   }
 
+  Future<void> _openSearch() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const UserSearchPage()),
+    );
+    _reload();
+  }
+
+  Future<void> _openProfile(String userId) => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => CommunityUserPage(userId: userId, repository: _repo),
+    ),
+  );
+
   Widget _list(List<Widget> children) => RefreshIndicator(
     onRefresh: () async {
       _reload();
@@ -461,190 +643,327 @@ class _FriendsChatPageState extends State<FriendsChatPage>
     },
     child: ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      children: children.isEmpty
-          ? const [
-              AppEmptyState(
-                icon: Icons.forum_outlined,
-                title: '暂无内容',
-                description: '去社区回答几个问题，就容易遇到同学了。',
-              ),
-            ]
-          : children,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      children: children,
     ),
   );
+
   @override
-  Widget build(BuildContext context) => DefaultTabController(
-    length: 3,
-    initialIndex: widget.initialIndex,
-    child: Scaffold(
-      backgroundColor: communityBackground,
-      appBar: AppBar(
-        title: const Text('好友与聊天'),
-        actions: [
-          IconButton(
-            tooltip: '搜索用户',
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const UserSearchPage()),
-              );
-              _reload();
-            },
-            icon: const Icon(Icons.person_add_alt_outlined),
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: communityBackground,
+    appBar: AppBar(
+      title: const Text('好友与聊天'),
+      actions: [
+        IconButton(
+          tooltip: '添加好友',
+          onPressed: _openSearch,
+          icon: const Icon(Icons.person_add_alt_1_rounded),
+        ),
+      ],
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(60),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: AppSegmented<int>(
+            value: _tabs.index,
+            onChanged: (index) => _tabs.animateTo(index),
+            options: const [
+              AppSegmentedOption(0, '好友'),
+              AppSegmentedOption(1, '私聊'),
+              AppSegmentedOption(2, '好友申请'),
+            ],
           ),
-        ],
-        bottom: const TabBar(
-          tabs: [
-            Tab(text: '好友'),
-            Tab(text: '私聊'),
-            Tab(text: '好友申请'),
-          ],
         ),
       ),
-      body: CloudFutureView(
-        future: _future,
-        onRetry: _reload,
-        builder: (data) => TabBarView(
-          children: [
-            _list([
-              if ((data['friends'] as List).isEmpty)
-                const AppEmptyState(
-                  icon: Icons.people_outline_rounded,
-                  title: '还没有好友',
-                  description: '搜索昵称或公开 ID，把一起学习的同学加进来。',
-                )
-              else
-                AppCard.outlined(
-                  padding: EdgeInsets.zero,
-                  child: Column(
-                    children: [
-                      for (final (i, p)
-                          in (data['friends'] as List)
-                              .cast<Json>()
-                              .indexed) ...[
-                        if (i > 0)
-                          const Divider(
-                            height: 1,
-                            indent: 66,
-                            color: AppColors.borderLight,
-                          ),
-                        AppListRow(
-                          leading: CommunityAvatar(profile: p),
-                          title: p['nickname'] as String,
-                          subtitle: 'ID：${p['public_id']}',
-                          trailing: const Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            size: 20,
-                            color: AppColors.primary,
-                          ),
-                          onTap: () => _chat(p['id'] as String),
+    ),
+    body: CloudFutureView(
+      future: _future,
+      onRetry: _reload,
+      builder: (data) => TabBarView(
+        controller: _tabs,
+        children: [
+          _list([
+            if ((data['friends'] as List).isEmpty)
+              AppEmptyState(
+                icon: Icons.people_outline_rounded,
+                title: '还没有好友',
+                description: '搜索同学，发一条好友申请开始交流。',
+                actionLabel: '添加好友',
+                onAction: _openSearch,
+              )
+            else
+              AppCard.outlined(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    for (final (i, p)
+                        in (data['friends'] as List).cast<Json>().indexed) ...[
+                      if (i > 0)
+                        const Divider(
+                          height: 1,
+                          indent: 70,
+                          color: AppColors.borderLight,
                         ),
-                      ],
+                      _FriendRow(
+                        profile: p,
+                        onOpenProfile: () => _openProfile(p['id'] as String),
+                        onChat: () => _chat(p['id'] as String),
+                      ),
                     ],
-                  ),
+                  ],
                 ),
-            ]),
-            _list([
-              if ((data['inbox'] as List).isEmpty)
-                const AppEmptyState(
-                  icon: Icons.mark_chat_unread_outlined,
-                  title: '还没有私聊',
-                  description: '在好友列表里点开一个同学，就能开始对话。',
-                )
-              else
-                AppCard.outlined(
-                  padding: EdgeInsets.zero,
-                  child: Column(
-                    children: [
-                      for (final (i, c)
-                          in (data['inbox'] as List).cast<Json>().indexed) ...[
-                        if (i > 0)
-                          const Divider(
-                            height: 1,
-                            indent: 66,
-                            color: AppColors.borderLight,
-                          ),
-                        _InboxRow(
-                          conversation: c,
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ChatPage(
-                                  conversationId: c['id'] as String,
-                                ),
-                              ),
-                            );
-                            _reload();
-                          },
+              ),
+          ]),
+          _list([
+            if ((data['inbox'] as List).isEmpty)
+              AppEmptyState(
+                icon: Icons.forum_outlined,
+                title: '还没有私聊',
+                description: '在好友列表里点对话框就能开始一次对话。',
+              )
+            else
+              AppCard.outlined(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    for (final (i, c)
+                        in (data['inbox'] as List).cast<Json>().indexed) ...[
+                      if (i > 0)
+                        const Divider(
+                          height: 1,
+                          indent: 70,
+                          color: AppColors.borderLight,
                         ),
-                      ],
-                    ],
-                  ),
-                ),
-            ]),
-            _list([
-              for (final r in (data['requests'] as List).cast<Json>())
-                Card(
-                  color: Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading: CommunityAvatar(
-                            profile: Json.from(
-                              (r['sender_id'] == _repo.uid
-                                      ? r['recipient']
-                                      : r['sender'])
-                                  as Map,
+                      _InboxRow(
+                        conversation: c,
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ChatPage(conversationId: c['id'] as String),
                             ),
-                          ),
-                          title: Text(
-                            ((r['sender_id'] == _repo.uid
-                                        ? r['recipient']
-                                        : r['sender'])
-                                    as Map)['nickname']
-                                as String,
-                          ),
-                          subtitle: Text(
-                            '${r['sender_id'] == _repo.uid ? '已发出' : '收到申请'} · ${{'pending': '待处理', 'accepted': '已同意', 'rejected': '已拒绝', 'cancelled': '已取消'}[r['status']]}',
-                          ),
-                        ),
-                        if (r['status'] == 'pending' &&
-                            r['recipient_id'] == _repo.uid)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => _respond(r['id'] as String, false),
-                                child: const Text('拒绝'),
-                              ),
-                              FilledButton(
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(0, 44),
-                                ),
-                                onPressed: _busy
-                                    ? null
-                                    : () => _respond(r['id'] as String, true),
-                                child: const Text('同意'),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
+                          );
+                          _reload();
+                        },
+                      ),
+                    ],
+                  ],
                 ),
-            ]),
+              ),
+          ]),
+          _list([
+            if ((data['requests'] as List).isEmpty)
+              AppEmptyState(
+                icon: Icons.mark_email_unread_outlined,
+                title: '没有好友申请',
+                description: '对方同意后，申请会移入好友列表。',
+              )
+            else
+              AppCard.outlined(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    for (final (i, r)
+                        in (data['requests'] as List).cast<Json>().indexed) ...[
+                      if (i > 0)
+                        const Divider(
+                          height: 1,
+                          indent: 70,
+                          color: AppColors.borderLight,
+                        ),
+                      _RequestRow(
+                        request: r,
+                        uid: _repo.uid,
+                        busy: _busy,
+                        onRespond: (yes) =>
+                            _respond(r['id'] as String, yes),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+          ]),
+        ],
+      ),
+    ),
+  );
+}
+
+/// A friend row: tapping the row starts a chat, tapping the avatar opens the
+/// profile. The explicit chat bubble on the right makes the primary action
+/// visible instead of hiding it behind "tap the row".
+class _FriendRow extends StatelessWidget {
+  const _FriendRow({
+    required this.profile,
+    required this.onOpenProfile,
+    required this.onChat,
+  });
+
+  final Json profile;
+  final VoidCallback onOpenProfile;
+  final VoidCallback onChat;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onChat,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+        child: Row(
+          children: [
+            InkResponse(
+              onTap: onOpenProfile,
+              radius: 28,
+              child: CommunityAvatar(profile: profile, size: 46),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    profile['nickname'] as String,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.title(context),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'ID ${profile['public_id']}',
+                    style: AppTextStyles.caption(context),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.tintOf(AppColors.primary, 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.forum_outlined,
+                size: 17,
+                color: AppColors.primary,
+              ),
+            ),
           ],
         ),
       ),
     ),
   );
 }
+
+/// One friend request. Incoming pending requests get inline accept/reject;
+/// everything else collapses into a single status tag, so the list stops
+/// looking like a form.
+class _RequestRow extends StatelessWidget {
+  const _RequestRow({
+    required this.request,
+    required this.uid,
+    required this.busy,
+    required this.onRespond,
+  });
+
+  final Json request;
+  final String uid;
+  final bool busy;
+  final ValueChanged<bool> onRespond;
+
+  @override
+  Widget build(BuildContext context) {
+    final outgoing = request['sender_id'] == uid;
+    final other = (outgoing ? request['recipient'] : request['sender']) as Map;
+    final status = request['status'] as String? ?? 'pending';
+    final pendingIncoming = status == 'pending' && !outgoing;
+    final (label, accent) = switch (status) {
+      'accepted' => ('已是好友', AppColors.success),
+      'rejected' => ('已拒绝', AppColors.textQuiet),
+      'cancelled' => ('已取消', AppColors.textQuiet),
+      _ => (outgoing ? '等待对方处理' : '想加你为好友', AppColors.accentAmber),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Row(
+        children: [
+          CommunityAvatar(profile: Json.from(other), size: 44),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  other['nickname'] as String,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title(context),
+                ),
+                const SizedBox(height: 4),
+                Text(label, style: AppTextStyles.caption(context)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (pendingIncoming) ...[
+            _MiniAction(
+              label: '拒绝',
+              onTap: busy ? null : () => onRespond(false),
+            ),
+            const SizedBox(width: 8),
+            _MiniAction(
+              label: '同意',
+              primary: true,
+              onTap: busy ? null : () => onRespond(true),
+            ),
+          ] else
+            AppTag(label: label, accent: accent),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniAction extends StatelessWidget {
+  const _MiniAction({
+    required this.label,
+    this.onTap,
+    this.primary = false,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.chip),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: primary ? AppColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadii.chip),
+          border: primary ? null : Border.all(color: AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: AppTextStyles.labelSmall(context).copyWith(
+            color: primary ? AppColors.textOnPrimary : AppColors.textSecondary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 
 /// One notification row: kind icon, actor + action, time. Unread rows get a
 /// tinted surface plus a dot — an unread item should be findable at a glance
@@ -664,7 +983,10 @@ class _NotificationRow extends StatelessWidget {
       'answer' => (Icons.forum_rounded, AppColors.accentSky),
       'comment' => (Icons.chat_bubble_rounded, AppColors.accentSky),
       'accepted' => (Icons.check_circle_rounded, AppColors.success),
-      'friend_request' => (Icons.person_add_alt_1_rounded, AppColors.accentViolet),
+      'friend_request' => (
+        Icons.person_add_alt_1_rounded,
+        AppColors.accentViolet,
+      ),
       'friend_accepted' => (Icons.people_alt_rounded, AppColors.accentViolet),
       'message' => (Icons.mail_rounded, AppColors.accentMint),
       _ => (Icons.notifications_rounded, AppColors.primary),
@@ -681,11 +1003,22 @@ class _NotificationRow extends StatelessWidget {
         '发来一条学习消息';
 
     return Material(
-      color: unread ? AppColors.tintOf(AppColors.primary, 0.05) : Colors.transparent,
+      color: unread
+          ? AppColors.tintOf(AppColors.primary, 0.05)
+          : Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Stack(
+          children: [
+            if (unread)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: Container(width: 3, color: AppColors.primary),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -708,7 +1041,8 @@ class _NotificationRow extends StatelessWidget {
                       TextSpan(
                         children: [
                           TextSpan(
-                            text: '${(n['actor'] as Map?)?['nickname'] ?? '同学'}',
+                            text:
+                                '${(n['actor'] as Map?)?['nickname'] ?? '同学'}',
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           TextSpan(text: action),
@@ -740,6 +1074,8 @@ class _NotificationRow extends StatelessWidget {
               ],
             ],
           ),
+            ),
+          ],
         ),
       ),
     );
@@ -816,7 +1152,9 @@ class _InboxRow extends StatelessWidget {
                             ),
                             decoration: BoxDecoration(
                               color: AppColors.primary,
-                              borderRadius: BorderRadius.circular(AppRadii.chip),
+                              borderRadius: BorderRadius.circular(
+                                AppRadii.chip,
+                              ),
                             ),
                             child: Text(
                               '$unread',
@@ -913,7 +1251,7 @@ class _UserSearchPageState extends State<UserSearchPage> {
             onSubmitted: (_) => _search(),
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              hintText: '昵称或公开用户 ID',
+              hintText: '昵称 / ID',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: IconButton(
                 tooltip: '搜索用户',
@@ -941,7 +1279,20 @@ class _UserSearchPageState extends State<UserSearchPage> {
                         ),
                       for (final p in _items)
                         ListTile(
-                          leading: CommunityAvatar(profile: p),
+                          leading: Tooltip(
+                            message: '查看主页',
+                            child: InkResponse(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CommunityUserPage(
+                                    userId: p['id'] as String,
+                                  ),
+                                ),
+                              ),
+                              child: CommunityAvatar(profile: p, size: 46),
+                            ),
+                          ),
                           title: Text(p['nickname'] as String),
                           subtitle: Text('ID：${p['public_id']}'),
                           onTap: () => Navigator.push(
@@ -1085,7 +1436,7 @@ class _LearningNotificationsPageState extends State<LearningNotificationsPage>
       _items = rows;
       _more = rows.length == 30;
       try {
-    _channel ??= _repo.client
+        _channel ??= _repo.client
             .channel('learning-notifications-$uuid')
             .onPostgresChanges(
               event: PostgresChangeEvent.insert,
@@ -1193,6 +1544,52 @@ class _LearningNotificationsPageState extends State<LearningNotificationsPage>
     }
   }
 
+  Widget _group(String title, int unread, List<Json> rows) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+        child: Row(
+          children: [
+            Text(
+              title,
+              style: AppTextStyles.label(context).copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (unread > 0)
+              AppTag(label: '$unread 条未读', accent: AppColors.primary)
+            else
+              Text('${rows.length} 条', style: AppTextStyles.caption(context)),
+          ],
+        ),
+      ),
+      AppCard.outlined(
+        padding: EdgeInsets.zero,
+        child: Column(
+          children: [
+            for (var i = 0; i < rows.length; i++) ...[
+              if (i > 0)
+                const Divider(
+                  height: 1,
+                  indent: 64,
+                  color: AppColors.borderLight,
+                ),
+              _NotificationRow(
+                notification: rows[i],
+                onTap: () => _open(rows[i]),
+              ),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: AppSpacing.sectionGap),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: communityBackground,
@@ -1200,73 +1597,55 @@ class _LearningNotificationsPageState extends State<LearningNotificationsPage>
     body: CloudFutureView(
       future: _future,
       onRetry: _reload,
-      builder: (_) => RefreshIndicator(
-        onRefresh: () async {
-          _reload();
-          try {
-            await _future;
-          } catch (_) {}
-        },
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-          children: [
-            Row(
-              children: [
-                const Icon(
-                  Icons.notifications_active_outlined,
-                  size: 15,
-                  color: AppColors.textTertiary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '这里显示应用内通知，后台系统推送尚未配置。',
-                    style: AppTextStyles.labelSmall(
-                      context,
-                    ).copyWith(color: AppColors.textTertiary),
+      builder: (_) {
+        final today = <Json>[];
+        final earlier = <Json>[];
+        final now = DateTime.now();
+        for (final item in _items) {
+          final at = DateTime.tryParse(
+            item['created_at']?.toString() ?? '',
+          )?.toLocal();
+          if (at != null && DateUtils.isSameDay(at, now)) {
+            today.add(item);
+          } else {
+            earlier.add(item);
+          }
+        }
+        int unreadOf(List<Json> rows) =>
+            rows.where((n) => n['read_at'] == null).length;
+        return RefreshIndicator(
+          onRefresh: () async {
+            _reload();
+            try {
+              await _future;
+            } catch (_) {}
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+            children: [
+              if (_items.isEmpty)
+                const AppEmptyState(
+                  icon: Icons.notifications_none_rounded,
+                  title: '暂时没有学习消息',
+                  description: '有人回答、采纳或私信你时，会出现在这里。',
+                )
+              else ...[
+                if (today.isNotEmpty) _group('今天', unreadOf(today), today),
+                if (earlier.isNotEmpty)
+                  _group('更早', unreadOf(earlier), earlier),
+              ],
+              if (_more)
+                Center(
+                  child: TextButton(
+                    onPressed: _busy ? null : _loadMore,
+                    child: const Text('加载更多消息'),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            if (_items.isEmpty)
-              const AppEmptyState(
-                icon: Icons.notifications_none_rounded,
-                title: '暂时没有学习消息',
-                description: '有人回答你的问题、申请好友或私信你时，会出现在这里。',
-              )
-            else
-              AppCard.outlined(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: [
-                    for (var i = 0; i < _items.length; i++) ...[
-                      if (i > 0)
-                        const Divider(
-                          height: 1,
-                          indent: 64,
-                          color: AppColors.borderLight,
-                        ),
-                      _NotificationRow(
-                        notification: _items[i],
-                        onTap: () => _open(_items[i]),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            if (_more)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: TextButton(
-                  onPressed: _busy ? null : _loadMore,
-                  child: const Text('加载更多消息'),
-                ),
-              ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     ),
   );
 }

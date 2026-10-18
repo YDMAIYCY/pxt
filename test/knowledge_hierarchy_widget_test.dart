@@ -177,7 +177,7 @@ void main() {
           () => ImportRecordRepository(database: app).forDocument(1, doc!.id),
         );
         await pump(tester, BookLibraryPage(database: app), scale: 1.3);
-        expect(find.text('学习资料知识库'), findsOneWidget);
+        expect(find.text('知识库'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await pump(
           tester,

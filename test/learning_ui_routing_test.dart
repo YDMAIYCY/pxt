@@ -97,6 +97,103 @@ void main() {
     expect(find.text('Question 3'), findsOneWidget);
   });
 
+  testWidgets('task scope can switch libraries and practice the newly selected questions', (tester) async {
+    await show(tester, LibraryPracticePage(initialQuestionId: 2, documentId: 2, database: app));
+    final fields = find.byType(DropdownButtonFormField<int>);
+    for (final field in tester.widgetList<DropdownButtonFormField<int>>(fields)) {
+      expect(field.onChanged, isNotNull);
+    }
+    await tester.tap(fields.first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Library 1').last);
+    await flush(tester);
+    expect(find.text('当前范围：1 道题'), findsOneWidget);
+    await tester.tap(find.text('开始练习'));
+    await flush(tester);
+    final runner = tester.widget<ScopedPracticeRunner>(find.byType(ScopedPracticeRunner));
+    expect(runner.scope.libraryId, 1);
+    expect(runner.scope.documentId, isNull);
+    expect(runner.questions.map((q) => q.question.id), [1]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('changing imported material resets concept and original question restrictions', (tester) async {
+    await tester.runAsync(() async {
+      for (final id in [20, 21]) {
+        await db.insert('import_records', {'id': id, 'user_id': 1,
+          'library_id': 2, 'operation_id': 'record-$id', 'title': 'Material $id',
+          'created_at': now.toIso8601String(), 'updated_at': now.toIso8601String()});
+      }
+      await db.update('source_documents', {'import_record_id': 20}, where: 'id=2');
+      await db.insert('source_documents', {'id': 4, 'user_id': 1, 'library_id': 2,
+        'import_record_id': 21, 'source_type': 'gallery_import', 'image_path': '',
+        'original_title': 'Source 4', 'created_at': now.toIso8601String()});
+      await db.insert('practice_questions', {'id': 6, 'document_id': 4,
+        'question_text': 'Question 6', 'review_status': 'pending',
+        'created_at': now.toIso8601String()});
+    });
+    await show(tester, LibraryPracticePage(initialConceptId: 10,
+        initialQuestionId: 2, documentId: 2, database: app));
+    expect(find.text('Material 20'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<int>).at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Material 21').last);
+    await flush(tester);
+    expect(find.text('全部知识点'), findsOneWidget);
+    await tester.tap(find.text('开始练习'));
+    await flush(tester);
+    final runner = tester.widget<ScopedPracticeRunner>(find.byType(ScopedPracticeRunner));
+    expect(runner.scope.recordId, 21);
+    expect(runner.scope.conceptId, isNull);
+    expect(runner.questions.map((q) => q.question.id), [6]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('exact question filters can be empty without reporting deleted questions', (tester) async {
+    await show(tester, LibraryPracticePage(questionIds: const [2, 3], database: app));
+    await tester.tap(find.text('到期复习'));
+    await flush(tester);
+    expect(find.text('当前范围：1 道题'), findsOneWidget);
+    await tester.tap(find.text('只练错题'));
+    await flush(tester);
+    expect(find.text('当前范围：1 道题'), findsOneWidget);
+    await tester.tap(find.text('只练错题'));
+    await flush(tester);
+    await tester.tap(find.text('到期复习'));
+    await flush(tester);
+    expect(find.text('当前范围：2 道题'), findsOneWidget);
+    await show(tester, LibraryPracticePage(questionIds: const [3], database: app,
+        key: const ValueKey('empty-filter')));
+    await tester.tap(find.text('只练错题'));
+    await flush(tester);
+    expect(find.text('当前范围：0 道题'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, '开始练习')).onPressed, isNull);
+    expect(find.text('无法加载练习范围'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('concept selector filters real questions and generation settings are separate', (tester) async {
+    await show(tester, LibraryPracticePage(libraryId: 2, database: app));
+    await tester.tap(find.byType(DropdownButtonFormField<int>).at(2));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Atomicity').last);
+    await flush(tester);
+    expect(find.text('当前范围：3 道题'), findsOneWidget);
+    expect(find.text('出题设置'), findsNothing);
+    await tester.tap(find.text('AI 出新题'));
+    await tester.pumpAndSettle();
+    expect(find.text('筛选已有题'), findsNothing);
+    await tester.ensureVisible(find.text('10 道'));
+    await tester.tap(find.text('10 道'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('生成 10 道题并练习'));
+    await tester.tap(find.text('生成 10 道题并练习'));
+    await flush(tester);
+    expect(find.textContaining('请先在“我的”配置 AI 模型'), findsOneWidget);
+    expect(await tester.runAsync(() => db.query('practice_questions')), hasLength(5));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('conflicting and foreign question scopes do not fall back to another library', (tester) async {
     await show(tester, LibraryPracticePage(initialQuestionId: 2, documentId: 1, database: app));
     expect(find.textContaining('所选练习来源不存在或无权访问'), findsOneWidget);

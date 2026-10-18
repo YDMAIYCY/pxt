@@ -849,7 +849,6 @@ class _HomeHero extends StatelessWidget {
     required this.onContinue,
     required this.onOpenTasks,
   });
-
   final LearningTask? task;
   final ValueChanged<LearningTask> onContinue;
   final VoidCallback onOpenTasks;
@@ -857,206 +856,218 @@ class _HomeHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = task;
-    return AppCard.ink(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-      child: Stack(
-        // The card's own rounded clip shapes the glow; a clipping Stack here
-        // would cut it to a hard-edged rectangle.
-        clipBehavior: Clip.none,
-        children: [
-          // A soft corner glow keeps the hero from reading as a flat colour
-          // block, positioned so it never sits behind the progress row.
-          Positioned(
-            right: -80,
-            top: -96,
-            child: Container(
-              width: 230,
-              height: 230,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    Colors.white.withValues(alpha: 0.20),
-                    Colors.white.withValues(alpha: 0),
-                  ],
+    final minutes = (current?.focusedSeconds ?? 0) ~/ 60;
+    final target = (current?.estimatedPomodoros ?? 0) * 25;
+    final progress = target <= 0 ? 0.0 : (minutes / target).clamp(0.0, 1.0);
+    final source = current == null
+        ? ''
+        : [
+            current.libraryName,
+            current.documentTitle,
+          ].where((value) => value.trim().isNotEmpty).join(' · ');
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        onTap: current == null ? onOpenTasks : () => onContinue(current),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            border: Border.all(color: AppColors.borderLight),
+            boxShadow: [AppShadows.cardSoft],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            child: Stack(
+              children: [
+                // A faint brand glow keeps the surface from reading as a plain
+                // white box without tinting the whole card again.
+                Positioned(
+                  right: -56,
+                  top: -74,
+                  child: IgnorePointer(
+                    child: Container(
+                      width: 196,
+                      height: 196,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            AppColors.primary.withValues(alpha: 0.10),
+                            AppColors.primary.withValues(alpha: 0),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 3,
+                            height: 13,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            current == null ? '今天的学习' : '继续上次学习',
+                            style: AppTextStyles.label(context).copyWith(
+                              color: AppColors.textSecondary,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (current != null)
+                            AppTag(
+                              label: current.kindLabel,
+                              accent: AppColors.primary,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 11),
+                      Text(
+                        current?.title ?? '安排今天的学习',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.h2(
+                          context,
+                        ).copyWith(fontWeight: FontWeight.w700, height: 1.28),
+                      ),
+                      if (source.isNotEmpty) ...[
+                        const SizedBox(height: 7),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.menu_book_rounded,
+                              size: 13,
+                              color: AppColors.textQuiet,
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                source,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTextStyles.caption(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: AppProgressBar(
+                                        value: progress,
+                                        accent: AppColors.primary,
+                                        track: AppColors.surfaceMuted,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      '${(progress * 100).round()}%',
+                                      style: AppTextStyles.label(context)
+                                          .copyWith(
+                                            color: AppColors.primaryDark,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 7),
+                                Text(
+                                  minutes == 0
+                                      ? '尚未开始'
+                                      : '已专注 $minutes 分钟',
+                                  style: AppTextStyles.caption(context),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          _HeroAction(
+                            icon: current == null
+                                ? Icons.add_rounded
+                                : Icons.play_arrow_rounded,
+                            tooltip: current == null ? '新建学习任务' : '继续学习',
+                            onTap: current == null
+                                ? onOpenTasks
+                                : () => onContinue(current),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          if (current == null)
-            _HeroEmpty(onOpenTasks: onOpenTasks)
-          else
-            _HeroTask(task: current, onContinue: onContinue),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _HeroTask extends StatelessWidget {
-  const _HeroTask({required this.task, required this.onContinue});
-
-  final LearningTask task;
-  final ValueChanged<LearningTask> onContinue;
+/// The one loud element of the hero: a filled circle that reads as "play".
+class _HeroAction extends StatelessWidget {
+  const _HeroAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final source = [
-      task.libraryName,
-      task.documentTitle,
-    ].where((value) => value.trim().isNotEmpty).join(' · ');
-    final minutes = task.focusedSeconds ~/ 60;
-    final target = task.estimatedPomodoros * 25;
-    final progress = target <= 0 ? 0.0 : (minutes / target).clamp(0.0, 1.0);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              '继续上次的学习',
-              style: AppTextStyles.overline(
-                context,
-              ).copyWith(color: AppColors.onImageMuted),
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.primary, AppColors.primaryDeep],
             ),
-            const Spacer(),
-            AppTag(label: task.kindLabel, accent: Colors.white),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          task.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 21,
-            fontWeight: FontWeight.w800,
-            height: 1.32,
-            letterSpacing: -0.3,
-            color: AppColors.onImage,
-          ),
-        ),
-        if (source.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(
-                Icons.menu_book_rounded,
-                size: 14,
-                color: Colors.white.withValues(alpha: 0.72),
-              ),
-              const SizedBox(width: 5),
-              Expanded(
-                child: Text(
-                  source,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.labelSmall(context).copyWith(
-                    color: AppColors.onImageMuted,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.32),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
-        ],
-        const SizedBox(height: 16),
-        AppProgressBar(
-          value: progress,
-          accent: Colors.white,
-          track: Colors.white.withValues(alpha: 0.22),
-        ),
-        const SizedBox(height: 9),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                minutes == 0
-                    ? '尚未开始 · 预计 ${task.estimatedPomodoros} 个番茄'
-                    : '已专注 $minutes 分钟 · 预计 ${task.estimatedPomodoros} 个番茄',
-                style: AppTextStyles.labelSmall(context).copyWith(
-                  color: AppColors.onImageMuted,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            Text(
-              '${(progress * 100).round()}%',
-              style: AppTextStyles.labelSmall(
-                context,
-              ).copyWith(color: AppColors.onImage, fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: () => onContinue(task),
-                icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                label: const Text('继续学习'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: AppColors.primaryDark,
-                  minimumSize: const Size.fromHeight(46),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _HeroEmpty extends StatelessWidget {
-  const _HeroEmpty({required this.onOpenTasks});
-
-  final VoidCallback onOpenTasks;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '今天的学习',
-          style: AppTextStyles.overline(
-            context,
-          ).copyWith(color: AppColors.onImageMuted),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          '还没有安排任务',
-          style: TextStyle(
-            fontSize: 21,
-            fontWeight: FontWeight.w800,
-            height: 1.3,
-            letterSpacing: -0.3,
-            color: AppColors.onImage,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: Icon(icon, size: 26, color: AppColors.textOnPrimary),
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          '定一个今天要完成的小目标，专注时长会自动记进这里。',
-          style: AppTextStyles.bodySmall(
-            context,
-          ).copyWith(color: AppColors.onImageMuted, height: 1.5),
-        ),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: onOpenTasks,
-          icon: const Icon(Icons.add_rounded, size: 20),
-          label: const Text('新建学习任务'),
-          style: FilledButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: AppColors.primaryDark,
-            minimumSize: const Size.fromHeight(46),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -1113,7 +1124,6 @@ class _StudyOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final needsAttention = wrongQuestions > 0 || overduePractice > 0;
     return AppCard.plain(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(
@@ -1121,9 +1131,6 @@ class _StudyOverviewCard extends StatelessWidget {
         children: [
           AppSectionHeader(
             title: '\u5b66\u4e60\u6982\u89c8',
-            subtitle: needsAttention
-                ? '\u6709\u9700\u8981\u5904\u7406\u7684\u5185\u5bb9'
-                : '\u4fdd\u6301\u5f53\u524d\u8282\u594f',
             trailing: TextButton(
               onPressed: onOpenTasks,
               style: TextButton.styleFrom(
@@ -1372,10 +1379,7 @@ class _RecommendationCardState extends State<_RecommendationCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AppSectionHeader(
-            title: '为你推荐',
-            subtitle: _weakOnly ? '掌握度偏低的内容，优先补上' : '按掌握情况和复习到期时间排序',
-          ),
+          AppSectionHeader(title: '为你推荐'),
           const SizedBox(height: 14),
           AppSegmented<int>(
             value: _weakOnly ? 1 : 0,
@@ -1700,7 +1704,7 @@ class _StudySearchSheetState extends State<_StudySearchSheet> {
             textInputAction: TextInputAction.search,
             onChanged: _search,
             decoration: const InputDecoration(
-              hintText: '搜索知识点、练习题或资料',
+              hintText: '搜索',
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),

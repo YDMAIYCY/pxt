@@ -55,17 +55,23 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
   late bool _wrongOnly;
   bool _dueOnly = false;
   bool _busy = false;
+  bool _generateNew = false;
+  bool _entryScopeActive = true;
   int _count = 5;
   String _difficulty = '基础理解';
-  bool get _scopeLocked =>
+  bool get _hasEntryScope =>
       widget.recordId != null ||
       widget.documentId != null ||
       widget.initialConceptId != null ||
       widget.initialQuestionId != null ||
       widget.questionIds != null;
-  List<int>? get _questionIds =>
-      widget.questionIds ??
-      (widget.initialQuestionId == null ? null : [widget.initialQuestionId!]);
+  int? get _sourceDocumentId => _entryScopeActive ? widget.documentId : null;
+  List<int>? get _questionIds => !_entryScopeActive
+      ? null
+      : widget.questionIds ??
+            (widget.initialQuestionId == null
+                ? null
+                : [widget.initialQuestionId!]);
   @override
   void initState() {
     super.initState();
@@ -88,7 +94,9 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
   }
 
   Future<_PracticeData> _load() async {
-    if (widget.initialQuestionId != null && widget.questionIds != null &&
+    if (_entryScopeActive &&
+        widget.initialQuestionId != null &&
+        widget.questionIds != null &&
         !widget.questionIds!.contains(widget.initialQuestionId)) {
       throw StateError('起始题目不在指定题目列表中');
     }
@@ -100,7 +108,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
       database: widget.database,
     ).fetchLibraries(user.id);
     final db = await (widget.database ?? AppDatabase.instance).database;
-    if (_scopeLocked) {
+    if (_entryScopeActive && _hasEntryScope) {
       final ids = _questionIds;
       final documents = await db.rawQuery(
         '''SELECT DISTINCT d.id, d.library_id, d.import_record_id
@@ -130,6 +138,10 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
       _libraryId =
           widget.libraryId ??
           (libraryIds.length == 1 ? libraryIds.single as int? : null);
+      final recordIds = documents.map((d) => d['import_record_id']).toSet();
+      _recordId =
+          widget.recordId ??
+          (recordIds.length == 1 ? recordIds.single as int? : null);
     } else {
       _libraryId ??= libraries.firstOrNull?.id;
       if (_libraryId == null) throw StateError('请先创建知识库');
@@ -142,7 +154,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
       libraryId: _libraryId,
       recordId: _recordId,
       conceptId: _conceptId,
-      documentId: widget.documentId,
+      documentId: _sourceDocumentId,
       wrongOnly: _wrongOnly,
     );
     final concepts = await db.rawQuery(
@@ -151,9 +163,9 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
       WHERE c.user_id = ? AND d.user_id=c.user_id
         ${_libraryId == null ? '' : 'AND d.library_id = ?'}
         ${_recordId == null ? '' : 'AND d.import_record_id = ?'}
-        ${widget.documentId == null ? '' : 'AND d.id = ?'}
+        ${_sourceDocumentId == null ? '' : 'AND d.id = ?'}
       ORDER BY c.name''',
-      [user.id, ?_libraryId, ?_recordId, ?widget.documentId],
+      [user.id, ?_libraryId, ?_recordId, ?_sourceDocumentId],
     );
     final questions = await PracticeSessionRepository(database: widget.database)
         .questions(
@@ -163,13 +175,20 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
           limit: _questionIds?.length ?? 500,
         );
     if (_questionIds != null) {
-      if (questions.length != _questionIds!.toSet().length) {
+      final ids = _questionIds!;
+      final selected = ids.isEmpty
+          ? <Map<String, Object?>>[]
+          : await db.rawQuery(
+              '''SELECT q.id FROM practice_questions q
+              JOIN source_documents d ON d.id=q.document_id
+              WHERE ${scope.ownershipClause}
+              AND q.id IN (${List.filled(ids.length, '?').join(',')})''',
+              [...scope.args, ...ids],
+            );
+      if (selected.length != ids.toSet().length) {
         throw StateError('部分指定题目已删除或不在当前范围');
       }
-      final order = <int>{
-        ?widget.initialQuestionId,
-        ..._questionIds!,
-      }.toList();
+      final order = <int>{?widget.initialQuestionId, ..._questionIds!}.toList();
       questions.sort(
         (a, b) => order
             .indexOf(a.question.id)
@@ -180,13 +199,16 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
   }
 
   void _refresh() {
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load();
+    });
   }
 
   Future<void> _generate(_PracticeData data) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
+      if (_libraryId == null) throw StateError('请先选择一个知识库再生成新题');
       final config = await LlmConfigRepository(
         database: widget.database,
       ).getByUserId(data.scope.userId);
@@ -196,7 +218,7 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
         libraryId: _libraryId,
         recordId: _recordId,
         conceptId: _conceptId,
-        documentId: widget.documentId,
+        documentId: _sourceDocumentId,
       );
       final ids = await LibraryPracticeService(
         database: widget.database,
@@ -228,6 +250,52 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
     }
   }
 
+  Widget _scopeField({
+    required String label,
+    required Key fieldKey,
+    required int value,
+    required List<DropdownMenuItem<int>> items,
+    required ValueChanged<int?> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 66,
+            child: Text(label, style: AppTextStyles.bodySmall(context)),
+          ),
+          Expanded(
+            child: DropdownButtonFormField<int>(
+              key: fieldKey,
+              initialValue: value,
+              isExpanded: true,
+              style: AppTextStyles.body(context),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.surfaceAlt,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              items: items,
+              onChanged: _busy ? null : onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final body = FutureBuilder<_PracticeData>(
@@ -238,245 +306,285 @@ class _LibraryPracticePageState extends State<LibraryPracticePage> {
             icon: Icons.error_outline_rounded,
             title: '无法加载练习范围',
             description: '${snapshot.error}',
+            onRetry: () async => _refresh(),
           );
         }
         if (!snapshot.hasData) {
           return const AppLoadingState(label: '正在准备练习…');
         }
         final data = snapshot.data!;
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
-          children: [
-            Text('围绕自己的知识练习', style: AppTextStyles.h1(context)),
-            const SizedBox(height: 6),
-            Text(
-              '选择范围 → 作答 → 回看来源 → 变式 → 间隔复习。',
-              style: AppTextStyles.bodySmall(context),
-            ),
-            const SizedBox(height: 18),
-
-            // ---- 练习范围 -------------------------------------------------
-            AppCard.plain(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const AppSectionHeader(
-                    title: '练习范围',
-                    subtitle: '不选就练整库',
-                    accent: AppColors.primary,
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+              children: [
+                AppSegmented<bool>(
+                  value: _generateNew,
+                  enabled: !_busy,
+                  onChanged: (value) => setState(() => _generateNew = value),
+                  options: const [
+                    AppSegmentedOption(false, '练已有题'),
+                    AppSegmentedOption(true, 'AI 出新题'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _generateNew
+                      ? '根据已解析的资料生成新题，生成后直接开始练习。'
+                      : '练习已保存的题目，作答后查看答案与解析。',
+                  style: AppTextStyles.bodySmall(context),
+                ),
+                const SizedBox(height: 20),
+                AppCard.outlined(
+                  borderRadius: 16,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('选择练习范围', style: AppTextStyles.title(context)),
+                      const SizedBox(height: 10),
+                      _scopeField(
+                        label: '知识库',
+                        fieldKey: ValueKey('library-$_libraryId'),
+                        value: _libraryId ?? -1,
+                        items: [
+                          if (_libraryId == null)
+                            const DropdownMenuItem(
+                              value: -1,
+                              child: Text('所选题目的知识库'),
+                            ),
+                          ...data.libraries.map(
+                            (library) => DropdownMenuItem(
+                              value: library.id,
+                              child: Text(
+                                library.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (id) {
+                          if (id == null || id == -1) return;
+                          _entryScopeActive = false;
+                          _libraryId = id;
+                          _recordId = null;
+                          _conceptId = null;
+                          _refresh();
+                        },
+                      ),
+                      _scopeField(
+                        label: '资料',
+                        fieldKey: ValueKey('record-$_libraryId-$_recordId'),
+                        value: _recordId ?? -1,
+                        items: [
+                          const DropdownMenuItem(
+                            value: -1,
+                            child: Text('全部导入资料'),
+                          ),
+                          ...data.records.map(
+                            (record) => DropdownMenuItem(
+                              value: record.id,
+                              child: Text(
+                                record.title,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (id) {
+                          _entryScopeActive = false;
+                          _recordId = id == -1 ? null : id;
+                          _conceptId = null;
+                          _refresh();
+                        },
+                      ),
+                      _scopeField(
+                        label: '知识点',
+                        fieldKey: ValueKey(
+                          'concept-$_libraryId-$_recordId-$_conceptId',
+                        ),
+                        value: _conceptId ?? -1,
+                        items: [
+                          const DropdownMenuItem(
+                            value: -1,
+                            child: Text('全部知识点'),
+                          ),
+                          ...data.concepts.map(
+                            (concept) => DropdownMenuItem(
+                              value: concept['id'] as int,
+                              child: Text(
+                                concept['name'] as String,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (id) {
+                          _entryScopeActive = false;
+                          _conceptId = id == -1 ? null : id;
+                          _refresh();
+                        },
+                      ),
+                      if (_entryScopeActive && _hasEntryScope) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _generateNew
+                              ? '将依据所选资料出题，题量与难度在下方设置。'
+                              : _questionIds != null
+                              ? '当前仅练这 ${_questionIds!.toSet().length} 道题，更换范围后会重新选题。'
+                              : '当前练习来自所选资料或知识点，可在上方更换。',
+                          style: AppTextStyles.caption(context),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                if (!_generateNew) ...[
+                  Text('筛选已有题', style: AppTextStyles.label(context)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilterChip(
+                        label: const Text('只练错题'),
+                        selected: _wrongOnly,
+                        onSelected: _busy
+                            ? null
+                            : (value) {
+                                _wrongOnly = value;
+                                _refresh();
+                              },
+                      ),
+                      FilterChip(
+                        label: const Text('到期复习'),
+                        selected: _dueOnly,
+                        onSelected: _busy
+                            ? null
+                            : (value) {
+                                _dueOnly = value;
+                                _refresh();
+                              },
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<int>(
-                    initialValue: _libraryId ?? -1,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: '知识库'),
-                    items: [
-                      if (_libraryId == null)
-                        const DropdownMenuItem(
-                          value: -1,
-                          child: Text('所选题目的知识库'),
-                        ),
-                      ...data.libraries.map(
-                        (l) => DropdownMenuItem(value: l.id, child: Text(l.name)),
-                      ),
-                    ],
-                    onChanged: _scopeLocked || _busy
-                        ? null
-                        : (id) {
-                            _libraryId = id;
-                            _recordId = null;
-                            _conceptId = null;
-                            _refresh();
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    key: ValueKey('record-$_libraryId'),
-                    initialValue: _recordId ?? -1,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: '导入记录'),
-                    items: [
-                      const DropdownMenuItem(
-                        value: -1,
-                        child: Text('本库全部记录'),
-                      ),
-                      ...data.records.map(
-                        (r) => DropdownMenuItem(value: r.id, child: Text(r.title)),
-                      ),
-                    ],
-                    onChanged: _scopeLocked || _busy
-                        ? null
-                        : (id) {
-                            _recordId = id == -1 ? null : id;
-                            _conceptId = null;
-                            _refresh();
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    key: ValueKey('concept-$_libraryId-$_recordId'),
-                    initialValue: _conceptId ?? -1,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: '知识点'),
-                    items: [
-                      const DropdownMenuItem(
-                        value: -1,
-                        child: Text('全部知识点'),
-                      ),
-                      ...data.concepts.map(
-                        (c) => DropdownMenuItem(
-                          value: c['id'] as int,
-                          child: Text(c['name'] as String),
-                        ),
-                      ),
-                    ],
-                    onChanged: _scopeLocked || _busy
-                        ? null
-                        : (id) {
-                            _conceptId = id == -1 ? null : id;
-                            _refresh();
-                          },
-                  ),
-                  const SizedBox(height: 4),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('只练错题和薄弱题'),
-                    value: _wrongOnly,
-                    onChanged: _questionIds != null || _busy
-                        ? null
-                        : (v) {
-                            _wrongOnly = v;
-                            _refresh();
-                          },
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('只看已到复习时间'),
-                    value: _dueOnly,
-                    onChanged: _questionIds != null || _busy
-                        ? null
-                        : (v) {
-                            _dueOnly = v;
-                            _refresh();
-                          },
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // ---- 就绪状态 + 主操作 ----------------------------------------
-            // The count and the primary action belong together: "N 道题" is the
-            // answer to "what am I about to start", so it is not a bare line.
-            AppCard.tinted(
-              accent: AppColors.primary,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.playlist_add_check_rounded,
-                        size: 20,
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
+                  AppCard.tinted(
+                    accent: AppColors.primary,
+                    borderRadius: 16,
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
                           '当前范围：${data.questions.length} 道题',
                           style: AppTextStyles.title(context),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    onPressed: _busy || data.questions.isEmpty
-                        ? null
-                        : () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ScopedPracticeRunner(
-                                  scope: data.scope,
-                                  questions: data.questions,
-                                  database: widget.database,
-                                ),
-                              ),
-                            );
-                            if (mounted) _refresh();
-                          },
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('开始练习'),
-                  ),
-                  if (data.questions.isEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      '这个范围里还没有题，可以先在下面生成一套专项题。',
-                      style: AppTextStyles.caption(context),
+                        const SizedBox(height: 6),
+                        Text(
+                          data.questions.isEmpty
+                              ? (_wrongOnly || _dueOnly
+                                    ? '没有符合筛选条件的题目，试试取消筛选。'
+                                    : '还没有保存的题目，可以切换到「AI 出新题」。')
+                              : '按当前范围开始，练习结果会保存到学习记录。',
+                          style: AppTextStyles.bodySmall(context),
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: _busy || data.questions.isEmpty
+                              ? null
+                              : () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ScopedPracticeRunner(
+                                        scope: data.scope,
+                                        questions: data.questions,
+                                        database: widget.database,
+                                      ),
+                                    ),
+                                  );
+                                  if (mounted) _refresh();
+                                },
+                          icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                          label: const Text('开始练习'),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
+                ] else ...[
+                  AppCard.outlined(
+                    borderRadius: 16,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('出题设置', style: AppTextStyles.title(context)),
+                        const SizedBox(height: 16),
+                        Text('题量', style: AppTextStyles.label(context)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final count in [5, 10, 20])
+                              ChoiceChip(
+                                label: Text('$count 道'),
+                                selected: _count == count,
+                                onSelected: _busy
+                                    ? null
+                                    : (_) => setState(() => _count = count),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Text('难度', style: AppTextStyles.label(context)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final difficulty in ['基础理解', '综合应用', '深入思考'])
+                              ChoiceChip(
+                                label: Text(difficulty),
+                                selected: _difficulty == difficulty,
+                                onSelected: _busy
+                                    ? null
+                                    : (_) => setState(
+                                        () => _difficulty = difficulty,
+                                      ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _libraryId == null
+                              ? '请先选择一个知识库再生成新题。'
+                              : '使用「我的」中配置的 AI 模型，依据所选资料出题并保存。',
+                          style: AppTextStyles.caption(context),
+                        ),
+                        const SizedBox(height: 16),
+                        if (_busy) ...[
+                          const LinearProgressIndicator(),
+                          const SizedBox(height: 12),
+                        ],
+                        FilledButton.icon(
+                          onPressed: _busy || _libraryId == null
+                              ? null
+                              : () => _generate(data),
+                          icon: const Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 18,
+                          ),
+                          label: Text(_busy ? '正在生成，请稍候…' : '生成 $_count 道题并练习'),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
-              ),
+              ],
             ),
-            const SizedBox(height: 22),
-
-            // ---- 生成新的专项题 -------------------------------------------
-            AppCard.outlined(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const AppSectionHeader(
-                    title: '生成新的专项题',
-                    subtitle: '让 AI 按当前范围出一套新题',
-                    accent: AppColors.accentViolet,
-                  ),
-                  const SizedBox(height: 16),
-                  Text('题量', style: AppTextStyles.label(context)),
-                  const SizedBox(height: 8),
-                  AppSegmented<int>(
-                    value: _count,
-                    enabled: !_busy,
-                    onChanged: (n) => setState(() => _count = n),
-                    options: const [
-                      AppSegmentedOption(5, '5 道'),
-                      AppSegmentedOption(10, '10 道'),
-                      AppSegmentedOption(20, '20 道'),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text('难度', style: AppTextStyles.label(context)),
-                  const SizedBox(height: 8),
-                  AppSegmented<String>(
-                    variant: AppSegmentedVariant.pill,
-                    value: _difficulty,
-                    enabled: !_busy,
-                    onChanged: (s) => setState(() => _difficulty = s),
-                    options: const [
-                      AppSegmentedOption('基础理解', '基础理解'),
-                      AppSegmentedOption('综合应用', '综合应用'),
-                      AppSegmentedOption('深入思考', '深入思考'),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  if (_busy) ...[
-                    const LinearProgressIndicator(),
-                    const SizedBox(height: 12),
-                  ],
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : () => _generate(data),
-                    icon: const Icon(Icons.auto_awesome),
-                    label: const Text('基于所选范围组卷'),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         );
       },
     );
@@ -744,20 +852,28 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
             ...rows.map(
               (r) => ListTile(
                 title: Text(
-                  '${r['legacy'] == 1 ? '旧版学习反馈' : r['correct'] == 1 ? '答对' : '答错'} · ${r['created_at']}',
+                  '${r['legacy'] == 1
+                      ? '旧版学习反馈'
+                      : r['correct'] == 1
+                      ? '答对'
+                      : '答错'} · ${r['created_at']}',
                 ),
-                subtitle: Text('${r['answer']}\n${r['legacy'] == 1 ? r['feedback'] : '修订 ${r['revision']}'}'),
+                subtitle: Text(
+                  '${r['answer']}\n${r['legacy'] == 1 ? r['feedback'] : '修订 ${r['revision']}'}',
+                ),
                 onTap: () {
-                  final q = r['question_snapshot'] == null ? null
-                    : jsonDecode(r['question_snapshot'] as String) as Map;
+                  final q = r['question_snapshot'] == null
+                      ? null
+                      : jsonDecode(r['question_snapshot'] as String) as Map;
                   showDialog(
                     context: context,
                     builder: (context) => AlertDialog(
                       title: const Text('作答当时的题目与依据'),
                       content: SingleChildScrollView(
                         child: Text(
-                          q == null ? '旧版保留了答案和反馈，没有当时的题目与来源快照。\n${r['feedback']}'
-                          : '${q['question_text']}\n\n参考答案：${q['answer_text']}\n\n${q['analysis_text']}',
+                          q == null
+                              ? '旧版保留了答案和反馈，没有当时的题目与来源快照。\n${r['feedback']}'
+                              : '${q['question_text']}\n\n参考答案：${q['answer_text']}\n\n${q['analysis_text']}',
                         ),
                       ),
                     ),
@@ -775,103 +891,172 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
   Widget build(BuildContext context) {
     if (widget.questions.isEmpty) {
       return Scaffold(
-        appBar: AppBar(),
-        body: const Center(child: Text('当前范围没有题目')),
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          title: Text(
+            '练习',
+            style: AppTextStyles.title(
+              context,
+            ).copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+        body: const AppEmptyState(
+          icon: Icons.inbox_rounded,
+          title: '当前范围没有题目',
+          description: '换一个范围，或先生成一套专项题。',
+        ),
       );
     }
     final q = _question;
+    final total = widget.questions.length;
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text('练习 ${_index + 1}/${widget.questions.length}'),
-        actions:[AskEClawButton(database:widget.database,scope:EClawContext(
-          knowledgeBaseId:widget.scope.libraryId,importRecordId:widget.scope.recordId,
-          documentId:q.documentId))],
+        title: Text(
+          '练习 ${_index + 1}/$total',
+          style: AppTextStyles.title(
+            context,
+          ).copyWith(fontWeight: FontWeight.w700),
+        ),
+        backgroundColor: Colors.transparent,
+        foregroundColor: AppColors.textPrimary,
+        scrolledUnderElevation: 0,
+        actions: [
+          AskEClawButton(
+            database: widget.database,
+            scope: EClawContext(
+              knowledgeBaseId: widget.scope.libraryId,
+              importRecordId: widget.scope.recordId,
+              documentId: q.documentId,
+            ),
+          ),
+        ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 32),
         children: [
-          Text(
-            widget.questions[_index].documentTitle,
-            style: AppTextStyles.caption(context),
-          ),
-          const SizedBox(height: 12),
-          Text(q.questionText, style: AppTextStyles.h2(context)),
-          ...q.options.asMap().entries.map(
-            (e) => Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: OutlinedButton(
-                onPressed: _busy || _submission != null
-                    ? null
-                    : () {
-                        _answer.text = String.fromCharCode(65 + e.key);
-                      },
-                child: Text(e.value),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _answer,
-            minLines: 2,
-            maxLines: 6,
-            enabled: !_busy && _submission == null,
-            decoration: const InputDecoration(labelText: '我的答案'),
-          ),
-          const SizedBox(height: 12),
-          if (_busy) const LinearProgressIndicator(),
-          if (_submission == null)
-            FilledButton(
-              onPressed: _busy ? null : () => _run(_submit),
-              child: const Text('提交并核对'),
-            ),
-          if (_revealed) ...[
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_submission != null)
-                      Text(
-                        _submission!.correct ? '本次答对' : '本次答错',
-                        style: AppTextStyles.h3(context),
-                      ),
-                    Text('参考答案：${q.answerText ?? ''}'),
-                    Text('解析：${q.analysisText ?? ''}'),
-                    if (q.expectedKeywords.isNotEmpty)
-                      Text('关键点：${q.expectedKeywords.join('、')}'),
-                    if (_evidence != null)
-                      Text(
-                        '${_evidence!.label} · ${_evidence!.distinctQuestions} 道不同题'
-                        ' · ${_evidence!.correctCount} 次连续正确'
-                        '\n间隔复习：${_evidence!.delayedSuccess ? '已验证' : '至少相隔 24 小时再验证'}'
-                        '\n下次复习：${_evidence!.nextReview?.toLocal() ?? '待安排'}',
-                      ),
-                  ],
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.questions[_index].documentTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.caption(context),
                 ),
               ),
+              const SizedBox(width: 10),
+              Text(
+                '${_index + 1} / $total',
+                style: AppTextStyles.labelSmall(context).copyWith(
+                  color: AppColors.textQuiet,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          AppProgressBar(value: (_index + 1) / total, height: 4),
+          const SizedBox(height: 12),
+
+          // ---- 题目 + 作答 ----
+          AppCard.plain(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  q.questionText,
+                  style: AppTextStyles.h2(context).copyWith(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    height: 1.55,
+                  ),
+                ),
+                if (q.options.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  for (final (i, option) in q.options.indexed)
+                    _ScopedOption(
+                      letter: String.fromCharCode(65 + i),
+                      text: option,
+                      selected:
+                          _answer.text.trim().toUpperCase() ==
+                          String.fromCharCode(65 + i),
+                      onTap: _busy || _submission != null
+                          ? null
+                          : () => setState(() {
+                              _answer.text = String.fromCharCode(65 + i);
+                            }),
+                    ),
+                ],
+                const SizedBox(height: 14),
+                const Divider(height: 1, color: AppColors.borderLight),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _answer,
+                  minLines: 2,
+                  maxLines: 6,
+                  enabled: !_busy && _submission == null,
+                  decoration: InputDecoration(
+                    labelText: '我的答案',
+                    hintText: '写下你的答案',
+                    filled: true,
+                    fillColor: AppColors.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.all(14),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_busy)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 10),
+                    child: LinearProgressIndicator(minHeight: 3),
+                  ),
+                if (_submission == null)
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    onPressed: _busy ? null : () => _run(_submit),
+                    child: const Text('提交并核对'),
+                  ),
+              ],
             ),
+          ),
+
+          if (_revealed) ...[
+            const SizedBox(height: 12),
+            _ScopedResultCard(
+              correct: _submission?.correct,
+              question: q,
+              evidence: _evidence,
+            ),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                OutlinedButton(
-                  onPressed: _busy ? null : () => setState(_newAttempt),
-                  child: const Text('原题再练'),
+                _QuietAction(
+                  label: '原题再练',
+                  onTap: _busy ? null : () => setState(_newAttempt),
                 ),
-                OutlinedButton(
-                  onPressed: _busy ? null : () => _run(_variations),
-                  child: const Text('同概念变式'),
+                _QuietAction(
+                  label: '同概念变式',
+                  onTap: _busy ? null : () => _run(_variations),
                 ),
                 if (_submission != null)
-                  TextButton(
-                    onPressed: _busy ? null : () => _run(_regrade),
-                    child: const Text('纠正本次判定'),
+                  _QuietAction(
+                    label: '纠正本次判定',
+                    onTap: _busy ? null : () => _run(_regrade),
                   ),
               ],
             ),
           ],
+
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             children: [
@@ -881,9 +1066,8 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
                     : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => DocumentDetailPage(
-                            documentId: q.documentId,
-                          ),
+                          builder: (_) =>
+                              DocumentDetailPage(documentId: q.documentId),
                         ),
                       ),
                 child: const Text('回看对应知识'),
@@ -894,11 +1078,13 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
                     : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                              q.sourceVersionId == null
-                                ? OcrResultPage(documentId: q.documentId)
-                                : SourceVersionPage(userId: widget.scope.userId,
-                                    versionId: q.sourceVersionId!, database: widget.database),
+                          builder: (_) => q.sourceVersionId == null
+                              ? OcrResultPage(documentId: q.documentId)
+                              : SourceVersionPage(
+                                  userId: widget.scope.userId,
+                                  versionId: q.sourceVersionId!,
+                                  database: widget.database,
+                                ),
                         ),
                       ),
                 child: const Text('查看原始来源'),
@@ -909,28 +1095,31 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
               ),
             ],
           ),
+          const Divider(height: 8, color: AppColors.borderLight),
           Row(
             children: [
               Expanded(
-                child: TextButton(
+                child: TextButton.icon(
                   onPressed: _busy || _index == 0
                       ? null
                       : () => setState(() {
                           _index--;
                           _newAttempt();
                         }),
-                  child: const Text('上一题'),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  label: const Text('上一题'),
                 ),
               ),
               Expanded(
-                child: TextButton(
-                  onPressed: _busy || _index >= widget.questions.length - 1
+                child: TextButton.icon(
+                  onPressed: _busy || _index >= total - 1
                       ? null
                       : () => setState(() {
                           _index++;
                           _newAttempt();
                         }),
-                  child: const Text('下一题'),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  label: const Text('下一题'),
                 ),
               ),
             ],
@@ -939,4 +1128,245 @@ class _ScopedPracticeRunnerState extends State<ScopedPracticeRunner> {
       ),
     );
   }
+}
+
+/// One answer option as a tappable block with its own letter badge.
+class _ScopedOption extends StatelessWidget {
+  const _ScopedOption({
+    required this.letter,
+    required this.text,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String letter;
+  final String text;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.tintOf(AppColors.primary, 0.08)
+                : AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.borderLight,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.primary : AppColors.surface,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? AppColors.primary : AppColors.border,
+                  ),
+                ),
+                child: Text(
+                  letter,
+                  style: AppTextStyles.labelSmall(context).copyWith(
+                    color: selected
+                        ? AppColors.textOnPrimary
+                        : AppColors.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  text,
+                  style: AppTextStyles.bodySmall(context).copyWith(
+                    fontSize: 14.5,
+                    height: 1.5,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Check-yourself result: verdict, reference answer, analysis, then the
+/// mastery evidence as quiet supporting text.
+class _ScopedResultCard extends StatelessWidget {
+  const _ScopedResultCard({
+    required this.correct,
+    required this.question,
+    required this.evidence,
+  });
+
+  final bool? correct;
+  final PracticeQuestionRecord question;
+  final MasteryEvidence? evidence;
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = correct == true;
+    final accent = correct == null
+        ? AppColors.textSecondary
+        : ok
+        ? AppColors.success
+        : AppColors.error;
+    final label = correct == null
+        ? '已核对'
+        : ok
+        ? '本次答对'
+        : '本次答错';
+
+    return AppCard.plain(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: AppColors.tintOf(accent, 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  ok
+                      ? Icons.check_rounded
+                      : correct == null
+                      ? Icons.info_outline_rounded
+                      : Icons.close_rounded,
+                  size: 18,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: AppTextStyles.title(context).copyWith(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: accent,
+                ),
+              ),
+              const Spacer(),
+              if (evidence != null)
+                AppTag(label: evidence!.label, accent: AppColors.accentViolet),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+            decoration: BoxDecoration(
+              color: AppColors.tintOf(AppColors.success, 0.07),
+              borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+              border: Border.all(
+                color: AppColors.tintOf(AppColors.success, 0.18),
+              ),
+            ),
+            child: SelectableText(
+              '参考答案：${question.answerText ?? ''}',
+              style: AppTextStyles.bodySmall(
+                context,
+              ).copyWith(color: AppColors.textPrimary, height: 1.55),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '解析',
+            style: AppTextStyles.label(
+              context,
+            ).copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 5),
+          SelectableText(
+            question.analysisText ?? '暂无解析',
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(height: 1.6, color: AppColors.slate),
+          ),
+          if (question.expectedKeywords.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              '关键点：${question.expectedKeywords.join('、')}',
+              style: AppTextStyles.caption(context),
+            ),
+          ],
+          if (evidence != null) ...[
+            const SizedBox(height: 14),
+            const Divider(height: 1, color: AppColors.borderLight),
+            const SizedBox(height: 10),
+            Text(
+              '${evidence!.distinctQuestions} 道不同题 · ${evidence!.correctCount} 次连续正确',
+              style: AppTextStyles.caption(context),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              '间隔复习：${evidence!.delayedSuccess ? '已验证' : '至少相隔 24 小时再验证'}',
+              style: AppTextStyles.caption(context),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              '下次复习：${evidence!.nextReview?.toLocal() ?? '待安排'}',
+              style: AppTextStyles.caption(context),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A small outlined action used for secondary quiz moves.
+class _QuietAction extends StatelessWidget {
+  const _QuietAction({required this.label, this.onTap});
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.chip),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.chip),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: AppTextStyles.labelSmall(context).copyWith(
+            color: onTap == null
+                ? AppColors.textQuiet
+                : AppColors.textSecondary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    ),
+  );
 }

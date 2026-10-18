@@ -222,9 +222,15 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('刷练习题'),
+        title: Text(
+          '练习',
+          style: AppTextStyles.title(
+            context,
+          ).copyWith(fontWeight: FontWeight.w700),
+        ),
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
+        scrolledUnderElevation: 0,
       ),
       body: FutureBuilder<List<PracticeQuestionWithDocument>>(
         future: _future,
@@ -269,47 +275,55 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           final isFavorited = _favoriteKeys.contains(favoriteKey);
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 28),
             children: [
               _ProgressHeader(
                 currentIndex: _currentIndex,
                 total: questions.length,
                 documentTitle: current.documentTitle,
               ),
-              const SizedBox(height: 16),
-              _QuestionCard(
-                question: question,
-                isFavorited: isFavorited,
-                isFavoriteSaving: _isFavoriteSaving,
-                onFavorite: () => _toggleFavorite(question),
-              ),
               const SizedBox(height: 12),
 
-              // ---- 作答 ----
+              // ---- 题目 + 作答：one surface ----
+              // Two separate cards made the act of answering feel like filling
+              // a second form. A hairline inside one card reads as one task.
               AppCard.plain(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const AppSectionHeader(
-                      title: '我的答案',
-                      subtitle: '先自己写一遍，再对答案',
-                      accent: AppColors.primary,
+                    _QuestionBody(
+                      question: question,
+                      isFavorited: isFavorited,
+                      isFavoriteSaving: _isFavoriteSaving,
+                      onFavorite: () => _toggleFavorite(question),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
+                    const Divider(height: 1, color: AppColors.borderLight),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: _answerController,
                       minLines: 3,
                       maxLines: 6,
                       decoration: InputDecoration(
-                        hintText: '写下你的作答或简单判断',
+                        hintText: '写下你的答案',
                         filled: true,
-                        fillColor: AppColors.surfaceAlt,
+                        fillColor: AppColors.surface,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(
                             AppRadii.cardSmall,
                           ),
-                          borderSide: BorderSide.none,
+                          borderSide: const BorderSide(
+                            color: AppColors.borderLight,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppRadii.cardSmall,
+                          ),
+                          borderSide: const BorderSide(
+                            color: AppColors.borderLight,
+                          ),
                         ),
                         contentPadding: const EdgeInsets.all(14),
                       ),
@@ -434,9 +448,11 @@ class _ProgressHeader extends StatelessWidget {
           children: [
             Text(
               '第 ${currentIndex + 1} / $total 题',
-              style: AppTextStyles.title(
-                context,
-              ).copyWith(fontWeight: FontWeight.w800),
+              style: AppTextStyles.labelSmall(context).copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
             ),
             const Spacer(),
             Flexible(
@@ -456,8 +472,10 @@ class _ProgressHeader extends StatelessWidget {
   }
 }
 
-class _QuestionCard extends StatelessWidget {
-  const _QuestionCard({
+/// The question body. It has no card of its own: it lives inside the single
+/// task surface together with the answer field.
+class _QuestionBody extends StatelessWidget {
+  const _QuestionBody({
     required this.question,
     required this.isFavorited,
     required this.isFavoriteSaving,
@@ -471,89 +489,126 @@ class _QuestionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard.plain(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (question.difficulty?.isNotEmpty == true)
-                AppTag(
-                  label: question.difficulty!,
-                  accent: AppColors.accentAmber,
-                  filled: false,
-                ),
-              const Spacer(),
-              IconButton(
-                tooltip: isFavorited ? '取消收藏' : '收藏',
-                onPressed: isFavoriteSaving ? null : onFavorite,
-                icon: Icon(
-                  isFavorited ? Icons.star_rounded : Icons.star_border_rounded,
-                  color: isFavorited
-                      ? AppColors.accentAmber
-                      : AppColors.textSecondary,
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (question.difficulty?.isNotEmpty == true)
+              AppTag(
+                label: question.difficulty!,
+                accent: AppColors.accentAmber,
               ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            question.questionText,
-            style: AppTextStyles.h2(context).copyWith(
-              fontWeight: FontWeight.w800,
-              height: 1.5,
-            ),
-          ),
-          if (question.options.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _QuestionOptionList(options: question.options),
-          ] else if (question.questionKind ==
-              PracticeQuestionKind.multipleChoice) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-              decoration: BoxDecoration(
-                color: AppColors.tintOf(AppColors.accentAmber, 0.10),
-                borderRadius: BorderRadius.circular(AppRadii.chipSmall),
-              ),
-              child: Text(
-                '选项缺失，请回到 AI 生成结果页重新生成练习题',
-                style: AppTextStyles.caption(
-                  context,
-                ).copyWith(color: AppColors.accentAmber),
+            const Spacer(),
+            IconButton(
+              tooltip: isFavorited ? '取消收藏' : '收藏',
+              onPressed: isFavoriteSaving ? null : onFavorite,
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+              icon: Icon(
+                isFavorited ? Icons.star_rounded : Icons.star_border_rounded,
+                size: 20,
+                color: isFavorited
+                    ? AppColors.accentAmber
+                    : AppColors.textQuiet,
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          question.questionText,
+          style: AppTextStyles.h2(context).copyWith(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            height: 1.55,
+          ),
+        ),
+        if (question.options.isNotEmpty) ...[
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _MetricPill(
-                icon: Icons.trending_up_rounded,
-                text: '掌握度 ${question.masteryScore}',
-                accent: AppColors.accentMint,
-              ),
-              _MetricPill(
-                icon: Icons.close_rounded,
-                text: '错 ${question.wrongCount} 次',
-                accent: question.wrongCount > 0
-                    ? AppColors.accentRose
-                    : AppColors.textTertiary,
-              ),
-              if (question.nextReviewAt != null)
-                _MetricPill(
-                  icon: Icons.schedule_rounded,
-                  text: '下次 ${_formatTime(question.nextReviewAt!)}',
-                  accent: AppColors.accentSky,
-                ),
-            ],
+          _QuestionOptionList(options: question.options),
+        ] else if (question.questionKind ==
+            PracticeQuestionKind.multipleChoice) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+            decoration: BoxDecoration(
+              color: AppColors.tintOf(AppColors.accentAmber, 0.10),
+              borderRadius: BorderRadius.circular(AppRadii.chipSmall),
+            ),
+            child: Text(
+              '选项缺失，请回到 AI 生成结果页重新生成练习题',
+              style: AppTextStyles.caption(
+                context,
+              ).copyWith(color: AppColors.accentAmber),
+            ),
           ),
         ],
-      ),
+        const SizedBox(height: 14),
+        _MetricsRow(question: question),
+      ],
     );
   }
+}
+
+/// Mastery / wrong count / next review as one quiet status line.
+///
+/// Three filled pills competed with the question for attention. A coloured dot
+/// plus neutral text keeps the same meaning at a fraction of the weight.
+class _MetricsRow extends StatelessWidget {
+  const _MetricsRow({required this.question});
+
+  final PracticeQuestionRecord question;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 14,
+    runSpacing: 6,
+    children: [
+      _StatusItem(
+        accent: AppColors.accentMint,
+        label: '掌握度 ${question.masteryScore}',
+      ),
+      _StatusItem(
+        accent: question.wrongCount > 0
+            ? AppColors.accentRose
+            : AppColors.border,
+        label: '错 ${question.wrongCount} 次',
+      ),
+      if (question.nextReviewAt != null)
+        _StatusItem(
+          accent: AppColors.accentSky,
+          label: '${_formatTime(question.nextReviewAt!)} 复习',
+        ),
+    ],
+  );
+}
+
+class _StatusItem extends StatelessWidget {
+  const _StatusItem({required this.accent, required this.label});
+
+  final Color accent;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 5,
+        height: 5,
+        decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 5),
+      Text(
+        label,
+        style: AppTextStyles.labelSmall(
+          context,
+        ).copyWith(color: AppColors.textTertiary, fontWeight: FontWeight.w600),
+      ),
+    ],
+  );
 }
 
 class _QuestionOptionList extends StatelessWidget {
@@ -601,10 +656,7 @@ class _AnswerCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const AppSectionHeader(
-            title: '正确答案',
-            accent: AppColors.success,
-          ),
+          const AppSectionHeader(title: '正确答案', accent: AppColors.success),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
@@ -644,43 +696,6 @@ class _AnswerCard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// One piece of question state (mastery / wrong count / next review). Colour
-/// carries meaning here, so the three pills no longer look interchangeable.
-class _MetricPill extends StatelessWidget {
-  const _MetricPill({
-    required this.icon,
-    required this.text,
-    required this.accent,
-  });
-
-  final IconData icon;
-  final String text;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(
-      color: AppColors.tintOf(accent, 0.10),
-      borderRadius: BorderRadius.circular(AppRadii.chip),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: accent),
-        const SizedBox(width: 4),
-        Text(
-          text,
-          style: AppTextStyles.labelSmall(context).copyWith(
-            color: accent,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 String _formatTime(DateTime time) {

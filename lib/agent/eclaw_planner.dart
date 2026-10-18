@@ -217,7 +217,11 @@ create_learning_task 必须使用提案的 taskTitle、documentId、dueAt，非�
               RegExp('进去|这个知识库|刚才|该知识库').hasMatch(command) &&
               previousLibraryName != null
           ? previousLibraryName
-          : '${explicit?.group(1)?.trim() ?? target?.group(1)?.trim() ?? (topic.isEmpty ? '学习资料' : topic)}知识库';
+          : _libraryNameFor(
+              explicit?.group(1),
+              target?.group(1),
+              topic,
+            );
       add('create_knowledge_library', '准备目标知识库', {'name': name});
     }
     if (organize) {
@@ -322,4 +326,19 @@ create_learning_task 必须使用提案的 taskTitle、documentId、dueAt，非�
     }
     return '';
   }
+}
+
+
+/// Names a library created from a free-form instruction.
+///
+/// The old default produced "学习资料知识库" — a label nobody says out loud —
+/// whenever the sentence carried no topic. An unnamed library is just "知识库".
+String _libraryNameFor(String? explicit, String? target, String topic) {
+  final base = explicit?.trim().isNotEmpty == true
+      ? explicit!.trim()
+      : target?.trim().isNotEmpty == true
+      ? target!.trim()
+      : topic.trim();
+  if (base.isEmpty || base == '学习资料') return '知识库';
+  return base.endsWith('知识库') ? base : '$base知识库';
 }

@@ -250,59 +250,12 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 116),
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
-            Container(
-              padding: const EdgeInsets.all(17),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFF4FBFF), Colors.white, Color(0xFFEAF9F6)],
-                ),
-                borderRadius: BorderRadius.circular(25),
-                border: Border.all(color: const Color(0xFFCDE1FF)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Icon(
-                      Icons.collections_bookmark_outlined,
-                      color: AppColors.primary,
-                      size: 29,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '学习资料知识库',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                        SizedBox(height: 5),
-                        Text(
-                          '让知识成为你自己的宝贵财富',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF8D9BB3),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 18),
+              child: Text('知识库', style: AppTextStyles.h1(context)),
             ),
-            const SizedBox(height: 16),
             KnowledgeSearchField(
-              hint: '搜索知识库、记录、知识点…',
+              hint: '搜索',
               onChanged: (v) => setState(() => _query = v),
             ),
             const SizedBox(height: 22),

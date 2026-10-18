@@ -825,14 +825,14 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
       return const _CenteredHint(
         icon: Icons.library_books_outlined,
         title: '还没有知识库',
-        message: '先在「知识库」里创建一本知识库并导入资料，再回来建立知识图谱。',
+        message: '先在知识库导入资料，再回来建立图谱。',
       );
     }
     if (_selectedLibraryIds.isEmpty) {
       return _CenteredHint(
         icon: Icons.filter_alt_off_outlined,
         title: '还没有选择知识库',
-        message: '选择一本或多本知识库，系统会从这些资料里抽取知识点与关系。',
+        message: '从所选知识库的资料里抽取知识点与关系。',
         actionLabel: '选择知识库',
         onAction: _openLibraryPicker,
       );
@@ -905,7 +905,7 @@ class _KnowledgeGraphPageState extends State<KnowledgeGraphPage> {
         autofocus: true,
         onChanged: _runSearch,
         decoration: const InputDecoration(
-          hintText: '搜索知识点名称或同义词',
+          hintText: '搜索',
           prefixIcon: Icon(Icons.search_rounded, size: 19),
           isDense: true,
           border: InputBorder.none,

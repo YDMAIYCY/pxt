@@ -366,7 +366,6 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                 _section(
                   icon: Icons.view_in_ar_outlined,
                   title: '服务商选择',
-                  subtitle: '选择你要使用的模型服务商',
                   child: _providerGrid(),
                 ),
                 _section(
@@ -388,7 +387,6 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                 _section(
                   icon: Icons.layers_outlined,
                   title: '模型选择',
-                  subtitle: '选择合适的模型，获取更好的效果',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -491,7 +489,6 @@ class _LlmConfigEditPageState extends State<LlmConfigEditPage> {
                 _section(
                   icon: Icons.tune,
                   title: '高级设置',
-                  subtitle: '按需调整模型参数',
                   child: ExpansionTile(
                     key: ValueKey('advanced_${_config.provider}'),
                     tilePadding: EdgeInsets.zero,

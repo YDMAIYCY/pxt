@@ -405,7 +405,7 @@ class _RecordMindmapViewState extends State<RecordMindmapView> {
           TextField(
             controller: _searchController,
             decoration: const InputDecoration(
-              hintText: '搜索导图节点，直接在图中标色',
+              hintText: '搜索节点',
               prefixIcon: Icon(Icons.search),
             ),
             onChanged: _changeSearch,

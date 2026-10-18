@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../community/cloud_backend.dart';
@@ -44,6 +45,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _foreground = true;
   String _status = '正在连接…', _title = '私聊';
   String? _syncError;
+  Json? _peerProfile;
   @override
   void initState() {
     super.initState();
@@ -153,13 +155,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (!_isCurrent(generation, uuid)) return false;
       final pending = await _outbox.pending(widget.conversationId);
       if (!_isCurrent(generation, uuid)) return false;
-      _title = (info['profile'] as Map)['nickname'] as String;
+      _peerProfile = Json.from(info['profile'] as Map);
+      _title = _peerProfile!['nickname'] as String;
       _messages = messages;
       _more = messages.length == 30;
       _pending = pending;
       _ready = true;
       try {
-    _channel ??= _repo.client
+        _channel ??= _repo.client
             .channel('chat-${widget.conversationId}-$uuid')
             .onPostgresChanges(
               event: PostgresChangeEvent.insert,
@@ -425,70 +428,100 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget _bubble(Json item, {bool pending = false}) {
     final mine = pending || item['sender_id'] == _authUuid;
     final token = item['token'] as String?;
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * .78,
-        ),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        padding: const EdgeInsets.all(13),
-        decoration: BoxDecoration(
-          color: mine ? const Color(0xFFE3EDFF) : Colors.white,
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (item['image_path'] != null)
-              CommunityImage(
-                path: item['image_path'] as String,
-                bucket: 'chat-images',
-                height: 180,
-                width: 220,
-              )
-            else if (pending && item['image_bytes'] != null)
-              Image.memory(
-                item['image_bytes'],
-                height: 140,
-                width: 180,
-                fit: BoxFit.cover,
-              ),
-            if ((item['body'] as String).isNotEmpty)
-              SelectableText(
-                item['body'] as String,
-                style: const TextStyle(fontSize: 15, height: 1.5),
-              ),
-            const SizedBox(height: 6),
-            Text(
-              communityTime(item['created_at']),
-              style: const TextStyle(fontSize: 10, color: Colors.blueGrey),
+    return Row(
+      mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!mine)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, top: 8),
+            child: CommunityAvatar(
+              profile: _peerProfile ?? {'nickname': _title},
+              size: 32,
             ),
-            if (pending)
-              TextButton(
-                onPressed: _sending ? null : _deliver,
-                child: Text(
-                  _sending
-                      ? '发送中…'
-                      : _sendErrors.containsKey(token)
-                      ? '发送失败，点击重试'
-                      : '等待发送，点击重试',
-                  style: const TextStyle(fontSize: 11),
+          ),
+        Flexible(
+          child: Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * .72,
+            ),
+            margin: const EdgeInsets.fromLTRB(8, 6, 12, 6),
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: mine ? AppColors.primary : Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(mine ? 18 : 5),
+                topRight: Radius.circular(mine ? 5 : 18),
+                bottomLeft: const Radius.circular(18),
+                bottomRight: const Radius.circular(18),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (item['image_path'] != null)
+                  CommunityImage(
+                    path: item['image_path'] as String,
+                    bucket: 'chat-images',
+                    height: 180,
+                    width: 220,
+                  )
+                else if (pending && item['image_bytes'] != null)
+                  Image.memory(
+                    item['image_bytes'],
+                    height: 140,
+                    width: 180,
+                    fit: BoxFit.cover,
+                  ),
+                if ((item['body'] as String).isNotEmpty)
+                  SelectableText(
+                    item['body'] as String,
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.55,
+                      color: mine ? Colors.white : AppColors.textPrimary,
+                    ),
+                  ),
+                const SizedBox(height: 6),
+                Text(
+                  communityTime(item['created_at']),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: mine
+                        ? const Color(0xFFD7E3FF)
+                        : AppColors.textTertiary,
+                  ),
                 ),
-              ),
-            if (pending && _sendErrors.containsKey(token))
-              Text(
-                _sendErrors[token]!,
-                style: const TextStyle(fontSize: 11, color: Colors.red),
-              ),
-            if (!pending && mine)
-              const Text(
-                '已发送',
-                style: TextStyle(fontSize: 10, color: Colors.blueGrey),
-              ),
-          ],
+                if (pending)
+                  TextButton(
+                    onPressed: _sending ? null : _deliver,
+                    child: Text(
+                      _sending
+                          ? '发送中…'
+                          : _sendErrors.containsKey(token)
+                          ? '发送失败，点击重试'
+                          : '等待发送，点击重试',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                if (pending && _sendErrors.containsKey(token))
+                  Text(
+                    _sendErrors[token]!,
+                    style: const TextStyle(fontSize: 11, color: Colors.red),
+                  ),
+                if (!pending && mine)
+                  Text(
+                    '已发送',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFFD7E3FF),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -567,8 +600,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           SafeArea(
             top: false,
             child: Container(
-              color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: AppColors.borderLight)),
+              ),
+              padding: const EdgeInsets.fromLTRB(8, 10, 12, 10),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
