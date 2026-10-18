@@ -19,6 +19,8 @@ import '../widgets/premium_app_chrome.dart';
 import 'import_record_detail_page.dart';
 import 'knowledge_graph_page.dart';
 import 'learning_concept_page.dart';
+import 'interview/interview_prepare_page.dart';
+import 'interview/interview_history_page.dart';
 
 class BookDetailPage extends StatefulWidget {
   const BookDetailPage({required this.library, this.database, this.autoImport = false, super.key});
@@ -242,6 +244,34 @@ class _BookDetailPageState extends State<BookDetailPage> {
     if (mounted) await _refresh();
   }
 
+  Future<void> _openInterview() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InterviewPreparePage(
+          userId: _library.userId,
+          libraryId: _library.id,
+          database: widget.database,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
+  Future<void> _openInterviewHistory() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => InterviewHistorySheet(
+        userId: _library.userId,
+        libraryId: _library.id,
+        database: widget.database,
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: Colors.transparent,
@@ -328,6 +358,21 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   _KnowledgeGraphEntry(
                     libraryName: _library.name,
                     onTap: _openKnowledgeGraph,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton.icon(
+                        onPressed: _importing ? null : _openInterview,
+                        icon: const Icon(Icons.record_voice_over_outlined),
+                        label: const Text('AI 面试'),
+                      ),
+                      TextButton.icon(
+                        onPressed: _importing ? null : _openInterviewHistory,
+                        icon: const Icon(Icons.history_rounded),
+                        label: const Text('面试历史'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 14),
                   KnowledgeSearchField(

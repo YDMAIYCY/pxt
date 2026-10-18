@@ -25,6 +25,7 @@ import 'ai_chat_page.dart';
 import '../../community/knowledge_community_bridge.dart';
 import 'community/publish_question_page.dart';
 import 'community/question_detail_page.dart';
+import 'interview/interview_prepare_page.dart';
 
 class ImportRecordDetailPage extends StatefulWidget {
   const ImportRecordDetailPage({
@@ -248,6 +249,22 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
   }
 
   Future<void> _results(ImportRecord record, String type, String title) async {
+    if (type == 'interview') {
+      if (_busy) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InterviewPreparePage(
+            userId: record.userId,
+            libraryId: record.libraryId,
+            recordId: record.id,
+            database: widget.database,
+          ),
+        ),
+      );
+      if (mounted) await _refresh();
+      return;
+    }
     if (type == 'ocr') {
       await _sources(record);
       return;
@@ -642,27 +659,40 @@ class _ImportRecordDetailPageState extends State<ImportRecordDetailPage> {
                       return Wrap(
                         spacing: 10,
                         runSpacing: 10,
-                        children: knowledgeOutcomes.map((item) {
-                          final count = item.type == 'ocr'
-                              ? record.pages.length
-                              : record.counts[item.type] ?? 0;
-                          return SizedBox(
+                        children: [
+                          ...knowledgeOutcomes.map((item) {
+                            final count = item.type == 'ocr'
+                                ? record.pages.length
+                                : record.counts[item.type] ?? 0;
+                            return SizedBox(
+                              width: width,
+                              child: OutcomeTile(
+                                title: item.title,
+                                description: item.description,
+                                color: Color(item.color),
+                                icon: item.icon,
+                                countLabel: count > 0 || item.type == 'ocr'
+                                    ? '$count ${item.unit}'
+                                    : item.type == 'wrong_questions'
+                                    ? '暂无错题'
+                                    : '尚未生成 · 点击生成',
+                                onTap: () =>
+                                    _results(record, item.type, item.title),
+                              ),
+                            );
+                          }),
+                          SizedBox(
                             width: width,
                             child: OutcomeTile(
-                              title: item.title,
-                              description: item.description,
-                              color: Color(item.color),
-                              icon: item.icon,
-                              countLabel: count > 0 || item.type == 'ocr'
-                                  ? '$count ${item.unit}'
-                                  : item.type == 'wrong_questions'
-                                  ? '暂无错题'
-                                  : '尚未生成 · 点击生成',
-                              onTap: () =>
-                                  _results(record, item.type, item.title),
+                              title: 'AI 面试',
+                              description: '基于本次资料\n进行语音问答',
+                              color: AppColors.primary,
+                              icon: Icons.record_voice_over_outlined,
+                              countLabel: '开始面试',
+                              onTap: () => _results(record, 'interview', 'AI 面试'),
                             ),
-                          );
-                        }).toList(),
+                          ),
+                        ],
                       );
                     },
                   ),
