@@ -34,7 +34,7 @@ class KnowledgeLibraryRepository {
         (
           SELECT COUNT(*)
           FROM ${AppDatabase.tableSourceDocuments} documents
-          WHERE documents.library_id = libraries.id
+          WHERE documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = libraries.id)
         ) AS document_count
       FROM ${AppDatabase.tableKnowledgeLibraries} libraries
       WHERE libraries.user_id = ?
@@ -119,14 +119,54 @@ class KnowledgeLibraryRepository {
         throw StateError('知识库不存在或无权删除');
       }
 
+      // A package linked to another library must survive removal of this one.
+      final shared = await txn.rawQuery(
+        """
+        SELECT d.id, MIN(dl.library_id) AS replacement
+        FROM source_documents d JOIN document_library_links dl ON dl.document_id = d.id
+        WHERE d.user_id = ? AND d.library_id = ? AND dl.library_id != ?
+        GROUP BY d.id
+      """,
+        [userId, libraryId, libraryId],
+      );
+      for (final row in shared) {
+        await txn.update(
+          'source_documents',
+          {'library_id': row['replacement']},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+      await txn.rawUpdate(
+        """
+        UPDATE document_batches SET library_id = (
+          SELECT library_id FROM source_documents WHERE batch_id = document_batches.id ORDER BY id LIMIT 1
+        ) WHERE user_id = ? AND library_id = ? AND EXISTS (
+          SELECT 1 FROM source_documents WHERE batch_id = document_batches.id AND library_id != ?
+        )
+      """,
+        [userId, libraryId, libraryId],
+      );
+
       final documentRows = await txn.query(
         AppDatabase.tableSourceDocuments,
-        columns: ['image_path'],
+        columns: ['image_path', 'original_file_path'],
         where: 'user_id = ? AND library_id = ?',
         whereArgs: [userId, libraryId],
       );
       cleanupPaths.addAll(
         documentRows.map((row) => row['image_path'] as String?),
+      );
+      cleanupPaths.addAll(
+        documentRows.map((row) => row['original_file_path'] as String?),
+      );
+      await txn.rawUpdate(
+        '''UPDATE import_records SET library_id = (
+          SELECT d.library_id FROM source_documents d
+          WHERE d.import_record_id = import_records.id AND d.library_id != ?
+          ORDER BY d.id LIMIT 1)
+          WHERE user_id = ? AND library_id = ?''',
+        [libraryId, userId, libraryId],
       );
 
       final batchRows = await txn.query(
@@ -200,7 +240,7 @@ class KnowledgeLibraryRepository {
         (
           SELECT COUNT(*)
           FROM ${AppDatabase.tableSourceDocuments} documents
-          WHERE documents.library_id = libraries.id
+          WHERE documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = libraries.id)
         ) AS document_count
       FROM ${AppDatabase.tableKnowledgeLibraries} libraries
       WHERE libraries.user_id = ?

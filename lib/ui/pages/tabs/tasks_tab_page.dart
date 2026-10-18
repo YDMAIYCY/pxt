@@ -7,7 +7,9 @@ import '../../../database/models/ai_generation_task_record.dart';
 import '../../../database/models/ai_result_records.dart';
 import '../../../database/models/source_document_record.dart';
 import '../../../database/source_document_repository.dart';
+import '../../../common/app_assets.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/premium_app_chrome.dart';
 import '../document_detail_page.dart';
 import '../practice_review_page.dart';
 import '../wrong_question_page.dart';
@@ -151,7 +153,9 @@ class _TasksTabPageState extends State<TasksTabPage> {
 
   Future<_TaskCenterData> _reload() {
     final future = _loadData();
-    setState(() => _future = future);
+    setState(() {
+      _future = future;
+    });
     return future;
   }
 
@@ -203,7 +207,7 @@ class _TasksTabPageState extends State<TasksTabPage> {
             physics: const BouncingScrollPhysics(),
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 104),
                 sliver: SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,20 +260,25 @@ class _TaskListPageState extends State<TaskListPage> {
     await widget.authRepository.ensureInitialized();
     final user = await widget.authRepository.getCurrentUserProfile();
     if (user == null) throw StateError('登录状态已失效');
+    final documents = await widget.sourceDocumentRepository
+        .fetchAllSourceDocuments(userId: user.id, limit: 300);
 
     switch (widget.kind) {
       case TaskListKind.todayPractice:
         return _TaskListData(
+          documents: documents,
           questions: await widget.aiGenerationRepository
               .fetchTodayPracticeQuestionsByUser(userId: user.id, limit: 300),
         );
       case TaskListKind.overduePractice:
         return _TaskListData(
+          documents: documents,
           questions: await widget.aiGenerationRepository
               .fetchOverduePracticeQuestionsByUser(userId: user.id, limit: 300),
         );
       case TaskListKind.wrongQuestions:
         return _TaskListData(
+          documents: documents,
           questions: await widget.aiGenerationRepository
               .fetchPracticeQuestionsByUser(
                 userId: user.id,
@@ -279,8 +288,7 @@ class _TaskListPageState extends State<TaskListPage> {
         );
       case TaskListKind.activeFlow:
         return _TaskListData(
-          documents: await widget.sourceDocumentRepository
-              .fetchAllSourceDocuments(userId: user.id, limit: 300),
+          documents: documents,
           aiTasks: await widget.aiGenerationRepository.fetchAiTasksByUser(
             userId: user.id,
             limit: 300,
@@ -288,6 +296,7 @@ class _TaskListPageState extends State<TaskListPage> {
         );
       case TaskListKind.masteredQuestions:
         return _TaskListData(
+          documents: documents,
           questions: await widget.aiGenerationRepository
               .fetchPracticeQuestionsByUser(
                 userId: user.id,
@@ -300,7 +309,9 @@ class _TaskListPageState extends State<TaskListPage> {
 
   Future<void> _refresh() async {
     final future = _loadData();
-    setState(() => _future = future);
+    setState(() {
+      _future = future;
+    });
     await future;
   }
 
@@ -382,91 +393,179 @@ class _TaskListPageState extends State<TaskListPage> {
     switch (widget.kind) {
       case TaskListKind.todayPractice:
         if (data.questions.isEmpty) {
-          return [const _EmptyHint(text: '暂无待刷复习题。生成复习题后会出现在这里。')];
+          return [const _EmptyHint(text: '暂无待刷练习题。生成练习题后会出现在这里。')];
         }
-        return data.questions
-            .map(
-              (item) => _TaskTile(
-                title: item.question.questionText,
-                subtitle: _questionMeta(item),
-                status: '待刷',
-                statusColor: AppColors.accentOrange,
-                onTap: () => _openPractice(item.question.id),
-              ),
-            )
-            .toList(growable: false);
+        return _buildQuestionGroups(
+          data,
+          status: '待刷',
+          statusColor: AppColors.accentOrange,
+          onTap: (item) => _openPractice(item.question.id),
+        );
       case TaskListKind.overduePractice:
-        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无逾期复习题。')];
-        return data.questions
-            .map(
-              (item) => _TaskTile(
-                title: item.question.questionText,
-                subtitle: _questionMeta(item),
-                status: '逾期',
-                statusColor: AppColors.error,
-                onTap: () => _openPractice(item.question.id),
-              ),
-            )
-            .toList(growable: false);
+        if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无逾期练习题。')];
+        return _buildQuestionGroups(
+          data,
+          status: '逾期',
+          statusColor: AppColors.error,
+          onTap: (item) => _openPractice(item.question.id),
+        );
       case TaskListKind.wrongQuestions:
         if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无待处理错题。')];
-        return data.questions
-            .map(
-              (item) => _TaskTile(
-                title: item.question.questionText,
-                subtitle: '${item.documentTitle} / 正确答案可点入查看',
-                status: '待处理',
-                statusColor: AppColors.warning,
-                onTap: () => _openWrongQuestion(item),
-              ),
-            )
-            .toList(growable: false);
+        return _buildQuestionGroups(
+          data,
+          status: '待处理',
+          statusColor: AppColors.warning,
+          subtitleOf: (item) => '${item.documentTitle} / 正确答案可点入查看',
+          onTap: _openWrongQuestion,
+        );
       case TaskListKind.activeFlow:
-        final tiles = <Widget>[
-          ...data.documents
-              .where((d) => d.ocrStatus != SourceDocumentOcrStatus.success)
-              .map(
-                (d) => _TaskTile(
-                  title: d.title,
-                  subtitle: 'OCR ${d.ocrStatusLabel}',
-                  status: _statusLabel(d.ocrStatus),
-                  statusColor: _statusColor(d.ocrStatus),
-                  onTap: () => _openDocument(d.id),
-                ),
-              ),
-          ...data.aiTasks
-              .where((t) => t.status != AiTaskStatus.completed)
-              .map(
-                (t) => _TaskTile(
-                  title: '${t.documentTitle} -> ${t.taskLabel}',
-                  subtitle: t.errorMessage?.isNotEmpty == true
-                      ? t.errorMessage!
-                      : _formatTime(t.updatedAt),
-                  status: _statusLabel(t.status),
-                  statusColor: _statusColor(t.status),
-                  onTap: () => _openDocument(t.documentId),
-                ),
-              ),
-        ];
-        if (tiles.isEmpty) {
+        final groups = _buildActiveFlowGroups(data);
+        if (groups.isEmpty) {
           return [const _EmptyHint(text: '暂无进行中的 OCR 或 AI 任务。')];
         }
-        return tiles;
+        return groups;
       case TaskListKind.masteredQuestions:
         if (data.questions.isEmpty) return [const _EmptyHint(text: '暂无已掌握题目。')];
-        return data.questions
-            .map(
-              (item) => _TaskTile(
-                title: item.question.questionText,
-                subtitle:
-                    '${item.documentTitle} / 答案：${item.question.answerText ?? '暂无'}',
-                status: '已掌握',
-                statusColor: AppColors.success,
-                onTap: () => _openDocument(item.question.documentId),
-              ),
-            )
-            .toList(growable: false);
+        return _buildQuestionGroups(
+          data,
+          status: '已掌握',
+          statusColor: AppColors.success,
+          subtitleOf: (item) =>
+              '${item.documentTitle} / 答案：${item.question.answerText ?? '暂无'}',
+          onTap: (item) => _openDocument(item.question.documentId),
+        );
     }
+  }
+
+  List<Widget> _buildQuestionGroups(
+    _TaskListData data, {
+    required String status,
+    required Color statusColor,
+    required ValueChanged<PracticeQuestionWithDocument> onTap,
+    String Function(PracticeQuestionWithDocument item)? subtitleOf,
+  }) {
+    return _groupQuestionsByImport(data)
+        .map(
+          (group) => _TaskImportGroupTile(
+            group: group,
+            children: group.questions
+                .map(
+                  (item) => _TaskTile(
+                    title: item.question.questionText,
+                    subtitle: subtitleOf?.call(item) ?? _questionMeta(item),
+                    status: status,
+                    statusColor: statusColor,
+                    onTap: () => onTap(item),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<Widget> _buildActiveFlowGroups(_TaskListData data) {
+    return _groupActiveFlowByImport(data)
+        .map(
+          (group) => _TaskImportGroupTile(
+            group: group,
+            children: [
+              ...group.documents
+                  .where((d) => d.ocrStatus != SourceDocumentOcrStatus.success)
+                  .map(
+                    (d) => _TaskTile(
+                      title: d.title,
+                      subtitle: 'OCR ${d.ocrStatusLabel}',
+                      status: _statusLabel(d.ocrStatus),
+                      statusColor: _statusColor(d.ocrStatus),
+                      onTap: () => _openDocument(d.id),
+                    ),
+                  ),
+              ...group.aiTasks
+                  .where((t) => t.status != AiTaskStatus.completed)
+                  .map(
+                    (t) => _TaskTile(
+                      title: '${t.documentTitle} -> ${t.taskLabel}',
+                      subtitle: t.errorMessage?.isNotEmpty == true
+                          ? t.errorMessage!
+                          : _formatTime(t.updatedAt),
+                      status: _statusLabel(t.status),
+                      statusColor: _statusColor(t.status),
+                      onTap: () => _openDocument(t.documentId),
+                    ),
+                  ),
+            ],
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<_TaskImportGroup> _groupQuestionsByImport(_TaskListData data) {
+    final documentsById = {
+      for (final document in data.documents) document.id: document,
+    };
+    final grouped = <String, _MutableTaskImportGroup>{};
+    for (final item in data.questions) {
+      final document = documentsById[item.question.documentId];
+      final key = _taskGroupKey(document, item.question.documentId);
+      final group = grouped.putIfAbsent(
+        key,
+        () => _MutableTaskImportGroup.fromDocument(
+          document,
+          fallbackTitle: item.documentTitle,
+        ),
+      );
+      group.questions.add(item);
+    }
+    return _finalizeTaskGroups(grouped.values);
+  }
+
+  List<_TaskImportGroup> _groupActiveFlowByImport(_TaskListData data) {
+    final documentsById = {
+      for (final document in data.documents) document.id: document,
+    };
+    final grouped = <String, _MutableTaskImportGroup>{};
+    for (final document in data.documents.where(
+      (item) => item.ocrStatus != SourceDocumentOcrStatus.success,
+    )) {
+      final key = _taskGroupKey(document, document.id);
+      final group = grouped.putIfAbsent(
+        key,
+        () => _MutableTaskImportGroup.fromDocument(document),
+      );
+      group.documents.add(document);
+    }
+    for (final task in data.aiTasks.where(
+      (item) => item.status != AiTaskStatus.completed,
+    )) {
+      final document = documentsById[task.documentId];
+      final key = _taskGroupKey(document, task.documentId);
+      final group = grouped.putIfAbsent(
+        key,
+        () => _MutableTaskImportGroup.fromDocument(
+          document,
+          fallbackTitle: task.documentTitle,
+          fallbackTime: task.updatedAt,
+        ),
+      );
+      group.aiTasks.add(task);
+    }
+    return _finalizeTaskGroups(grouped.values);
+  }
+
+  String _taskGroupKey(SourceDocumentRecord? document, int documentId) {
+    final batchId = document?.batchId;
+    return batchId == null ? 'document:$documentId' : 'batch:$batchId';
+  }
+
+  List<_TaskImportGroup> _finalizeTaskGroups(
+    Iterable<_MutableTaskImportGroup> groups,
+  ) {
+    final result = groups
+        .map((group) => group.toImmutable())
+        .where((group) => group.itemCount > 0)
+        .toList(growable: false);
+    return result..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 }
 
@@ -476,47 +575,58 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF0FDFA), Color(0xFFFFF7ED)],
-        ),
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.primarySoft),
-      ),
-      child: Row(
+    return PremiumHeroPanel(
+      asset: AppAssets.tasksHeaderIllustration,
+      child: Stack(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.fact_check_rounded,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('任务中心', style: AppTextStyles.h1(context)),
-                const SizedBox(height: 4),
-                Text(
-                  '点击任务标签，进入对应列表处理。',
-                  style: AppTextStyles.bodySmall(
-                    context,
-                  ).copyWith(fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.primaryLight.withValues(alpha: 0.62),
+                  ),
                 ),
-              ],
-            ),
+                child: const Icon(
+                  Icons.fact_check_rounded,
+                  color: AppColors.primary,
+                  size: 25,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 72),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '任务中心',
+                        maxLines: 2,
+                        softWrap: true,
+                        style: AppTextStyles.h1(context).copyWith(
+                          color: AppColors.textPrimary,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '把复习、错题、AI 处理流收束到一个清晰的学习队列。',
+                        style: AppTextStyles.bodySmall(context).copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -535,17 +645,19 @@ class _TaskBoard extends StatelessWidget {
     final items = [
       _BoardItem(
         kind: TaskListKind.todayPractice,
-        title: '待刷复习题',
+        title: '待刷练习题',
         value: '${data.todayPractice.length}',
         icon: Icons.quiz_rounded,
         color: const Color(0xFFF0FDFA),
+        foreground: AppColors.primary,
       ),
       _BoardItem(
         kind: TaskListKind.overduePractice,
-        title: '逾期复习',
+        title: '逾期练习',
         value: '${data.overduePractice.length}',
         icon: Icons.schedule_rounded,
         color: const Color(0xFFFEF2F2),
+        foreground: AppColors.error,
       ),
       _BoardItem(
         kind: TaskListKind.wrongQuestions,
@@ -553,6 +665,7 @@ class _TaskBoard extends StatelessWidget {
         value: '${data.wrongQuestions.length}',
         icon: Icons.report_problem_rounded,
         color: const Color(0xFFFFF7ED),
+        foreground: AppColors.accentOrange,
       ),
       _BoardItem(
         kind: TaskListKind.activeFlow,
@@ -560,6 +673,7 @@ class _TaskBoard extends StatelessWidget {
         value: '${data.activeFlowCount}',
         icon: Icons.auto_mode_rounded,
         color: const Color(0xFFEFF6FF),
+        foreground: AppColors.secondaryBlue,
       ),
       _BoardItem(
         kind: TaskListKind.masteredQuestions,
@@ -567,15 +681,16 @@ class _TaskBoard extends StatelessWidget {
         value: '${data.masteredQuestions.length}',
         icon: Icons.check_circle_rounded,
         color: const Color(0xFFF0FDF4),
+        foreground: AppColors.primary,
       ),
     ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final itemWidth = (constraints.maxWidth - 12) / 2;
+        final itemWidth = (constraints.maxWidth - 14) / 2;
         return Wrap(
-          spacing: 12,
-          runSpacing: 12,
+          spacing: 14,
+          runSpacing: 14,
           children: items
               .map(
                 (item) => SizedBox(
@@ -604,46 +719,156 @@ class _BoardCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.cardSmall),
+        borderRadius: BorderRadius.circular(24),
         child: Ink(
-          padding: const EdgeInsets.all(14),
+          height: 164,
+          padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
           decoration: BoxDecoration(
-            color: item.color,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(AppRadii.cardSmall),
-            border: Border.all(color: AppColors.border),
+            border: Border.all(color: AppColors.borderLight),
+            boxShadow: AppShadows.cardSoftList,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              Icon(item.icon, color: AppColors.primary),
-              const SizedBox(height: 8),
-              Text(
-                item.value,
-                style: AppTextStyles.h2(
-                  context,
-                ).copyWith(color: AppColors.primaryDark),
+              Positioned(
+                right: -24,
+                bottom: -30,
+                child: Icon(
+                  item.icon,
+                  size: 46,
+                  color: item.foreground.withValues(alpha: 0.065),
+                ),
               ),
-              const SizedBox(height: 4),
-              Row(
+              const Positioned(
+                right: 0,
+                top: 0,
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 26,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      item.title,
-                      style: AppTextStyles.caption(context).copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: item.foreground.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(item.icon, color: item.foreground, size: 22),
+                  ),
+                  const Spacer(),
+                  Text(
+                    item.value,
+                    style: AppTextStyles.h1(context).copyWith(
+                      color: item.foreground,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 28,
                     ),
                   ),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    size: 18,
-                    color: AppColors.textTertiary,
+                  const SizedBox(height: 6),
+                  Text(
+                    item.title,
+                    maxLines: 3,
+                    softWrap: true,
+                    style: AppTextStyles.h3(context).copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ],
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ========== Task Import Groups ==========
+class _TaskImportGroupTile extends StatelessWidget {
+  const _TaskImportGroupTile({required this.group, required this.children});
+
+  final _TaskImportGroup group;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.borderLight),
+        boxShadow: AppShadows.cardSoftList,
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.fromLTRB(14, 8, 10, 8),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          leading: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: const Icon(
+              Icons.auto_stories_rounded,
+              color: AppColors.primary,
+            ),
+          ),
+          title: Text(
+            group.title,
+            maxLines: 3,
+            softWrap: true,
+            style: AppTextStyles.h3(
+              context,
+            ).copyWith(fontSize: 16, fontWeight: FontWeight.w900),
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text(
+              group.subtitle,
+              maxLines: 3,
+              softWrap: true,
+              style: AppTextStyles.bodySmall(context).copyWith(
+                color: AppColors.textSecondary,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${group.itemCount}',
+                  style: AppTextStyles.bodySmall(context).copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: AppColors.textTertiary,
+              ),
+            ],
+          ),
+          children: children,
         ),
       ),
     );
@@ -687,8 +912,8 @@ class _TaskTile extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 5,
+                        softWrap: true,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: AppColors.textPrimary,
                           fontWeight: FontWeight.w700,
@@ -697,8 +922,8 @@ class _TaskTile extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: 4,
+                        softWrap: true,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600,
@@ -793,7 +1018,10 @@ class _StatePanel extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
-            FilledButton(onPressed: () => onPressed(), child: const Text('重试')),
+            FilledButton(
+              onPressed: () => onPressed(),
+              child: const Text('閲嶈瘯'),
+            ),
           ],
         ),
       ),
@@ -802,6 +1030,76 @@ class _StatePanel extends StatelessWidget {
 }
 
 // ========== Data models ==========
+class _MutableTaskImportGroup {
+  _MutableTaskImportGroup({
+    required this.key,
+    required this.title,
+    required this.createdAt,
+    required this.sourceLabel,
+  });
+
+  factory _MutableTaskImportGroup.fromDocument(
+    SourceDocumentRecord? document, {
+    String? fallbackTitle,
+    DateTime? fallbackTime,
+  }) {
+    return _MutableTaskImportGroup(
+      key: document?.batchId == null
+          ? 'document:${document?.id ?? fallbackTitle ?? 'unknown'}'
+          : 'batch:${document!.batchId}',
+      title: document?.batchId == null
+          ? (document?.title ?? fallbackTitle ?? '未命名资料')
+          : '学习包：${document!.title}',
+      createdAt: document?.createdAt ?? fallbackTime ?? DateTime.now(),
+      sourceLabel: document?.sourceTypeLabel ?? '资料',
+    );
+  }
+
+  final String key;
+  final String title;
+  final DateTime createdAt;
+  final String sourceLabel;
+  final List<SourceDocumentRecord> documents = <SourceDocumentRecord>[];
+  final List<AiTaskWithDocument> aiTasks = <AiTaskWithDocument>[];
+  final List<PracticeQuestionWithDocument> questions =
+      <PracticeQuestionWithDocument>[];
+
+  _TaskImportGroup toImmutable() {
+    return _TaskImportGroup(
+      key: key,
+      title: title,
+      subtitle:
+          '$sourceLabel / ${_formatTime(createdAt)} / ${documents.length + aiTasks.length + questions.length} 项',
+      createdAt: createdAt,
+      documents: documents,
+      aiTasks: aiTasks,
+      questions: questions,
+    );
+  }
+}
+
+class _TaskImportGroup {
+  const _TaskImportGroup({
+    required this.key,
+    required this.title,
+    required this.subtitle,
+    required this.createdAt,
+    required this.documents,
+    required this.aiTasks,
+    required this.questions,
+  });
+
+  final String key;
+  final String title;
+  final String subtitle;
+  final DateTime createdAt;
+  final List<SourceDocumentRecord> documents;
+  final List<AiTaskWithDocument> aiTasks;
+  final List<PracticeQuestionWithDocument> questions;
+
+  int get itemCount => documents.length + aiTasks.length + questions.length;
+}
+
 class _TaskCenterData {
   const _TaskCenterData({
     required this.documents,
@@ -849,11 +1147,13 @@ class _BoardItem {
     required this.value,
     required this.icon,
     required this.color,
+    required this.foreground,
   });
   final TaskListKind kind;
   final String title, value;
   final IconData icon;
   final Color color;
+  final Color foreground;
 }
 
 enum TaskListKind {
@@ -867,9 +1167,9 @@ enum TaskListKind {
 String _titleOf(TaskListKind kind) {
   switch (kind) {
     case TaskListKind.todayPractice:
-      return '今日待刷复习题';
+      return '今日待刷练习题';
     case TaskListKind.overduePractice:
-      return '逾期复习';
+      return '逾期练习';
     case TaskListKind.wrongQuestions:
       return '待处理错题';
     case TaskListKind.activeFlow:
@@ -893,6 +1193,7 @@ String _questionMeta(PracticeQuestionWithDocument item) {
 
 String _statusLabel(String status) {
   if (status == SourceDocumentOcrStatus.processing) return '进行中';
+  if (status == SourceDocumentOcrStatus.needsReview) return '待校对';
   if (status == SourceDocumentOcrStatus.success) return '已完成';
   if (status == SourceDocumentOcrStatus.failed) return '失败';
   switch (status) {
@@ -910,6 +1211,9 @@ String _statusLabel(String status) {
 
 Color _statusColor(String status) {
   if (status == SourceDocumentOcrStatus.processing) return AppColors.info;
+  if (status == SourceDocumentOcrStatus.needsReview) {
+    return const Color(0xFFF59E0B);
+  }
   if (status == SourceDocumentOcrStatus.success) return AppColors.success;
   if (status == SourceDocumentOcrStatus.failed) return AppColors.error;
   switch (status) {

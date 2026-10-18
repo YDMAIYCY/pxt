@@ -4,10 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/document_batch_repository.dart';
+import 'package:pxt1/database/knowledge_graph_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
 import 'package:pxt1/database/llm_config_repository.dart';
 import 'package:pxt1/database/models/ai_result_records.dart';
 import 'package:pxt1/database/models/document_batch_record.dart';
+import 'package:pxt1/database/models/knowledge_graph_records.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
 import 'package:pxt1/database/models/llm_provider_config.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
@@ -62,6 +64,7 @@ void main() {
       tester,
     ) async {
       final libraries = _FakeKnowledgeLibraryRepository();
+      final graph = _FakeKnowledgeGraphRepository();
 
       await tester.pumpWidget(
         _wrap(
@@ -71,6 +74,7 @@ void main() {
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
             aiGenerationRepository: _FakeAiGenerationRepository(),
             documentBatchRepository: _FakeDocumentBatchRepository(),
+            knowledgeGraphRepository: graph,
             knowledgeLibraryRepository: libraries,
           ),
         ),
@@ -87,6 +91,7 @@ void main() {
             sourceDocumentRepository: _FakeSourceDocumentRepository(),
             aiGenerationRepository: _FakeAiGenerationRepository(),
             documentBatchRepository: _FakeDocumentBatchRepository(),
+            knowledgeGraphRepository: graph,
             knowledgeLibraryRepository: libraries,
           ),
         ),
@@ -167,37 +172,56 @@ void main() {
     });
   });
 
-  testWidgets('Home AI quick entry can use OCR-completed batch pages', (
+  testWidgets('Home current quick entries render without legacy AI entry', (
     tester,
   ) async {
-    final sourceDocuments = _FakeSourceDocumentRepository(
-      recentWithBatchPages: [_ocrCompleteBatchPage],
-    );
-
     await tester.pumpWidget(
       _wrap(
         HomeTabPage(
           refreshVersion: 0,
           authRepository: _FakeAuthRepository(),
-          sourceDocumentRepository: sourceDocuments,
+          sourceDocumentRepository: _FakeSourceDocumentRepository(),
           aiGenerationRepository: _FakeAiGenerationRepository(),
           documentBatchRepository: _FakeDocumentBatchRepository(),
           knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
-          aiGenerationPageBuilder: (documentId) =>
-              _MarkerPage('ai-$documentId'),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.textContaining('AI').first);
+    expect(find.text('拍一下，开始学习'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('今日学习建议'), 100);
     await tester.pumpAndSettle();
-
-    expect(sourceDocuments.includeBatchPageQueries, contains(true));
-    expect(find.text('ai-${_ocrCompleteBatchPage.id}'), findsOneWidget);
+    expect(find.text('今日学习建议'), findsOneWidget);
+    expect(find.text('益智游戏'), findsNothing);
+    expect(
+      find.textContaining('\u690d\u5165\u6f14\u793a\u6570\u636e'),
+      findsNothing,
+    );
   });
 
-  testWidgets('Profile entries switch bottom tabs when callback is available', (
+  testWidgets('home companion entry uses the new fourth tab', (tester) async {
+    final opened = <int>[];
+    await tester.pumpWidget(
+      _wrap(
+        HomeTabPage(
+          authRepository: _FakeAuthRepository(),
+          sourceDocumentRepository: _FakeSourceDocumentRepository(),
+          aiGenerationRepository: _FakeAiGenerationRepository(),
+          documentBatchRepository: _FakeDocumentBatchRepository(),
+          knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+          onOpenTab: opened.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('AI 学伴'), 120);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI 学伴'));
+    expect(opened, [3]);
+  });
+
+  testWidgets('Profile keeps favorites entry without wrong-question shortcut', (
     tester,
   ) async {
     final openedTabs = <int>[];
@@ -216,12 +240,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.report_problem_rounded));
+    expect(find.text('我的错题收藏'), findsNothing);
+    await tester.scrollUntilVisible(
+      find.text('收藏'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.collections_bookmark_rounded).last);
+    await tester.tap(find.text('收藏'));
     await tester.pumpAndSettle();
 
-    expect(openedTabs, [2, 1]);
+    expect(openedTabs, isEmpty);
+    expect(find.text('我的收藏'), findsOneWidget);
   });
 }
 
@@ -239,31 +269,6 @@ const _testUser = UserProfile(
   backgroundStyle: ProfilePresetIds.defaultBackgroundStyle,
 );
 
-final _ocrCompleteBatchPage = SourceDocumentRecord(
-  id: 42,
-  userId: _testUser.id,
-  libraryId: 1,
-  batchId: 7,
-  pageNumber: 1,
-  sourceType: SourceDocumentSourceType.pdfPage,
-  imagePath: 'missing.png',
-  title: 'batch page',
-  createdAt: DateTime(2026, 5, 29),
-  ocrStatus: SourceDocumentOcrStatus.success,
-  aiDone: false,
-);
-
-class _MarkerPage extends StatelessWidget {
-  const _MarkerPage(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(body: Center(child: Text(label)));
-  }
-}
-
 class _FakeAuthRepository extends AuthRepository {
   @override
   Future<void> ensureInitialized() async {}
@@ -273,10 +278,6 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeSourceDocumentRepository extends SourceDocumentRepository {
-  _FakeSourceDocumentRepository({this.recentWithBatchPages = const []});
-
-  final List<SourceDocumentRecord> recentWithBatchPages;
-  final includeBatchPageQueries = <bool>[];
   int recentCalls = 0;
   int allCalls = 0;
 
@@ -288,8 +289,7 @@ class _FakeSourceDocumentRepository extends SourceDocumentRepository {
     int limit = 5,
   }) async {
     recentCalls++;
-    includeBatchPageQueries.add(includeBatchPages);
-    return includeBatchPages ? recentWithBatchPages : const [];
+    return const [];
   }
 
   @override
@@ -329,6 +329,29 @@ class _FakeKnowledgeLibraryRepository extends KnowledgeLibraryRepository {
         updatedAt: DateTime(2026, 5, 29),
       ),
     ];
+  }
+}
+
+class _FakeKnowledgeGraphRepository extends KnowledgeGraphRepository {
+  int fetchCalls = 0;
+
+  @override
+  Future<List<KnowledgeConceptWithDocument>> fetchWeakConcepts({
+    required int userId,
+    int? libraryId,
+    int limit = 20,
+  }) async {
+    fetchCalls++;
+    return const [];
+  }
+
+  @override
+  Future<List<KnowledgeConceptLinkRecord>> fetchLinksByLibrary({
+    required int userId,
+    int? libraryId,
+    int limit = 100,
+  }) async {
+    return const [];
   }
 }
 

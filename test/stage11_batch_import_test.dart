@@ -188,6 +188,7 @@ class _RecordingDocumentBatchRepository extends DocumentBatchRepository {
     required String title,
     required String? originalFilePath,
     required List<DocumentBatchPageDraft> pages,
+    String? operationId,
   }) async {
     lastUserId = userId;
     lastLibraryId = libraryId;
@@ -220,6 +221,7 @@ class _ThrowingDocumentBatchRepository extends DocumentBatchRepository {
     required String title,
     required String? originalFilePath,
     required List<DocumentBatchPageDraft> pages,
+    String? operationId,
   }) async {
     throw Exception('database write failed');
   }

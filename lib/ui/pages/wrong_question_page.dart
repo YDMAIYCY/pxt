@@ -122,6 +122,9 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
       final config = user == null
           ? null
           : await _llmConfigRepository.getByUserId(user.id);
+      if (config == null || !config.isConfigured) {
+        throw StateError('请先到“我的”页面配置 AI 大模型，再生成强化训练');
+      }
       await _trainingService.generateForQuestion(
         question: widget.item.question,
         llmConfig: config,
@@ -133,7 +136,7 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
       await _reloadTrainingData();
     } catch (error) {
       if (mounted) {
-        _showMessage(error.toString());
+        _showMessage(_trainingErrorMessage(error));
       }
     } finally {
       if (mounted) {
@@ -142,6 +145,14 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
         });
       }
     }
+  }
+
+  String _trainingErrorMessage(Object error) {
+    final message = error.toString().replaceFirst('Bad state: ', '').trim();
+    if (message.isEmpty) {
+      return '强化训练生成失败，请检查 AI 配置后重试';
+    }
+    return message;
   }
 
   Future<void> _openSimilarQuestion(int questionId) async {
@@ -260,7 +271,7 @@ class _WrongQuestionPageState extends State<WrongQuestionPage> {
               if (hasPendingSimilar) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '完成全部相似题后，原错题会自动进入已掌握。',
+                  '完成不同变式题并通过间隔复习后，再判断是否掌握。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: const Color(0xFFB45309),
                     fontWeight: FontWeight.w700,
@@ -362,11 +373,7 @@ class _SimilarQuestionTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       onTap: onTap,
-      title: Text(
-        question.questionText,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
+      title: Text(question.questionText, maxLines: 5, softWrap: true),
       subtitle: Text(
         '掌握度 ${question.masteryScore} / 错 ${question.wrongCount} 次',
       ),

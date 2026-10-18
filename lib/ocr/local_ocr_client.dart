@@ -49,11 +49,36 @@ class LocalOcrClient {
       return _recognizeOnDevice(imagePath: imagePath, language: language);
     }
 
-    return _recognizeByHttp(imagePath: imagePath, language: language);
+    try {
+      return await _recognizeByHttp(imagePath: imagePath, language: language);
+    } on LocalOcrException catch (error) {
+      if (_shouldFallbackToOnDevice(error)) {
+        return _recognizeOnDevice(imagePath: imagePath, language: language);
+      }
+      rethrow;
+    }
   }
 
   bool _shouldUseOnDeviceOcr() {
+    return AppRuntimeConfig.useOnDeviceOcr && _canUseOnDeviceOcr();
+  }
+
+  bool _canUseOnDeviceOcr() {
     return Platform.isAndroid || Platform.isIOS;
+  }
+
+  bool _shouldFallbackToOnDevice(LocalOcrException error) {
+    if (!AppRuntimeConfig.allowOnDeviceOcrFallback || !_canUseOnDeviceOcr()) {
+      return false;
+    }
+
+    final message = error.message.toLowerCase();
+    return message.contains('无法连接') ||
+        message.contains('响应超时') ||
+        message.contains('connection') ||
+        message.contains('socket') ||
+        message.contains('timeout') ||
+        message.contains('http 5');
   }
 
   Future<OcrResult> _recognizeOnDevice({
@@ -166,12 +191,7 @@ class LocalOcrClient {
         throw const FormatException('JSON root is not an object');
       }
 
-      final rawText = _readString(decoded, const [
-        'raw_text',
-        'text',
-        'result',
-        'content',
-      ]);
+      final rawText = _readOcrText(decoded);
       final cleanFromResponse = _readString(decoded, const [
         'clean_text',
         'clean',
@@ -214,6 +234,57 @@ class LocalOcrClient {
     }
 
     return '';
+  }
+
+  String _readOcrText(Map<String, dynamic> map) {
+    final direct = _readString(map, const [
+      'raw_text',
+      'text',
+      'result',
+      'content',
+      'ocr_text',
+    ]);
+    if (direct.isNotEmpty) return direct;
+
+    final lineTexts = <String>[];
+    for (final key in const [
+      'lines',
+      'results',
+      'data',
+      'rec_texts',
+      'ocr_results',
+    ]) {
+      _collectPaddleText(map[key], lineTexts);
+      if (lineTexts.isNotEmpty) break;
+    }
+    return lineTexts.join('\n').trim();
+  }
+
+  void _collectPaddleText(Object? value, List<String> output) {
+    if (value == null) return;
+    if (value is String) {
+      final text = value.trim();
+      if (text.isNotEmpty) output.add(text);
+      return;
+    }
+    if (value is List) {
+      for (final item in value) {
+        _collectPaddleText(item, output);
+      }
+      return;
+    }
+    if (value is Map) {
+      for (final key in const ['text', 'transcription', 'label', 'content']) {
+        final text = _valueToString(value[key]);
+        if (text.isNotEmpty) {
+          output.add(text);
+          return;
+        }
+      }
+      if (value.containsKey('rec_texts')) {
+        _collectPaddleText(value['rec_texts'], output);
+      }
+    }
   }
 
   String _valueToString(Object? value) {

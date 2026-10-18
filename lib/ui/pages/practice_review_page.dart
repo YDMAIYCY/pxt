@@ -1,21 +1,40 @@
 import 'package:flutter/material.dart';
+import '../../database/learning_repository.dart';
+import 'library_practice_page.dart';
 
 import '../theme/app_theme.dart';
 import '../../database/ai_generation_repository.dart';
 import '../../database/auth_repository.dart';
+import '../../database/favorite_repository.dart';
 import '../../database/models/ai_result_records.dart';
 
 class PracticeReviewPage extends StatefulWidget {
   const PracticeReviewPage({
     this.initialQuestionId,
+    this.documentId,
+    this.libraryId,
+    this.conceptId,
+    this.wrongOnly = false,
+    this.questionLimit,
+    this.questionIds,
     this.authRepository,
     this.aiGenerationRepository,
+    this.favoriteRepository,
+    this.learningRepository,
     super.key,
   });
 
   final int? initialQuestionId;
+  final int? documentId;
+  final int? libraryId;
+  final int? conceptId;
+  final bool wrongOnly;
+  final int? questionLimit;
+  final List<int>? questionIds;
   final AuthRepository? authRepository;
   final AiGenerationRepository? aiGenerationRepository;
+  final FavoriteRepository? favoriteRepository;
+  final LearningRepository? learningRepository;
 
   @override
   State<PracticeReviewPage> createState() => _PracticeReviewPageState();
@@ -24,11 +43,16 @@ class PracticeReviewPage extends StatefulWidget {
 class _PracticeReviewPageState extends State<PracticeReviewPage> {
   late final AuthRepository _authRepository;
   late final AiGenerationRepository _aiGenerationRepository;
+  late final FavoriteRepository _favoriteRepository;
   late Future<List<PracticeQuestionWithDocument>> _future;
   final TextEditingController _answerController = TextEditingController();
+  Set<String> _favoriteKeys = const <String>{};
+  int? _userId;
   int _currentIndex = 0;
   bool _answerRevealed = false;
   bool _isSaving = false;
+  bool _isFavoriteSaving = false;
+  String _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
 
   @override
   void initState() {
@@ -36,6 +60,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     _authRepository = widget.authRepository ?? AuthRepository();
     _aiGenerationRepository =
         widget.aiGenerationRepository ?? AiGenerationRepository();
+    _favoriteRepository = widget.favoriteRepository ?? FavoriteRepository();
     _future = _loadQuestions();
   }
 
@@ -51,11 +76,29 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     if (user == null) {
       throw StateError('登录状态已失效');
     }
+    _userId = user.id;
 
-    final questions = await _aiGenerationRepository.fetchReviewQueueByUser(
-      userId: user.id,
-      limit: 300,
-    );
+    final scoped = widget.libraryId != null || widget.documentId != null ||
+      widget.conceptId != null || widget.questionIds != null;
+    var questions = scoped
+      ? await _aiGenerationRepository.fetchScopedPracticeQuestions(
+          userId: user.id, libraryId: widget.libraryId, documentId: widget.documentId,
+          conceptId: widget.conceptId, wrongOnly: widget.wrongOnly,
+          questionIds: widget.questionIds)
+      : await _aiGenerationRepository.fetchReviewQueueByUser(userId: user.id, limit: 300);
+    if (widget.wrongOnly && !scoped) {
+      questions = questions.where((q) => q.question.wrongCount > 0 && !q.question.isMastered).toList();
+    }
+    if (widget.questionLimit != null) {
+      questions = questions.take(widget.questionLimit!).toList();
+    }
+    final favoriteKeys = await _favoriteRepository.fetchFavoriteKeys(user.id);
+    if (mounted) {
+      setState(() => _favoriteKeys = favoriteKeys);
+    } else {
+      _favoriteKeys = favoriteKeys;
+    }
+
     final initialId = widget.initialQuestionId;
     if (initialId != null) {
       final index = questions.indexWhere(
@@ -64,14 +107,13 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       if (index >= 0) {
         _currentIndex = index;
       } else {
-        final selected = await _aiGenerationRepository
-            .fetchPracticeQuestionByUserAndId(
-              userId: user.id,
-              questionId: initialId,
-            );
-        if (selected != null) {
-          return [selected, ...questions];
-        }
+        final allowed = widget.questionIds == null || widget.questionIds!.contains(initialId);
+        final matches = !allowed ? <PracticeQuestionWithDocument>[] :
+          await _aiGenerationRepository.fetchScopedPracticeQuestions(
+            userId: user.id, libraryId: widget.libraryId, documentId: widget.documentId,
+            conceptId: widget.conceptId, wrongOnly: widget.wrongOnly,
+            questionIds: [initialId]);
+        if (matches.isNotEmpty) return [matches.single, ...questions];
       }
     }
     return questions;
@@ -80,6 +122,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
   Future<void> _reload() async {
     _answerController.clear();
     _answerRevealed = false;
+    _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
     final future = _loadQuestions();
     setState(() {
       _future = future;
@@ -87,14 +130,52 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     await future;
   }
 
-  void _completeAnswer() {
+  Future<void> _completeAnswer(PracticeQuestionRecord question) async {
     if (_answerController.text.trim().isEmpty) {
       _showMessage('请先输入你的答案');
       return;
     }
-    setState(() {
-      _answerRevealed = true;
-    });
+    final judged = evaluateObjectiveAnswer(question, _answerController.text);
+    if (judged != null) {
+      if (judged) { await _markMastered(question); }
+      else { await _retryQuestion(question); }
+      return;
+    }
+    setState(() { _answerRevealed = true; });
+  }
+
+  Future<void> _toggleFavorite(PracticeQuestionRecord question) async {
+    final userId = _userId;
+    if (userId == null || _isFavoriteSaving) {
+      return;
+    }
+    setState(() => _isFavoriteSaving = true);
+    try {
+      final favorited = await _favoriteRepository.toggleFavorite(
+        userId: userId,
+        targetType: FavoriteTargetType.practiceQuestion,
+        targetId: question.id,
+      );
+      final key = FavoriteRepository.favoriteKey(
+        FavoriteTargetType.practiceQuestion,
+        question.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        final next = Set<String>.of(_favoriteKeys);
+        if (favorited) {
+          next.add(key);
+        } else {
+          next.remove(key);
+        }
+        _favoriteKeys = next;
+      });
+      _showMessage(favorited ? '已加入收藏' : '已取消收藏');
+    } catch (error) {
+      if (mounted) _showMessage('收藏操作失败：$error');
+    } finally {
+      if (mounted) setState(() => _isFavoriteSaving = false);
+    }
   }
 
   Future<void> _markMastered(PracticeQuestionRecord question) async {
@@ -105,14 +186,13 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       _isSaving = true;
     });
     try {
-      await _aiGenerationRepository.markPracticeQuestionCorrect(
-        questionId: question.id,
-        userAnswer: _answerController.text,
-      );
+      await _aiGenerationRepository.submitPracticeAnswer(
+        userId: _userId!, questionId: question.id, requestId: _requestId,
+        libraryId: widget.libraryId, answer: _answerController.text, correct: true);
       if (!mounted) {
         return;
       }
-      _showMessage('已掌握，题目已移出待刷列表');
+      _showMessage('已记录本次答对，按复习进度继续巩固');
       await _reload();
     } finally {
       if (mounted) {
@@ -131,10 +211,9 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       _isSaving = true;
     });
     try {
-      await _aiGenerationRepository.markPracticeQuestionWrong(
-        questionId: question.id,
-        userAnswer: _answerController.text,
-      );
+      await _aiGenerationRepository.submitPracticeAnswer(
+        userId: _userId!, questionId: question.id, requestId: _requestId,
+        libraryId: widget.libraryId, answer: _answerController.text, correct: false);
       if (!mounted) {
         return;
       }
@@ -142,6 +221,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
       setState(() {
         _answerRevealed = false;
         _answerController.clear();
+        _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
       });
     } finally {
       if (mounted) {
@@ -163,7 +243,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('刷复习题'),
+        title: const Text('刷练习题'),
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
       ),
@@ -177,7 +257,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           if (snapshot.hasError) {
             return _StatePanel(
               icon: Icons.error_outline_rounded,
-              title: '复习题加载失败',
+              title: '练习题加载失败',
               description: '请稍后重试。',
               actionLabel: '重新加载',
               onPressed: _reload,
@@ -189,8 +269,8 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           if (questions.isEmpty) {
             return _StatePanel(
               icon: Icons.check_circle_rounded,
-              title: '暂无待刷复习题',
-              description: '生成复习题后，会自动出现在这里。',
+              title: '暂无待刷练习题',
+              description: '生成练习题后，会自动出现在这里。',
               actionLabel: '返回',
               onPressed: () async => Navigator.of(context).maybePop(),
             );
@@ -201,6 +281,11 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
           }
           final current = questions[_currentIndex];
           final question = current.question;
+          final favoriteKey = FavoriteRepository.favoriteKey(
+            FavoriteTargetType.practiceQuestion,
+            question.id,
+          );
+          final isFavorited = _favoriteKeys.contains(favoriteKey);
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
@@ -211,10 +296,16 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                 documentTitle: current.documentTitle,
               ),
               const SizedBox(height: 14),
-              _QuestionCard(question: question),
+              _QuestionCard(
+                question: question,
+                isFavorited: isFavorited,
+                isFavoriteSaving: _isFavoriteSaving,
+                onFavorite: () => _toggleFavorite(question),
+              ),
               const SizedBox(height: 14),
               TextField(
                 controller: _answerController,
+                enabled: !_isSaving,
                 minLines: 3,
                 maxLines: 6,
                 decoration: const InputDecoration(
@@ -229,7 +320,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                   if (!_answerRevealed)
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _completeAnswer,
+                        onPressed: _isSaving ? null : () => _completeAnswer(question),
                         icon: const Icon(Icons.done_rounded),
                         label: const Text('完成'),
                       ),
@@ -241,7 +332,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                             ? null
                             : () => _retryQuestion(question),
                         icon: const Icon(Icons.replay_rounded),
-                        label: const Text('重新刷题'),
+                        label: const Text('本次答错'),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -251,7 +342,7 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                             ? null
                             : () => _markMastered(question),
                         icon: const Icon(Icons.check_circle_rounded),
-                        label: const Text('已掌握'),
+                        label: const Text('本次答对'),
                       ),
                     ),
                   ],
@@ -267,12 +358,13 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                   children: [
                     Expanded(
                       child: TextButton.icon(
-                        onPressed: _currentIndex == 0
+                        onPressed: _isSaving || _currentIndex == 0
                             ? null
                             : () {
                                 setState(() {
                                   _currentIndex--;
                                   _answerController.clear();
+                                  _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
                                   _answerRevealed = false;
                                 });
                               },
@@ -282,12 +374,14 @@ class _PracticeReviewPageState extends State<PracticeReviewPage> {
                     ),
                     Expanded(
                       child: TextButton.icon(
-                        onPressed: _currentIndex == questions.length - 1
+                        onPressed:
+                            _isSaving || _currentIndex == questions.length - 1
                             ? null
                             : () {
                                 setState(() {
                                   _currentIndex++;
                                   _answerController.clear();
+                                  _requestId = 'review-${DateTime.now().microsecondsSinceEpoch}';
                                   _answerRevealed = false;
                                 });
                               },
@@ -349,9 +443,17 @@ class _ProgressHeader extends StatelessWidget {
 }
 
 class _QuestionCard extends StatelessWidget {
-  const _QuestionCard({required this.question});
+  const _QuestionCard({
+    required this.question,
+    required this.isFavorited,
+    required this.isFavoriteSaving,
+    required this.onFavorite,
+  });
 
   final PracticeQuestionRecord question;
+  final bool isFavorited;
+  final bool isFavoriteSaving;
+  final VoidCallback onFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -364,17 +466,49 @@ class _QuestionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            question.questionText,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-              height: 1.45,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  question.questionText,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: isFavorited ? '取消收藏' : '收藏',
+                onPressed: isFavoriteSaving ? null : onFavorite,
+                icon: Icon(
+                  isFavorited ? Icons.star_rounded : Icons.star_border_rounded,
+                  color: isFavorited
+                      ? const Color(0xFFF59E0B)
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ],
           ),
           if (question.difficulty?.isNotEmpty == true) ...[
             const SizedBox(height: 10),
             _ChipText(text: '难度：${question.difficulty}'),
+          ],
+          if (question.options.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _QuestionOptionList(options: question.options),
+          ] else if (question.questionKind ==
+              PracticeQuestionKind.multipleChoice) ...[
+            const SizedBox(height: 12),
+            Text(
+              '选项缺失，请回到 AI 生成结果页重新生成练习题',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFB45309),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
           const SizedBox(height: 10),
           Wrap(
@@ -389,6 +523,34 @@ class _QuestionCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _QuestionOptionList extends StatelessWidget {
+  const _QuestionOptionList({required this.options});
+
+  final List<String> options;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: options
+          .map(
+            (option) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: SelectableText(
+                option,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textPrimary,
+                  height: 1.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          )
+          .toList(growable: false),
     );
   }
 }

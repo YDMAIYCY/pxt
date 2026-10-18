@@ -2,11 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../learning_hub_pages.dart';
 
 import '../../../common/app_assets.dart';
 import '../../../common/profile_image_store.dart';
 import '../../../database/ai_generation_repository.dart';
 import '../../../database/auth_repository.dart';
+import '../../../database/favorite_repository.dart';
 import '../../../database/source_document_repository.dart';
 import '../../../database/llm_config_repository.dart';
 import '../../../database/models/ai_result_records.dart';
@@ -122,6 +124,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
   late final SourceDocumentRepository _sourceDocumentRepository;
   late final LlmConfigRepository _llmConfigRepository;
   late final AiGenerationRepository _aiGenerationRepository;
+  late final FavoriteRepository _favoriteRepository;
   final ProfileImageStore _imageStore = ProfileImageStore();
 
   UserProfile? _profile;
@@ -141,6 +144,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     _llmConfigRepository = widget.llmConfigRepository ?? LlmConfigRepository();
     _aiGenerationRepository =
         widget.aiGenerationRepository ?? AiGenerationRepository();
+    _favoriteRepository = FavoriteRepository();
     _handledRefreshVersion = widget.refreshVersion;
     widget.refreshListenable?.addListener(_handleExternalRefresh);
     widget.activeTabListenable?.addListener(_handleExternalRefresh);
@@ -579,6 +583,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     }
   }
 
+  // ignore: unused_element
   Future<void> _openWrongQuestionsEntry() async {
     final onOpenTab = widget.onOpenTab;
     if (onOpenTab != null) {
@@ -603,6 +608,7 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     }
   }
 
+  // ignore: unused_element
   Future<void> _openKnowledgeEntry() async {
     final onOpenTab = widget.onOpenTab;
     if (onOpenTab != null) {
@@ -620,6 +626,22 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     );
     if (mounted) {
       widget.onDataChanged?.call();
+      await _loadProfile();
+    }
+  }
+
+  Future<void> _openFavoritesEntry() async {
+    final profile = _profile;
+    if (profile == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FavoritesPage(
+          userId: profile.id,
+          favoriteRepository: _favoriteRepository,
+        ),
+      ),
+    );
+    if (mounted) {
       await _loadProfile();
     }
   }
@@ -811,20 +833,30 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
           ),
           const SizedBox(height: 16),
           _SettingTile(
-            icon: Icons.report_problem_rounded,
-            title: '我的错题收藏',
-            subtitle: stats == null
-                ? '待同步'
-                : '待处理 ${stats.wrongQuestionCount} 题，已掌握 ${stats.masteredQuestionCount} 题',
-            onTap: _openWrongQuestionsEntry,
+            icon: Icons.event_note_rounded,
+            title: '计划管理',
+            subtitle: '学习计划、专注计时和复习安排',
+            onTap: () => openLearningPage(
+              context,
+              const FocusSessionPage(),
+              onChanged: widget.onDataChanged,
+            ),
+          ),
+          _SettingTile(
+            icon: Icons.pending_actions_rounded,
+            title: '任务记录',
+            subtitle: '到期练习、生成任务与待处理资料',
+            onTap: () => openLearningPage(
+              context,
+              const LearningPlansPage(),
+              onChanged: widget.onDataChanged,
+            ),
           ),
           _SettingTile(
             icon: Icons.collections_bookmark_rounded,
-            title: '我的知识库收藏',
-            subtitle: stats == null
-                ? '待同步'
-                : '${stats.documentCount} 份资料，${stats.generatedResultCount} 条学习成果',
-            onTap: _openKnowledgeEntry,
+            title: '收藏',
+            subtitle: stats == null ? '待同步' : '知识卡片、错题和 AI 学习成果集中查看',
+            onTap: _openFavoritesEntry,
           ),
           _SettingTile(
             icon: Icons.auto_awesome_rounded,
@@ -873,6 +905,526 @@ class _ProfileTabPageState extends State<ProfileTabPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+class FavoritesPage extends StatefulWidget {
+  const FavoritesPage({
+    required this.userId,
+    required this.favoriteRepository,
+    super.key,
+  });
+
+  final int userId;
+  final FavoriteRepository favoriteRepository;
+
+  @override
+  State<FavoritesPage> createState() => _FavoritesPageState();
+}
+
+class _FavoritesPageState extends State<FavoritesPage> {
+  late Future<List<FavoriteCategorySummary>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.favoriteRepository.fetchCategorySummaries(widget.userId);
+  }
+
+  Future<void> _refresh() async {
+    final future = widget.favoriteRepository.fetchCategorySummaries(
+      widget.userId,
+    );
+    setState(() {
+      _future = future;
+    });
+    await future;
+  }
+
+  Future<void> _openCategory(FavoriteCategorySummary category) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FavoriteCategoryPage(
+          userId: widget.userId,
+          category: category,
+          favoriteRepository: widget.favoriteRepository,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: const Text('我的收藏')),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<FavoriteCategorySummary>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                snapshot.data == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final categories = snapshot.data ?? const [];
+            if (categories.isEmpty) {
+              return const _FavoriteEmptyList(text: '还没有可查看的收藏内容。');
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: categories
+                  .map(
+                    (category) => _SettingTile(
+                      icon: _favoriteIconFor(category.iconName),
+                      title: category.title,
+                      subtitle: '${category.count} 条收藏',
+                      onTap: () => _openCategory(category),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class FavoriteCategoryPage extends StatefulWidget {
+  const FavoriteCategoryPage({
+    required this.userId,
+    required this.category,
+    required this.favoriteRepository,
+    super.key,
+  });
+
+  final int userId;
+  final FavoriteCategorySummary category;
+  final FavoriteRepository favoriteRepository;
+
+  @override
+  State<FavoriteCategoryPage> createState() => _FavoriteCategoryPageState();
+}
+
+class _FavoriteCategoryPageState extends State<FavoriteCategoryPage> {
+  late Future<List<FavoriteItemRecord>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<List<FavoriteItemRecord>> _load() {
+    return widget.favoriteRepository.fetchFavoritesByType(
+      userId: widget.userId,
+      targetType: widget.category.type,
+    );
+  }
+
+  Future<void> _refresh() async {
+    final future = _load();
+    setState(() {
+      _future = future;
+    });
+    await future;
+  }
+
+  Future<void> _setNote(FavoriteItemRecord item, String note) async {
+    await widget.favoriteRepository.updateFavoriteNoteOnly(
+      favoriteId: item.favoriteId,
+      note: note,
+    );
+    if (mounted) await _refresh();
+  }
+
+  Future<void> _setHighlight(FavoriteItemRecord item, String highlight) async {
+    await widget.favoriteRepository.updateFavoriteHighlightOnly(
+      favoriteId: item.favoriteId,
+      highlightText: highlight,
+    );
+    if (mounted) await _refresh();
+  }
+
+  Future<void> _removeFavorite(FavoriteItemRecord item) async {
+    try {
+      await widget.favoriteRepository.removeFavoriteById(item.favoriteId);
+    } catch (error) {
+      if (mounted) _showMessage('取消收藏失败：$error');
+      return;
+    }
+    if (!mounted) return;
+    _showMessage('已取消收藏');
+    try {
+      await _refresh();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _future = Future.value(const <FavoriteItemRecord>[]);
+        });
+      }
+    }
+  }
+
+  Future<void> _editText({
+    required FavoriteItemRecord item,
+    required String title,
+    required String initialText,
+    required ValueChanged<String> onSaved,
+  }) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) =>
+          _FavoriteTextDialog(title: title, initialText: initialText),
+    );
+    if (result != null) onSaved(result);
+  }
+
+  void _showDetail(FavoriteItemRecord item) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (context) => _FavoriteDetailSheet(
+        item: item,
+        onEditHighlight: () {
+          Navigator.of(context).pop();
+          _editText(
+            item: item,
+            title: '高亮重点',
+            initialText: item.highlightText ?? '',
+            onSaved: (value) => _setHighlight(item, value),
+          );
+        },
+        onClearHighlight: item.highlightText?.isNotEmpty == true
+            ? () {
+                Navigator.of(context).pop();
+                _setHighlight(item, '');
+              }
+            : null,
+        onEditNote: () {
+          Navigator.of(context).pop();
+          _editText(
+            item: item,
+            title: '添加笔记',
+            initialText: item.note ?? '',
+            onSaved: (value) => _setNote(item, value),
+          );
+        },
+        onClearNote: item.note?.isNotEmpty == true
+            ? () {
+                Navigator.of(context).pop();
+                _setNote(item, '');
+              }
+            : null,
+        onRemoveFavorite: () {
+          Navigator.of(context).pop();
+          _removeFavorite(item);
+        },
+      ),
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: Text(widget.category.title)),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<FavoriteItemRecord>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                snapshot.data == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final items = snapshot.data ?? const [];
+            if (items.isEmpty) {
+              return const _FavoriteEmptyList(text: '这里没有可查看的收藏内容。');
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: items
+                  .map(
+                    (item) => _FavoriteItemTile(
+                      item: item,
+                      onTap: () => _showDetail(item),
+                      onRemove: () => _removeFavorite(item),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoriteItemTile extends StatelessWidget {
+  const _FavoriteItemTile({
+    required this.item,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  final FavoriteItemRecord item;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        onTap: onTap,
+        leading: const Icon(Icons.star_rounded, color: Color(0xFFF59E0B)),
+        title: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Text(item.subtitle),
+            const SizedBox(height: 6),
+            Text(item.body, maxLines: 5, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 6),
+            const Text(
+              '点击查看完整内容',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        trailing: IconButton(
+          tooltip: '取消收藏',
+          onPressed: onRemove,
+          icon: const Icon(Icons.star_border_rounded),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoriteDetailSheet extends StatelessWidget {
+  const _FavoriteDetailSheet({
+    required this.item,
+    required this.onEditHighlight,
+    required this.onClearHighlight,
+    required this.onEditNote,
+    required this.onClearNote,
+    required this.onRemoveFavorite,
+  });
+
+  final FavoriteItemRecord item;
+  final VoidCallback onEditHighlight;
+  final VoidCallback? onClearHighlight;
+  final VoidCallback onEditNote;
+  final VoidCallback? onClearNote;
+  final VoidCallback onRemoveFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.86,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(item.title, style: AppTextStyles.h2(context)),
+              const SizedBox(height: 6),
+              Text(item.subtitle, style: AppTextStyles.bodySmall(context)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item.highlightText?.isNotEmpty == true)
+                        _FavoriteDetailBlock(
+                          title: '高亮重点',
+                          text: item.highlightText!,
+                        ),
+                      if (item.note?.isNotEmpty == true)
+                        _FavoriteDetailBlock(title: '我的笔记', text: item.note!),
+                      _FavoriteDetailBlock(title: '完整内容', text: item.body),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onEditHighlight,
+                    icon: const Icon(Icons.highlight_rounded),
+                    label: const Text('高亮'),
+                  ),
+                  if (onClearHighlight != null)
+                    OutlinedButton.icon(
+                      onPressed: onClearHighlight,
+                      icon: const Icon(Icons.format_color_reset_rounded),
+                      label: const Text('取消高亮'),
+                    ),
+                  OutlinedButton.icon(
+                    onPressed: onEditNote,
+                    icon: const Icon(Icons.edit_note_rounded),
+                    label: const Text('笔记'),
+                  ),
+                  if (onClearNote != null)
+                    OutlinedButton.icon(
+                      onPressed: onClearNote,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      label: const Text('删除笔记'),
+                    ),
+                  FilledButton.icon(
+                    onPressed: onRemoveFavorite,
+                    icon: const Icon(Icons.star_border_rounded),
+                    label: const Text('取消收藏'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoriteTextDialog extends StatefulWidget {
+  const _FavoriteTextDialog({required this.title, required this.initialText});
+
+  final String title;
+  final String initialText;
+
+  @override
+  State<_FavoriteTextDialog> createState() => _FavoriteTextDialogState();
+}
+
+class _FavoriteTextDialogState extends State<_FavoriteTextDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLines: 4,
+        decoration: const InputDecoration(border: OutlineInputBorder()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
+class _FavoriteDetailBlock extends StatelessWidget {
+  const _FavoriteDetailBlock({required this.title, required this.text});
+
+  final String title;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderLight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: AppTextStyles.bodySmall(
+              context,
+            ).copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 8),
+          SelectableText(text, style: AppTextStyles.body(context)),
+        ],
+      ),
+    );
+  }
+}
+
+class _FavoriteEmptyList extends StatelessWidget {
+  const _FavoriteEmptyList({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text(
+          text,
+          textAlign: TextAlign.center,
+          style: AppTextStyles.body(context),
+        ),
+      ],
+    );
+  }
+}
+
+IconData _favoriteIconFor(String name) {
+  switch (name) {
+    case 'wrong':
+      return Icons.report_problem_rounded;
+    case 'outline':
+      return Icons.list_alt_rounded;
+    case 'mindmap':
+      return Icons.account_tree_rounded;
+    case 'quiz':
+      return Icons.quiz_rounded;
+    default:
+      return Icons.style_rounded;
   }
 }
 

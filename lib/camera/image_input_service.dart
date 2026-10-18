@@ -1,21 +1,29 @@
 import 'dart:io';
-import 'dart:ui' as ui;
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf_render_maintained/pdf_render_maintained.dart';
 
 import 'document_input_contract.dart';
 
 // ========== 图片输入服务 ==========
 // 负责调用 image_picker，并将选中的图片复制到应用私有目录。
 
+const int _maxPdfImportPages = 80;
+const int _maxPdfRenderLongestSide = 1600;
+const int _maxPdfRenderedPixels = 2200000;
+
 class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
-  ImageInputService({ImagePicker? picker}) : _picker = picker ?? ImagePicker();
+  ImageInputService({ImagePicker? picker, PdfPageRenderer? pdfPageRenderer})
+    : _picker = picker ?? ImagePicker(),
+      _pdfPageRenderer = pdfPageRenderer ?? const PdfPageRenderer();
 
   final ImagePicker _picker;
+  final PdfPageRenderer _pdfPageRenderer;
 
   @override
   Future<StoredImageSelection?> pickAndStoreImage({
@@ -56,6 +64,95 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
         return _pickAndStoreMultipleImages();
       case BatchDocumentInputSource.pdf:
         return _pickAndRenderPdfPages();
+      case BatchDocumentInputSource.files:
+        return _pickAndStoreFiles();
+      case BatchDocumentInputSource.cameraSequence:
+        return _captureSequence();
+    }
+  }
+
+  Future<StoredBatchSelection?> _captureSequence() async {
+    final pages = <StoredDocumentPage>[];
+    while (pages.length < 20) {
+      final selected = await pickAndStoreImage(source: ImageInputSource.camera);
+      if (selected == null) break;
+      pages.add(
+        StoredDocumentPage(
+          savedPath: selected.savedPath,
+          originalName: '拍照第 ${pages.length + 1} 张',
+        ),
+      );
+    }
+    if (pages.isEmpty) return null;
+    return StoredBatchSelection(
+      source: BatchDocumentInputSource.cameraSequence,
+      title: '连续拍照 · ${pages.length} 张',
+      originalFilePath: null,
+      pages: pages,
+    );
+  }
+
+  Future<StoredBatchSelection?> _pickAndStoreFiles() async {
+    final selected = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+      allowMultiple: true,
+      withData: false,
+    );
+    if (selected == null || selected.files.isEmpty) return null;
+    final directory = await _ensureStorageDirectory();
+    final pages = <StoredDocumentPage>[];
+    final stored = <String>[];
+    try {
+      for (final file in selected.files) {
+        if (file.path == null) throw StateError('文件无法读取：${file.name}');
+        final isPdf = p.extension(file.name).toLowerCase() == '.pdf';
+        final copy = await _copyIntoStorage(
+          sourcePath: file.path!,
+          storageDirectory: directory,
+          prefix: isPdf ? 'source_pdf' : 'source',
+        );
+        stored.add(copy);
+        if (isPdf) {
+          final rendered = await _pdfPageRenderer.renderPdf(
+            pdfPath: copy,
+            outputDirectoryPath: directory.path,
+            outputPrefix: 'pdf_page_${DateTime.now().microsecondsSinceEpoch}',
+            maxPages: _maxPdfImportPages,
+            maxLongestSide: _maxPdfRenderLongestSide,
+            maxRenderedPixels: _maxPdfRenderedPixels,
+          );
+          if (rendered.isEmpty) throw StateError('PDF 没有可导入页面：${file.name}');
+          for (final page in rendered) {
+            stored.add(page.savedPath);
+            pages.add(
+              StoredDocumentPage(
+                savedPath: page.savedPath,
+                originalName: '${file.name} · 第 ${page.pageNumber} 页',
+                originalFilePath: copy,
+                filePageNumber: page.pageNumber,
+              ),
+            );
+          }
+        } else {
+          pages.add(
+            StoredDocumentPage(savedPath: copy, originalName: file.name),
+          );
+        }
+      }
+      return StoredBatchSelection(
+        source: BatchDocumentInputSource.files,
+        title: selected.files.length == 1
+            ? selected.files.single.name
+            : '文件导入 · ${selected.files.length} 个文件',
+        originalFilePath: null,
+        pages: pages,
+      );
+    } catch (_) {
+      for (final path in stored) {
+        await _deleteStoredPath(path);
+      }
+      rethrow;
     }
   }
 
@@ -115,30 +212,27 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
     );
     final title = p.basenameWithoutExtension(sourcePath).trim();
     final pages = <StoredDocumentPage>[];
-    PdfDocument? document;
 
     try {
-      document = await PdfDocument.openFile(pdfCopyPath);
-      for (var pageNumber = 1; pageNumber <= document.pageCount; pageNumber++) {
-        final page = await document.getPage(pageNumber);
-        final pageImage = await page.render(
-          width: (page.width * 2).round(),
-          height: (page.height * 2).round(),
-        );
-        final image = await pageImage.createImageDetached();
-        final pngBytes = await _encodeImageAsPng(image);
-        pageImage.dispose();
-        image.dispose();
+      final renderedPages = await _pdfPageRenderer.renderPdf(
+        pdfPath: pdfCopyPath,
+        outputDirectoryPath: storageDirectory.path,
+        outputPrefix: 'pdf_page_${DateTime.now().microsecondsSinceEpoch}',
+        maxPages: _maxPdfImportPages,
+        maxLongestSide: _maxPdfRenderLongestSide,
+        maxRenderedPixels: _maxPdfRenderedPixels,
+      );
+      if (renderedPages.isEmpty) {
+        throw StateError('PDF 没有可导入的页面');
+      }
 
-        final savedPath = p.join(
-          storageDirectory.path,
-          'pdf_page_${DateTime.now().microsecondsSinceEpoch}_$pageNumber.png',
-        );
-        await File(savedPath).writeAsBytes(pngBytes, flush: true);
+      for (final page in renderedPages) {
         pages.add(
           StoredDocumentPage(
-            savedPath: savedPath,
-            originalName: '${title.isEmpty ? 'PDF' : title}-$pageNumber',
+            savedPath: page.savedPath,
+            originalName: '${title.isEmpty ? 'PDF' : title}-${page.pageNumber}',
+            originalFilePath: pdfCopyPath,
+            filePageNumber: page.pageNumber,
           ),
         );
       }
@@ -155,8 +249,6 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
         await _deleteStoredPath(page.savedPath);
       }
       rethrow;
-    } finally {
-      await document?.dispose();
     }
   }
 
@@ -188,14 +280,6 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
     final savedPath = p.join(storageDirectory.path, fileName);
     await File(sourcePath).copy(savedPath);
     return savedPath;
-  }
-
-  Future<List<int>> _encodeImageAsPng(ui.Image image) async {
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    if (byteData == null) {
-      throw StateError('PDF 页面转图片失败');
-    }
-    return byteData.buffer.asUint8List();
   }
 
   String _buildMultiImageBatchTitle(List<StoredDocumentPage> pages) {
@@ -233,4 +317,100 @@ class ImageInputService implements ImageInputPort, BatchDocumentInputPort {
 
     return extension;
   }
+}
+
+// ========== PDF 页面渲染 ==========
+// Android 端用系统 PdfRenderer，避开第三方 PDF 插件 JNI 崩溃问题。
+
+class PdfPageRenderer {
+  const PdfPageRenderer();
+
+  static const MethodChannel _channel = MethodChannel('pxt1/pdf_renderer');
+
+  Future<List<RenderedPdfPage>> renderPdf({
+    required String pdfPath,
+    required String outputDirectoryPath,
+    required String outputPrefix,
+    required int maxPages,
+    required int maxLongestSide,
+    required int maxRenderedPixels,
+  }) async {
+    try {
+      final result = await _channel.invokeListMethod<Map<dynamic, dynamic>>(
+        'renderPdf',
+        <String, Object>{
+          'pdfPath': pdfPath,
+          'outputDirectoryPath': outputDirectoryPath,
+          'outputPrefix': outputPrefix,
+          'maxPages': maxPages,
+          'maxLongestSide': maxLongestSide,
+          'maxRenderedPixels': maxRenderedPixels,
+        },
+      );
+
+      return (result ?? const <Map<dynamic, dynamic>>[])
+          .map(RenderedPdfPage.fromPlatformMap)
+          .toList(growable: false);
+    } on MissingPluginException catch (error) {
+      throw StateError('当前平台暂不支持 PDF 导入：$error');
+    } on PlatformException catch (error) {
+      throw StateError(error.message ?? 'PDF 渲染失败：${error.code}');
+    }
+  }
+}
+
+class RenderedPdfPage {
+  const RenderedPdfPage({required this.pageNumber, required this.savedPath});
+
+  factory RenderedPdfPage.fromPlatformMap(Map<dynamic, dynamic> map) {
+    final pageNumber = map['pageNumber'];
+    final savedPath = map['savedPath'];
+    if (pageNumber is! int || savedPath is! String || savedPath.isEmpty) {
+      throw StateError('PDF 渲染结果异常');
+    }
+    return RenderedPdfPage(pageNumber: pageNumber, savedPath: savedPath);
+  }
+
+  final int pageNumber;
+  final String savedPath;
+}
+
+_PdfRenderSize _resolvePdfPageRenderSize({
+  required double pageWidth,
+  required double pageHeight,
+}) {
+  if (pageWidth <= 0 || pageHeight <= 0) {
+    throw StateError('PDF 页面尺寸异常，无法导入');
+  }
+
+  final longestSide = math.max(pageWidth, pageHeight);
+  var scale = math.min(2.0, _maxPdfRenderLongestSide / longestSide);
+  final estimatedPixels = pageWidth * scale * pageHeight * scale;
+  if (estimatedPixels > _maxPdfRenderedPixels) {
+    scale *= math.sqrt(_maxPdfRenderedPixels / estimatedPixels);
+  }
+
+  return _PdfRenderSize(
+    width: math.max(1, (pageWidth * scale).round()),
+    height: math.max(1, (pageHeight * scale).round()),
+  );
+}
+
+@visibleForTesting
+Map<String, int> resolvePdfPageRenderSizeForTest({
+  required double pageWidth,
+  required double pageHeight,
+}) {
+  final size = _resolvePdfPageRenderSize(
+    pageWidth: pageWidth,
+    pageHeight: pageHeight,
+  );
+  return {'width': size.width, 'height': size.height};
+}
+
+class _PdfRenderSize {
+  const _PdfRenderSize({required this.width, required this.height});
+
+  final int width;
+  final int height;
 }

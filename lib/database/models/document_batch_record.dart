@@ -12,11 +12,11 @@ class DocumentBatchSourceType {
   static String labelOf(String value) {
     switch (value) {
       case multiImage:
-        return '多图导入';
+        return '\u591a\u56fe\u5bfc\u5165';
       case pdf:
-        return 'PDF 导入';
+        return 'PDF \u5bfc\u5165';
       default:
-        return '学习包';
+        return '\u5b66\u4e60\u5305';
     }
   }
 }
@@ -103,9 +103,13 @@ class DocumentBatchPageDraft {
     required this.savedPath,
     required this.title,
     required this.pageNumber,
+    this.originalFilePath,
+    this.filePageNumber,
   });
 
   final String savedPath;
   final String title;
   final int pageNumber;
+  final String? originalFilePath;
+  final int? filePageNumber;
 }

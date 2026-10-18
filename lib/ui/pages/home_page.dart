@@ -4,20 +4,25 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../common/app_assets.dart';
 import '../../database/auth_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/premium_app_chrome.dart';
 import 'login_page.dart';
 import 'tabs/home_tab_page.dart';
-import 'tabs/knowledge_tab_page.dart';
+import 'book_library_page.dart';
+import 'learning_hub_pages.dart';
 import 'tabs/profile_tab_page.dart';
-import 'tabs/tasks_tab_page.dart';
 
 const List<_BottomDockItem> _bottomDockItems = [
-  _BottomDockItem(label: '首页', iconAsset: AppAssets.navHome),
-  _BottomDockItem(label: '知识库', iconAsset: AppAssets.navKnowledge),
-  _BottomDockItem(label: '任务', iconAsset: AppAssets.navTask),
-  _BottomDockItem(label: '我的', iconAsset: AppAssets.navProfile),
+  _BottomDockItem(label: '\u9996\u9875', iconAsset: AppAssets.navHome),
+  _BottomDockItem(
+    label: '\u77e5\u8bc6\u5e93',
+    iconAsset: AppAssets.navKnowledge,
+  ),
+  _BottomDockItem(label: '练习', icon: Icons.quiz_rounded),
+  _BottomDockItem(label: 'AI 学伴', icon: Icons.chat_bubble_outline_rounded),
+  _BottomDockItem(label: '\u6211\u7684', iconAsset: AppAssets.navProfile),
 ];
 
-// ========== 主界面 ==========
+// ========== Main Shell ==========
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -86,22 +91,17 @@ class _HomePageState extends State<HomePage> {
         tabIndex: 0,
         refreshListenable: _refreshNotifier,
         activeTabListenable: _activeTabNotifier,
+        onOpenTab: _selectTab,
         onDataChanged: _notifyDataChanged,
       ),
-      KnowledgeTabPage(
-        tabIndex: 1,
+      BookLibraryPage(
         refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
         onDataChanged: _notifyDataChanged,
       ),
-      TasksTabPage(
-        tabIndex: 2,
-        refreshListenable: _refreshNotifier,
-        activeTabListenable: _activeTabNotifier,
-        onDataChanged: _notifyDataChanged,
-      ),
+      PracticeTabPage(onDataChanged: _notifyDataChanged),
+      const CompanionTabPage(),
       ProfileTabPage(
-        tabIndex: 3,
+        tabIndex: 4,
         refreshListenable: _refreshNotifier,
         activeTabListenable: _activeTabNotifier,
         onOpenTab: _selectTab,
@@ -115,11 +115,13 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       extendBody: true,
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        bottom: false,
-        child: _isCheckingSession
-            ? const Center(child: CircularProgressIndicator())
-            : IndexedStack(index: _currentIndex, children: _tabs),
+      body: PremiumPageBackground(
+        child: SafeArea(
+          bottom: false,
+          child: _isCheckingSession
+              ? const Center(child: CircularProgressIndicator())
+              : IndexedStack(index: _currentIndex, children: _tabs),
+        ),
       ),
       bottomNavigationBar: _isCheckingSession
           ? null
@@ -132,7 +134,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ========== 底部导航 ==========
+// ========== Bottom Navigation ==========
 class _FloatingBottomDock extends StatelessWidget {
   const _FloatingBottomDock({
     required this.currentIndex,
@@ -149,13 +151,13 @@ class _FloatingBottomDock extends StatelessWidget {
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
-        height: 70,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 7),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(AppRadii.card),
-          border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
-          boxShadow: AppShadows.cardSoftList,
+          color: AppColors.surface.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: AppColors.borderLight),
+          boxShadow: AppShadows.navList,
         ),
         child: Row(
           children: List.generate(items.length, (index) {
@@ -198,22 +200,36 @@ class _DockButton extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.primarySoft : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(19),
+            border: Border.all(
+              color: isSelected
+                  ? AppColors.primaryLight.withValues(alpha: 0.72)
+                  : Colors.transparent,
+            ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const SizedBox(height: 2),
-              SvgPicture.asset(
-                item.iconAsset,
-                width: 22,
-                height: 22,
-                colorFilter: ColorFilter.mode(
-                  isSelected ? AppColors.primary : AppColors.textTertiary,
-                  BlendMode.srcIn,
+              if (item.iconAsset != null)
+                SvgPicture.asset(
+                  item.iconAsset!,
+                  width: 22,
+                  height: 22,
+                  colorFilter: ColorFilter.mode(
+                    isSelected ? AppColors.primary : AppColors.textTertiary,
+                    BlendMode.srcIn,
+                  ),
+                )
+              else if (item.icon != null)
+                Icon(
+                  item.icon,
+                  size: 22,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textTertiary,
                 ),
-              ),
               const SizedBox(height: 2),
               Text(
                 item.label,
@@ -221,7 +237,7 @@ class _DockButton extends StatelessWidget {
                   fontSize: 11,
                   fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                   color: isSelected
-                      ? AppColors.primary
+                      ? AppColors.primaryDark
                       : AppColors.textTertiary,
                 ),
               ),
@@ -234,8 +250,9 @@ class _DockButton extends StatelessWidget {
 }
 
 class _BottomDockItem {
-  const _BottomDockItem({required this.label, required this.iconAsset});
+  const _BottomDockItem({required this.label, this.iconAsset, this.icon});
 
   final String label;
-  final String iconAsset;
+  final String? iconAsset;
+  final IconData? icon;
 }

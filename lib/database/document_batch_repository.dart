@@ -26,6 +26,7 @@ class DocumentBatchRepository {
     required String title,
     required String? originalFilePath,
     required List<DocumentBatchPageDraft> pages,
+    String? operationId,
   }) async {
     if (pages.isEmpty) {
       throw ArgumentError('学习包至少需要包含 1 页资料');
@@ -36,6 +37,15 @@ class DocumentBatchRepository {
     final now = DateTime.now().toUtc().toIso8601String();
 
     final batchId = await db.transaction((txn) async {
+      if (operationId != null) {
+        final prior = await txn.rawQuery(
+          '''SELECT d.batch_id FROM import_records r
+          JOIN source_documents d ON d.import_record_id = r.id
+          WHERE r.user_id = ? AND r.request_id = ? AND d.batch_id IS NOT NULL LIMIT 1''',
+          [userId, operationId],
+        );
+        if (prior.isNotEmpty) return prior.single['batch_id'] as int;
+      }
       final resolvedLibraryId = await _resolveLibraryId(
         txn,
         userId: userId,
@@ -54,13 +64,33 @@ class DocumentBatchRepository {
             'updated_at': now,
           });
 
+      if (sourceType == DocumentBatchSourceType.pdf) {
+        await txn.insert(AppDatabase.tableSourceDocuments, {
+          'user_id': userId,
+          'library_id': resolvedLibraryId,
+          'batch_id': createdBatchId,
+          'page_number': null,
+          'source_type': SourceDocumentSourceType.pdfDocument,
+          'image_path': originalFilePath ?? '',
+          'original_title': title.trim().isEmpty ? 'PDF 资料' : title.trim(),
+          'ocr_status': SourceDocumentOcrStatus.pending,
+          'ocr_error_message': null,
+          'ocr_updated_at': now,
+          'created_at': now,
+        });
+      }
+
       for (final page in pages) {
         await txn.insert(AppDatabase.tableSourceDocuments, {
           'user_id': userId,
           'library_id': resolvedLibraryId,
           'batch_id': createdBatchId,
           'page_number': page.pageNumber,
-          'source_type': pageSourceType,
+          'file_page_number': page.filePageNumber,
+          'original_file_path': page.originalFilePath,
+          'source_type': page.originalFilePath != null
+              ? SourceDocumentSourceType.pdfPage
+              : pageSourceType,
           'image_path': page.savedPath,
           'original_title': page.title,
           'ocr_status': SourceDocumentOcrStatus.pending,
@@ -76,6 +106,14 @@ class DocumentBatchRepository {
         where: 'id = ? AND user_id = ?',
         whereArgs: [resolvedLibraryId, userId],
       );
+      if (operationId != null) {
+        await txn.update(
+          'import_records',
+          {'request_id': operationId},
+          where: 'user_id = ? AND operation_id = ?',
+          whereArgs: [userId, 'batch:$createdBatchId'],
+        );
+      }
 
       return createdBatchId;
     });
@@ -106,7 +144,7 @@ class DocumentBatchRepository {
         batches.source_type,
         batches.title,
         batches.original_file_path,
-        COUNT(documents.id) AS page_count,
+        COUNT(CASE WHEN documents.page_number IS NOT NULL THEN 1 END) AS page_count,
         batches.created_at,
         batches.updated_at
       FROM ${AppDatabase.tableDocumentBatches} batches
@@ -148,7 +186,7 @@ class DocumentBatchRepository {
         batches.source_type,
         batches.title,
         batches.original_file_path,
-        COUNT(documents.id) AS page_count,
+        COUNT(CASE WHEN documents.page_number IS NOT NULL THEN 1 END) AS page_count,
         batches.created_at,
         batches.updated_at
       FROM ${AppDatabase.tableDocumentBatches} batches
@@ -174,6 +212,9 @@ class DocumentBatchRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -187,12 +228,13 @@ class DocumentBatchRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
       WHERE documents.user_id = ?
         AND documents.batch_id = ?
+        AND documents.page_number IS NOT NULL
       ORDER BY documents.page_number ASC, documents.id ASC
       ''',
       [userId, batchId],
@@ -223,13 +265,12 @@ class DocumentBatchRepository {
 
       final pageRows = await txn.query(
         AppDatabase.tableSourceDocuments,
-        columns: ['image_path'],
+        columns: ['image_path', 'original_file_path'],
         where: 'batch_id = ? AND user_id = ?',
         whereArgs: [batchId, userId],
       );
-      cleanupPaths.addAll(
-        pageRows.map((row) => row['image_path'] as String?),
-      );
+      cleanupPaths.addAll(pageRows.map((row) => row['image_path'] as String?));
+      cleanupPaths.addAll(pageRows.map((row) => row['original_file_path'] as String?));
 
       await txn.delete(
         AppDatabase.tableSourceDocuments,
@@ -296,6 +337,6 @@ class DocumentBatchRepository {
       return '';
     }
     args.add(libraryId);
-    return 'AND batches.library_id = ?';
+    return 'AND batches.id IN (SELECT d.batch_id FROM source_documents d JOIN document_library_links dl ON dl.document_id = d.id WHERE dl.library_id = ?)';
   }
 }

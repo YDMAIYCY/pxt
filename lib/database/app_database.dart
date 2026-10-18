@@ -1,5 +1,9 @@
+import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'learning_schema.dart';
+import 'import_record_schema.dart';
+import 'practice_evidence_schema.dart';
 
 // ========== SQLite 数据库入口 ==========
 // 统一管理数据库打开、建表与升级逻辑。
@@ -7,10 +11,28 @@ import 'package:sqflite/sqflite.dart';
 class AppDatabase {
   AppDatabase._();
 
+  static Future<AppDatabase> openForTesting(
+    DatabaseFactory factory, {
+    String path = inMemoryDatabasePath,
+  }) async {
+    final instance = AppDatabase._();
+    instance._database = await factory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: databaseVersion,
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onCreate: instance._createTables,
+        onUpgrade: instance._upgradeTables,
+        onOpen: instance._ensureSchemaConsistency,
+      ),
+    );
+    return instance;
+  }
+
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'paixuetong.db';
-  static const int databaseVersion = 9;
+  static const int databaseVersion = 16;
 
   static const String tableUsers = 'users';
   static const String tableAuthSessions = 'auth_sessions';
@@ -27,6 +49,14 @@ class AppDatabase {
   static const String tableWrongQuestionExplanations =
       'wrong_question_explanations';
   static const String tableWrongQuestionTrainings = 'wrong_question_trainings';
+  static const String tableAiChatSessions = 'ai_chat_sessions';
+  static const String tableAiChatMessages = 'ai_chat_messages';
+  static const String tablePomodoroTasks = 'pomodoro_tasks';
+  static const String tablePomodoroRecords = 'pomodoro_records';
+  static const String tableCheckinRecords = 'checkin_records';
+  static const String tableKnowledgeConcepts = 'knowledge_concepts';
+  static const String tableKnowledgeConceptLinks = 'knowledge_concept_links';
+  static const String tableFavorites = 'favorites';
 
   Database? _database;
 
@@ -36,13 +66,37 @@ class AppDatabase {
   }
 
   Future<void> ensureSchemaReady() async {
-    final db = await database;
-    await _ensureSchemaConsistency(db);
+    // Opening already runs creation, migration and consistency checks.
+    await database;
   }
 
   Future<Database> _open() async {
     final dbDirectory = await getDatabasesPath();
     final dbPath = p.join(dbDirectory, databaseName);
+    if (await File(dbPath).exists()) {
+      final previous = await openDatabase(
+        dbPath,
+        readOnly: true,
+        singleInstance: false,
+      );
+      final version = await previous.getVersion();
+      await previous.close();
+      if (version < databaseVersion) {
+        final backup = Directory(
+          p.join(
+            dbDirectory,
+            'backup-v$version-${DateTime.now().millisecondsSinceEpoch}',
+          ),
+        );
+        await backup.create();
+        for (final suffix in ['', '-wal', '-shm']) {
+          final file = File('$dbPath$suffix');
+          if (await file.exists()) {
+            await file.copy(p.join(backup.path, '$databaseName$suffix'));
+          }
+        }
+      }
+    }
 
     return openDatabase(
       dbPath,
@@ -144,6 +198,10 @@ class AppDatabase {
         document_id INTEGER NOT NULL UNIQUE,
         raw_text TEXT NOT NULL,
         clean_text TEXT,
+        final_text TEXT,
+        quality_score INTEGER,
+        quality_level TEXT,
+        quality_reasons_json TEXT,
         language TEXT NOT NULL DEFAULT 'zh-CN',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -219,6 +277,9 @@ class AppDatabase {
         correct_streak INTEGER NOT NULL DEFAULT 0,
         parent_question_id INTEGER,
         question_kind TEXT NOT NULL DEFAULT 'normal',
+        options_json TEXT,
+        rubric_json TEXT,
+        expected_keywords_json TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY(document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE,
         FOREIGN KEY(parent_question_id) REFERENCES $tablePracticeQuestions(id) ON DELETE CASCADE
@@ -264,6 +325,34 @@ class AppDatabase {
         FOREIGN KEY(wrong_question_id) REFERENCES $tablePracticeQuestions(id) ON DELETE CASCADE
       );
     ''');
+
+    await db.execute('''
+      CREATE TABLE $tableAiChatSessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        last_message_preview TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE $tableAiChatMessages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES $tableAiChatSessions(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await _createKnowledgeGraphTables(db);
+    await _createFavoriteTables(db);
 
     await db.execute(
       'CREATE INDEX idx_users_username ON $tableUsers(username);',
@@ -319,6 +408,23 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_llm_configs_user_id ON $tableLlmProviderConfigs(user_id);',
     );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_sessions_user_id ON $tableAiChatSessions(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_sessions_updated_at ON $tableAiChatSessions(updated_at);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_messages_session_id ON $tableAiChatMessages(session_id);',
+    );
+    await db.execute(
+      'CREATE INDEX idx_ai_chat_messages_created_at ON $tableAiChatMessages(created_at);',
+    );
+    await _createKnowledgeGraphIndexes(db);
+    await _createFavoriteIndexes(db);
+    await createLearningSchema(db);
+    await createImportRecordSchema(db);
+    await createPracticeEvidenceSchema(db);
   }
 
   Future<void> _upgradeTables(
@@ -349,6 +455,29 @@ class AppDatabase {
     }
     if (oldVersion < 9) {
       await _upgradePracticeSchedulingToV9(db);
+    }
+    if (oldVersion < 10) {
+      await _upgradeOcrQualityToV10(db);
+      await _upgradeAiChatToV10(db);
+    }
+    if (oldVersion < 11) {
+      await _upgradeFocusToV11(db);
+    }
+    if (oldVersion < 12) {
+      await _upgradeKnowledgeGraphToV12(db);
+    }
+    if (oldVersion < 13) {
+      await _upgradeRichPracticeQuestionsToV13(db);
+    }
+    if (oldVersion < 14) {
+      await _upgradeFavoritesToV14(db);
+    }
+    if (oldVersion < 15) {
+      await createLearningSchema(db);
+    }
+    if (oldVersion < 16) {
+      await createImportRecordSchema(db);
+      await createPracticeEvidenceSchema(db);
     }
   }
 
@@ -397,7 +526,8 @@ class AppDatabase {
       SET
         ocr_status = 'success',
         ocr_updated_at = COALESCE(ocr_updated_at, created_at)
-      WHERE id IN (SELECT document_id FROM $tableOcrTexts);
+      WHERE id IN (SELECT document_id FROM $tableOcrTexts)
+        AND (ocr_status IS NULL OR TRIM(ocr_status) = '' OR ocr_status = 'pending');
       ''');
   }
 
@@ -646,8 +776,246 @@ class AppDatabase {
     );
   }
 
+  Future<void> _upgradeAiChatToV10(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableAiChatSessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        last_message_preview TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableAiChatMessages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES $tableAiChatSessions(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_sessions_user_id ON $tableAiChatSessions(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_sessions_updated_at ON $tableAiChatSessions(updated_at);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_session_id ON $tableAiChatMessages(session_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created_at ON $tableAiChatMessages(created_at);',
+    );
+  }
+
+  Future<void> _upgradeOcrQualityToV10(Database db) async {
+    if (!await _tableExists(db, tableOcrTexts)) {
+      return;
+    }
+
+    await _addColumnIfMissing(db, tableOcrTexts, 'final_text', 'TEXT');
+    await _addColumnIfMissing(db, tableOcrTexts, 'quality_score', 'INTEGER');
+    await _addColumnIfMissing(db, tableOcrTexts, 'quality_level', 'TEXT');
+    await _addColumnIfMissing(
+      db,
+      tableOcrTexts,
+      'quality_reasons_json',
+      'TEXT',
+    );
+  }
+
+  Future<void> _upgradeFocusToV11(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tablePomodoroTasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        estimated_pomodoros INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tablePomodoroRecords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        task_id INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        duration_seconds INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        pomodoro_mode TEXT NOT NULL DEFAULT '正向',
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(task_id) REFERENCES $tablePomodoroTasks(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableCheckinRecords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        study_seconds INTEGER NOT NULL DEFAULT 0,
+        pomodoro_count INTEGER NOT NULL DEFAULT 0,
+        points_earned INTEGER NOT NULL DEFAULT 0,
+        is_makeup INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_tasks_user_id ON $tablePomodoroTasks(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_records_user_id ON $tablePomodoroRecords(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_records_task_id ON $tablePomodoroRecords(task_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pomodoro_records_started_at ON $tablePomodoroRecords(started_at);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_checkin_records_user_id ON $tableCheckinRecords(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_checkin_records_date ON $tableCheckinRecords(date);',
+    );
+  }
+
+  Future<void> _upgradeKnowledgeGraphToV12(Database db) async {
+    await _createKnowledgeGraphTables(db);
+    await _createKnowledgeGraphIndexes(db);
+  }
+
+  Future<void> _upgradeRichPracticeQuestionsToV13(Database db) async {
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'options_json',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'rubric_json',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tablePracticeQuestions,
+      'expected_keywords_json',
+      'TEXT',
+    );
+  }
+
+  Future<void> _upgradeFavoritesToV14(Database db) async {
+    await _createFavoriteTables(db);
+    await _createFavoriteIndexes(db);
+  }
+
+  Future<void> _createKnowledgeGraphTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableKnowledgeConcepts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        library_id INTEGER,
+        document_id INTEGER,
+        name TEXT NOT NULL,
+        summary TEXT,
+        evidence_text TEXT,
+        source_type TEXT NOT NULL DEFAULT 'generated',
+        source_id INTEGER,
+        mastery_score INTEGER NOT NULL DEFAULT 0,
+        weakness_score INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
+        FOREIGN KEY(document_id) REFERENCES $tableSourceDocuments(id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableKnowledgeConceptLinks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        library_id INTEGER,
+        from_concept_id INTEGER NOT NULL,
+        to_concept_id INTEGER NOT NULL,
+        relation_label TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE,
+        FOREIGN KEY(library_id) REFERENCES $tableKnowledgeLibraries(id) ON DELETE CASCADE,
+        FOREIGN KEY(from_concept_id) REFERENCES $tableKnowledgeConcepts(id) ON DELETE CASCADE,
+        FOREIGN KEY(to_concept_id) REFERENCES $tableKnowledgeConcepts(id) ON DELETE CASCADE
+      );
+    ''');
+  }
+
+  Future<void> _createKnowledgeGraphIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_user_id ON $tableKnowledgeConcepts(user_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_library_id ON $tableKnowledgeConcepts(library_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_document_id ON $tableKnowledgeConcepts(document_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_concepts_weakness_score ON $tableKnowledgeConcepts(weakness_score);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_links_library_id ON $tableKnowledgeConceptLinks(library_id);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_links_from_concept ON $tableKnowledgeConceptLinks(from_concept_id);',
+    );
+  }
+
+  Future<void> _createFavoriteTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableFavorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id INTEGER NOT NULL,
+        note TEXT,
+        highlight_text TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, target_type, target_id),
+        FOREIGN KEY(user_id) REFERENCES $tableUsers(id) ON DELETE CASCADE
+      );
+    ''');
+  }
+
+  Future<void> _createFavoriteIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_favorites_user_type ON $tableFavorites(user_id, target_type);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_favorites_target ON $tableFavorites(target_type, target_id);',
+    );
+  }
+
   // 兼容历史版本中“版本号已升级但列缺失”的异常状态，启动时自动补齐。
   Future<void> _ensureSchemaConsistency(Database db) async {
+    await _createFavoriteTables(db);
+    await _createFavoriteIndexes(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS $tableKnowledgeLibraries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -740,7 +1108,12 @@ class AppDatabase {
           SET
             ocr_status = 'success',
             ocr_updated_at = COALESCE(ocr_updated_at, created_at)
-          WHERE id IN (SELECT document_id FROM $tableOcrTexts);
+          WHERE id IN (SELECT document_id FROM $tableOcrTexts)
+            AND (
+              ocr_status IS NULL
+              OR TRIM(ocr_status) = ''
+              OR ocr_status = 'pending'
+            );
           ''');
       }
 
@@ -774,6 +1147,7 @@ class AppDatabase {
 
     if (await _tableExists(db, tableOcrTexts)) {
       await _addColumnIfMissing(db, tableOcrTexts, 'updated_at', 'TEXT');
+      await _upgradeOcrQualityToV10(db);
       await db.execute('''
         UPDATE $tableOcrTexts
         SET updated_at = COALESCE(updated_at, created_at)
@@ -809,6 +1183,11 @@ class AppDatabase {
     await _upgradeLlmConfigsToV6(db);
     await _upgradePracticeQuestionsToV7(db);
     await _upgradePracticeSchedulingToV9(db);
+    await _upgradeOcrQualityToV10(db);
+    await _upgradeAiChatToV10(db);
+    await _upgradeFocusToV11(db);
+    await _upgradeKnowledgeGraphToV12(db);
+    await _upgradeRichPracticeQuestionsToV13(db);
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

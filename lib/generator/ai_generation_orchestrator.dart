@@ -1,9 +1,13 @@
 import 'dart:convert';
 
 import '../database/ai_generation_repository.dart';
+import '../database/knowledge_graph_repository.dart';
+import '../database/learning_repository.dart';
 import '../database/models/ai_generation_task_record.dart';
+import '../database/models/ai_result_records.dart';
 import '../database/models/llm_provider_config.dart';
 import '../llm/minimax_client.dart';
+import 'knowledge_graph_extraction_service.dart';
 
 class AiSingleTaskResult {
   const AiSingleTaskResult({
@@ -29,12 +33,25 @@ class AiGenerationOrchestrator {
   AiGenerationOrchestrator({
     MiniMaxClient? miniMaxClient,
     AiGenerationRepository? aiGenerationRepository,
+    KnowledgeGraphRepository? knowledgeGraphRepository,
+    KnowledgeGraphExtractionService? knowledgeGraphExtractionService,
+    LearningRepository? learningRepository,
   }) : _miniMaxClient = miniMaxClient ?? MiniMaxClient(),
+       _clientOverride = miniMaxClient,
+       _learningRepository = learningRepository ?? LearningRepository(),
        _aiGenerationRepository =
-           aiGenerationRepository ?? AiGenerationRepository();
+           aiGenerationRepository ?? AiGenerationRepository(),
+       _knowledgeGraphRepository =
+           knowledgeGraphRepository ?? KnowledgeGraphRepository(),
+       _knowledgeGraphExtractionService =
+           knowledgeGraphExtractionService ?? KnowledgeGraphExtractionService();
 
   final MiniMaxClient _miniMaxClient;
+  final MiniMaxClient? _clientOverride;
+  final LearningRepository _learningRepository;
   final AiGenerationRepository _aiGenerationRepository;
+  final KnowledgeGraphRepository _knowledgeGraphRepository;
+  final KnowledgeGraphExtractionService _knowledgeGraphExtractionService;
 
   Future<AiSingleTaskResult> generateSingle({
     required int documentId,
@@ -47,6 +64,24 @@ class AiGenerationOrchestrator {
       ocrText: ocrText,
       taskType: taskType,
       llmConfig: llmConfig,
+    );
+  }
+
+  Future<AiSingleTaskResult> regenerateWithFeedback({
+    required int documentId,
+    required String ocrText,
+    required String taskType,
+    required String currentResultText,
+    required String feedback,
+    LlmProviderConfig? llmConfig,
+  }) {
+    return _runTask(
+      documentId: documentId,
+      ocrText: ocrText,
+      taskType: taskType,
+      llmConfig: llmConfig,
+      currentResultText: currentResultText,
+      feedback: feedback,
     );
   }
 
@@ -75,6 +110,8 @@ class AiGenerationOrchestrator {
     required String ocrText,
     required String taskType,
     LlmProviderConfig? llmConfig,
+    String? currentResultText,
+    String? feedback,
   }) async {
     final trimmedText = ocrText.trim();
     if (trimmedText.isEmpty) {
@@ -86,6 +123,27 @@ class AiGenerationOrchestrator {
     }
 
     final promptTemplate = _promptTemplateOf(taskType);
+    final scope = await _knowledgeGraphRepository.findDocumentScope(documentId);
+    final sourceVersionId = scope == null ? null :
+      await _learningRepository.sourceVersion(scope.userId, documentId);
+    if (scope != null && feedback == null) {
+      final cached = await _learningRepository.resources(
+        scope.userId,
+        documentId,
+        type: taskType,
+      );
+      final model = llmConfig?.effectiveModel ?? _miniMaxClient.debugModel;
+      if (cached.isNotEmpty &&
+          cached.first.fingerprint ==
+              LearningRepository.fingerprint(trimmedText) &&
+          cached.first.model == model) {
+        return AiSingleTaskResult(
+          taskType: taskType,
+          success: true,
+          message: '已复用保存的${AiTaskType.labelOf(taskType)}',
+        );
+      }
+    }
     final taskRecord = await _aiGenerationRepository.markTaskRunning(
       documentId: documentId,
       taskType: taskType,
@@ -97,12 +155,19 @@ class AiGenerationOrchestrator {
     );
 
     try {
-      final client = llmConfig == null
-          ? _miniMaxClient
-          : MiniMaxClient.fromConfig(llmConfig);
+      final client =
+          _clientOverride ??
+          (llmConfig == null
+              ? _miniMaxClient
+              : MiniMaxClient.fromConfig(llmConfig));
       final response = await client.generateStructuredJson(
         systemPrompt: _systemPrompt,
-        userPrompt: _buildUserPrompt(taskType: taskType, ocrText: trimmedText),
+        userPrompt: _buildUserPrompt(
+          taskType: taskType,
+          ocrText: trimmedText,
+          currentResultText: currentResultText,
+          feedback: feedback,
+        ),
         jsonSchema: _jsonSchemaOf(taskType),
       );
 
@@ -110,11 +175,30 @@ class AiGenerationOrchestrator {
         documentId: documentId,
         taskType: taskType,
         response: response,
+        sourceVersionId: sourceVersionId,
       );
 
       await _aiGenerationRepository.markTaskCompleted(
         taskId: taskRecord.id,
         resultText: const JsonEncoder.withIndent('  ').convert(response),
+      );
+      if (scope != null) {
+        await _learningRepository.saveResource(
+          userId: scope.userId,
+          documentId: documentId,
+          type: taskType,
+          title: AiTaskType.labelOf(taskType),
+          content: jsonEncode(response),
+          inputText: trimmedText,
+          model: client.debugModel,
+          sourceVersionId: sourceVersionId,
+        );
+      }
+      await _refreshKnowledgeGraph(
+        documentId: documentId,
+        ocrText: trimmedText,
+        response: response,
+        llmConfig: llmConfig,
       );
 
       return AiSingleTaskResult(
@@ -141,6 +225,7 @@ class AiGenerationOrchestrator {
     required int documentId,
     required String taskType,
     required Map<String, dynamic> response,
+    int? sourceVersionId,
   }) async {
     switch (taskType) {
       case AiTaskType.knowledgeCards:
@@ -166,12 +251,52 @@ class AiGenerationOrchestrator {
       case AiTaskType.practiceQuestions:
         await _aiGenerationRepository.replacePracticeQuestions(
           documentId: documentId,
-          questions: _parsePracticeQuestions(response),
+          questions: _parsePracticeQuestions(response).map((q) => {
+            ...q, if (sourceVersionId != null) 'source_version_id': '$sourceVersionId',
+          }).toList(),
         );
         return;
       default:
         throw FormatException('不支持的任务类型：$taskType');
     }
+  }
+
+  Future<void> _refreshKnowledgeGraph({
+    required int documentId,
+    required String ocrText,
+    required Map<String, dynamic> response,
+    LlmProviderConfig? llmConfig,
+  }) async {
+    final scope = await _knowledgeGraphRepository.findDocumentScope(documentId);
+    if (scope == null) {
+      return;
+    }
+    if ((await _learningRepository.concepts(
+      scope.userId,
+      documentId,
+    )).isNotEmpty) {
+      return;
+    }
+
+    try {
+      await _knowledgeGraphExtractionService.generateForDocument(
+        userId: scope.userId,
+        libraryId: scope.libraryId,
+        documentId: documentId,
+        sourceText:
+            '$ocrText\n\nAI 生成结果：\n${const JsonEncoder.withIndent('  ').convert(response)}',
+        llmConfig: llmConfig,
+      );
+    } catch (_) {
+      // Knowledge graph extraction is a secondary enrichment step. Keep the
+      // generated learning material available even when graph extraction fails.
+    }
+  }
+
+  static List<Map<String, String>> parsePracticeQuestionsForTest(
+    Map<String, dynamic> data,
+  ) {
+    return AiGenerationOrchestrator()._parsePracticeQuestions(data);
   }
 
   List<Map<String, String>> _parseKnowledgeCards(Map<String, dynamic> data) {
@@ -355,7 +480,7 @@ class AiGenerationOrchestrator {
         'question',
       ]);
       if (singleQuestion.isNotEmpty) {
-        return [
+        final parsed = [
           {
             'question_text': singleQuestion,
             'answer_text': _pickFirstString(data, const [
@@ -369,8 +494,18 @@ class AiGenerationOrchestrator {
               'explanation',
             ]),
             'difficulty': _pickFirstString(data, const ['difficulty']),
+            'question_kind': PracticeQuestionKind.normalize(
+              _pickFirstString(data, const ['question_kind', 'kind', 'type']),
+            ),
+            'options_json': _jsonListText(data['options'] ?? data['choices']),
+            'rubric_json': _jsonMapText(data['rubric'] ?? data['scoring']),
+            'expected_keywords_json': _jsonListText(
+              data['expected_keywords'] ?? data['keywords'],
+            ),
           },
         ];
+        _validatePracticeQuestions(parsed);
+        return parsed;
       }
 
       throw const FormatException('questions 字段缺失或格式错误');
@@ -390,6 +525,15 @@ class AiGenerationOrchestrator {
                 .toString()
                 .trim(),
             'difficulty': (item['difficulty'] ?? '').toString().trim(),
+            'question_kind': PracticeQuestionKind.normalize(
+              (item['question_kind'] ?? item['kind'] ?? item['type'] ?? '')
+                  .toString(),
+            ),
+            'options_json': _jsonListText(item['options'] ?? item['choices']),
+            'rubric_json': _jsonMapText(item['rubric'] ?? item['scoring']),
+            'expected_keywords_json': _jsonListText(
+              item['expected_keywords'] ?? item['keywords'],
+            ),
           },
         )
         .where((item) => (item['question_text'] ?? '').isNotEmpty)
@@ -399,7 +543,37 @@ class AiGenerationOrchestrator {
       throw const FormatException('复习题为空');
     }
 
+    _validatePracticeQuestions(parsed);
     return parsed;
+  }
+
+  void _validatePracticeQuestions(List<Map<String, String>> questions) {
+    for (final question in questions) {
+      final kind = question['question_kind'] ?? '';
+      if (kind != PracticeQuestionKind.multipleChoice) {
+        continue;
+      }
+
+      final options = _decodeStringList(question['options_json']);
+      if (options.length < 2) {
+        throw const FormatException('选择题必须包含 options 选项');
+      }
+    }
+  }
+
+  List<String> _decodeStringList(String? jsonText) {
+    final raw = (jsonText ?? '').trim();
+    if (raw.isEmpty) return const <String>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const <String>[];
+      return decoded
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const <String>[];
+    }
   }
 
   String _friendlyError(Object error) {
@@ -419,8 +593,17 @@ class AiGenerationOrchestrator {
     return 'AI 生成失败：$message';
   }
 
-  String _buildUserPrompt({required String taskType, required String ocrText}) {
+  String _buildUserPrompt({
+    required String taskType,
+    required String ocrText,
+    String? currentResultText,
+    String? feedback,
+  }) {
     final taskSchema = _schemaOf(taskType);
+    final refinementBlock = _buildRefinementBlock(
+      currentResultText: currentResultText,
+      feedback: feedback,
+    );
 
     return '''
 请基于以下 OCR 文本进行处理。
@@ -428,17 +611,42 @@ class AiGenerationOrchestrator {
 输出要求：
 1. 必须只返回 JSON 对象，不要输出额外解释。
 2. JSON 必须严格符合下面 schema。
-3. 内容使用中文，准确、简洁、便于学习复习。
+3. 内容使用中文，准确、清晰、便于学习复习。
+4. 如果 question_kind 是 multiple_choice，必须提供 4 个 options，且每个选项必须带 A./B./C./D. 前缀，answer_text 必须能对应其中一个选项。
 
 Schema:
 $taskSchema
 
 OCR 文本:
 $ocrText
+$refinementBlock
+''';
+  }
+
+  String _buildRefinementBlock({String? currentResultText, String? feedback}) {
+    final currentResult = (currentResultText ?? '').trim();
+    final userFeedback = (feedback ?? '').trim();
+    if (currentResult.isEmpty && userFeedback.isEmpty) {
+      return '';
+    }
+
+    return '''
+
+当前已有 AI 结果:
+$currentResult
+
+用户修改意见:
+$userFeedback
+
+请基于 OCR 原文、当前结果和用户修改意见，重新生成同一种类型的结果。保留正确内容，重点修正用户不满意的地方。
 ''';
   }
 
   String _schemaOf(String taskType) {
+    if (taskType == AiTaskType.practiceQuestions) {
+      return '{"questions":[{"question_kind":"multiple_choice|fill_blank|true_false|short_answer|calculation|application|error_analysis|oral","question_text":"question","options":["A. 选项内容","B. 选项内容","C. 选项内容","D. 选项内容"],"answer_text":"answer","analysis_text":"analysis","difficulty":"easy|medium|hard","expected_keywords":["keyword"],"rubric":{"point":40}}]}';
+    }
+
     switch (taskType) {
       case AiTaskType.knowledgeCards:
         return '{"cards":[{"title":"卡片标题","content":"卡片内容"}]}';
@@ -454,6 +662,48 @@ $ocrText
   }
 
   Map<String, dynamic> _jsonSchemaOf(String taskType) {
+    if (taskType == AiTaskType.practiceQuestions) {
+      return {
+        'name': 'practice_questions_response',
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'questions': {
+              'type': 'array',
+              'items': {
+                'type': 'object',
+                'properties': {
+                  'question_kind': {'type': 'string'},
+                  'question_text': {'type': 'string'},
+                  'options': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                  },
+                  'answer_text': {'type': 'string'},
+                  'analysis_text': {'type': 'string'},
+                  'difficulty': {'type': 'string'},
+                  'expected_keywords': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                  },
+                  'rubric': {'type': 'object'},
+                },
+                'required': [
+                  'question_kind',
+                  'question_text',
+                  'options',
+                  'answer_text',
+                  'analysis_text',
+                  'difficulty',
+                ],
+              },
+            },
+          },
+          'required': ['questions'],
+        },
+      };
+    }
+
     switch (taskType) {
       case AiTaskType.knowledgeCards:
         return {
@@ -559,6 +809,29 @@ $ocrText
     }
 
     return '';
+  }
+
+  static String _jsonListText(Object? value) {
+    if (value == null) return '';
+    if (value is List) {
+      return jsonEncode(
+        value
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false),
+      );
+    }
+    final text = value.toString().trim();
+    return text.isEmpty ? '' : jsonEncode([text]);
+  }
+
+  static String _jsonMapText(Object? value) {
+    if (value == null) return '';
+    if (value is Map) {
+      return jsonEncode(value);
+    }
+    final text = value.toString().trim();
+    return text.isEmpty ? '' : jsonEncode({'rubric': text});
   }
 
   static const String _systemPrompt =

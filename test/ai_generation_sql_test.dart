@@ -20,12 +20,12 @@ void main() {
     ).readAsStringSync();
 
     expect(
-      RegExp(r'questions\.question_kind\s*=\s*\?').allMatches(source).length,
+      RegExp(r'questions\.question_kind\s*!=\s*\?').allMatches(source).length,
       greaterThanOrEqualTo(2),
     );
     expect(
-      RegExp(r'PracticeQuestionKind\.normal').allMatches(source).length,
-      greaterThanOrEqualTo(3),
+      RegExp(r'PracticeQuestionKind\.similar').allMatches(source).length,
+      greaterThanOrEqualTo(2),
     );
   });
 

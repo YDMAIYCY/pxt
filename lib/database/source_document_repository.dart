@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../common/source_document_file_store.dart';
 import 'app_database.dart';
+import 'import_record_repository.dart';
 import 'models/source_document_record.dart';
 
 // ========== 原始资料仓库 ==========
@@ -23,19 +24,29 @@ class SourceDocumentRepository {
     required String sourceType,
     required String imagePath,
     required String title,
+    String? operationId,
   }) async {
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final createdAt = DateTime.now().toUtc().toIso8601String();
 
     final documentId = await db.transaction((txn) async {
+      if (operationId != null) {
+        final prior = await txn.rawQuery(
+          '''SELECT d.id FROM import_records r
+          JOIN source_documents d ON d.import_record_id = r.id
+          WHERE r.user_id = ? AND r.request_id = ? AND d.batch_id IS NULL LIMIT 1''',
+          [userId, operationId],
+        );
+        if (prior.isNotEmpty) return prior.single['id'] as int;
+      }
       final resolvedLibraryId = await _resolveLibraryId(
         txn,
         userId: userId,
         libraryId: libraryId,
       );
 
-      return txn.insert(AppDatabase.tableSourceDocuments, {
+      final id = await txn.insert(AppDatabase.tableSourceDocuments, {
         'user_id': userId,
         'library_id': resolvedLibraryId,
         'source_type': sourceType,
@@ -46,6 +57,15 @@ class SourceDocumentRepository {
         'ocr_updated_at': createdAt,
         'created_at': createdAt,
       });
+      if (operationId != null) {
+        await txn.update(
+          'import_records',
+          {'request_id': operationId},
+          where: "user_id = ? AND operation_id = ?",
+          whereArgs: [userId, 'document:$id'],
+        );
+      }
+      return id;
     });
 
     final createdDocument = await getSourceDocumentById(
@@ -81,6 +101,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -88,20 +111,27 @@ class SourceDocumentRepository {
         documents.ocr_error_message,
         documents.ocr_updated_at,
         documents.created_at,
+        (SELECT c.name FROM learning_attempts a JOIN knowledge_concepts c ON c.id = a.concept_id
+          WHERE a.document_id = documents.id ORDER BY a.id DESC LIMIT 1) AS last_concept_name,
         CASE
           WHEN EXISTS (
             SELECT 1
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
       WHERE documents.user_id = ?
         $libraryClause
         $batchClause
-      ORDER BY documents.created_at DESC
+        AND NOT (
+          documents.source_type = '${SourceDocumentSourceType.pdfPage}'
+          AND documents.batch_id IS NOT NULL
+        )
+      ORDER BY COALESCE((SELECT MAX(created_at) FROM learning_attempts WHERE document_id = documents.id),
+        (SELECT MAX(created_at) FROM learning_resources WHERE document_id = documents.id), documents.created_at) DESC
       LIMIT ?
       ''', args);
 
@@ -126,6 +156,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -139,12 +172,16 @@ class SourceDocumentRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
       WHERE documents.user_id = ?
         $libraryClause
+        AND NOT (
+          documents.source_type = '${SourceDocumentSourceType.pdfPage}'
+          AND documents.batch_id IS NOT NULL
+        )
       ORDER BY documents.created_at DESC
       LIMIT ?
       ''', args);
@@ -166,6 +203,9 @@ class SourceDocumentRepository {
         documents.library_id,
         documents.batch_id,
         documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
         documents.source_type,
         documents.image_path,
         documents.original_title,
@@ -179,7 +219,7 @@ class SourceDocumentRepository {
             FROM ${AppDatabase.tableAiGenerationTasks} tasks
             WHERE tasks.document_id = documents.id
               AND tasks.status = 'completed'
-          ) THEN 1
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
           ELSE 0
         END AS ai_done
       FROM ${AppDatabase.tableSourceDocuments} documents
@@ -197,11 +237,78 @@ class SourceDocumentRepository {
     return SourceDocumentRecord.fromMap(rows.first);
   }
 
+  Future<List<SourceDocumentRecord>> fetchPdfPageSources({
+    required int userId,
+    required int batchId,
+  }) async {
+    await _database.ensureSchemaReady();
+    final db = await _database.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        documents.id,
+        documents.user_id,
+        documents.library_id,
+        documents.batch_id,
+        documents.page_number,
+        documents.import_record_id,
+        documents.original_file_path,
+        documents.file_page_number,
+        documents.source_type,
+        documents.image_path,
+        documents.original_title,
+        documents.ocr_status,
+        documents.ocr_error_message,
+        documents.ocr_updated_at,
+        documents.created_at,
+        CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM ${AppDatabase.tableAiGenerationTasks} tasks
+            WHERE tasks.document_id = documents.id
+              AND tasks.status = 'completed'
+          ) OR EXISTS (SELECT 1 FROM learning_resources resources WHERE resources.document_id = documents.id) THEN 1
+          ELSE 0
+        END AS ai_done
+      FROM ${AppDatabase.tableSourceDocuments} documents
+      WHERE documents.user_id = ?
+        AND documents.batch_id = ?
+        AND documents.source_type = ?
+        AND documents.page_number IS NOT NULL
+      ORDER BY documents.page_number ASC, documents.id ASC
+      ''',
+      [userId, batchId, SourceDocumentSourceType.pdfPage],
+    );
+
+    return rows.map(SourceDocumentRecord.fromMap).toList(growable: false);
+  }
+
   Future<void> moveDocumentToLibrary({
     required int userId,
     required int documentId,
     required int libraryId,
   }) async {
+    final record = await ImportRecordRepository(
+      database: _database,
+    ).forDocument(userId, documentId);
+    if (record != null) {
+      final db = await _database.database;
+      final links = await db.rawQuery(
+        '''SELECT DISTINCT dl.library_id
+        FROM document_library_links dl JOIN source_documents d ON d.id = dl.document_id
+        WHERE d.import_record_id = ?''',
+        [record.id],
+      );
+      await ImportRecordRepository(
+        database: _database,
+      ).setLibraries(userId, record.id, [
+        libraryId,
+        ...links
+            .map((r) => r['library_id'] as int)
+            .where((id) => id != libraryId && id != record.libraryId),
+      ]);
+      return;
+    }
     await _database.ensureSchemaReady();
     final db = await _database.database;
     final now = DateTime.now().toUtc().toIso8601String();
@@ -212,14 +319,41 @@ class SourceDocumentRepository {
         userId: userId,
         libraryId: libraryId,
       );
+      final documentRows = await txn.query(
+        AppDatabase.tableSourceDocuments,
+        columns: ['source_type', 'batch_id'],
+        where: 'id = ? AND user_id = ?',
+        whereArgs: [documentId, userId],
+        limit: 1,
+      );
+      if (documentRows.isEmpty) {
+        throw StateError('资料不存在或无权移动');
+      }
+      final batchId = documentRows.first['batch_id'] as int?;
+      final isPdfDocument =
+          documentRows.first['source_type'] ==
+              SourceDocumentSourceType.pdfDocument &&
+          batchId != null;
+
       final updated = await txn.update(
         AppDatabase.tableSourceDocuments,
         {'library_id': resolvedLibraryId},
-        where: 'id = ? AND user_id = ?',
-        whereArgs: [documentId, userId],
+        where: isPdfDocument
+            ? 'batch_id = ? AND user_id = ?'
+            : 'id = ? AND user_id = ?',
+        whereArgs: [isPdfDocument ? batchId : documentId, userId],
       );
       if (updated == 0) {
         throw StateError('资料不存在或无权移动');
+      }
+
+      if (isPdfDocument) {
+        await txn.update(
+          AppDatabase.tableDocumentBatches,
+          {'library_id': resolvedLibraryId, 'updated_at': now},
+          where: 'id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
       }
 
       await txn.update(
@@ -231,6 +365,33 @@ class SourceDocumentRepository {
     });
   }
 
+  Future<void> updateDocumentImagePath({
+    required int userId,
+    required int documentId,
+    required String imagePath,
+  }) async {
+    await _database.ensureSchemaReady();
+    final db = await _database.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final updated = await db.update(
+      AppDatabase.tableSourceDocuments,
+      {
+        'image_path': imagePath.trim(),
+        'ocr_status': SourceDocumentOcrStatus.pending,
+        'ocr_error_message': null,
+        'ocr_updated_at': now,
+      },
+      where: 'id = ? AND user_id = ?',
+      whereArgs: [documentId, userId],
+    );
+
+    if (updated == 0) {
+      throw StateError('资料不存在或无权更新图片');
+    }
+    await db.delete('image_understandings', where: 'document_id = ?',
+      whereArgs: [documentId]);
+  }
+
   Future<void> deleteDocument({
     required int userId,
     required int documentId,
@@ -239,7 +400,7 @@ class SourceDocumentRepository {
     final db = await _database.database;
     final rows = await db.query(
       AppDatabase.tableSourceDocuments,
-      columns: ['image_path'],
+      columns: ['image_path', 'source_type', 'batch_id'],
       where: 'id = ? AND user_id = ?',
       whereArgs: [documentId, userId],
       limit: 1,
@@ -248,15 +409,55 @@ class SourceDocumentRepository {
       throw StateError('资料不存在或无权删除');
     }
 
-    final deleted = await db.delete(
-      AppDatabase.tableSourceDocuments,
-      where: 'id = ? AND user_id = ?',
-      whereArgs: [documentId, userId],
-    );
+    final cleanupPaths = <String?>[rows.first['image_path'] as String?];
+    final batchId = rows.first['batch_id'] as int?;
+    final isPdfDocument =
+        rows.first['source_type'] == SourceDocumentSourceType.pdfDocument &&
+        batchId != null;
+
+    final deleted = await db.transaction((txn) async {
+      if (isPdfDocument) {
+        final batchRows = await txn.query(
+          AppDatabase.tableDocumentBatches,
+          columns: ['original_file_path'],
+          where: 'id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+          limit: 1,
+        );
+        if (batchRows.isNotEmpty) {
+          cleanupPaths.add(batchRows.first['original_file_path'] as String?);
+        }
+        final pageRows = await txn.query(
+          AppDatabase.tableSourceDocuments,
+          columns: ['image_path'],
+          where: 'batch_id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
+        cleanupPaths.addAll(
+          pageRows.map((row) => row['image_path'] as String?),
+        );
+        await txn.delete(
+          AppDatabase.tableSourceDocuments,
+          where: 'batch_id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
+        return txn.delete(
+          AppDatabase.tableDocumentBatches,
+          where: 'id = ? AND user_id = ?',
+          whereArgs: [batchId, userId],
+        );
+      }
+
+      return txn.delete(
+        AppDatabase.tableSourceDocuments,
+        where: 'id = ? AND user_id = ?',
+        whereArgs: [documentId, userId],
+      );
+    });
     if (deleted == 0) {
       throw StateError('资料不存在或无权删除');
     }
-    await _fileStore.deleteAllIfManaged([rows.first['image_path'] as String?]);
+    await _fileStore.deleteAllIfManaged(cleanupPaths);
   }
 
   Future<int?> _resolveLibraryId(
@@ -312,6 +513,6 @@ class SourceDocumentRepository {
     }
 
     args.add(libraryId);
-    return 'AND documents.library_id = ?';
+    return 'AND documents.id IN (SELECT document_id FROM document_library_links WHERE library_id = ?)';
   }
 }

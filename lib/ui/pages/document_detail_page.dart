@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'learning_workspace_page.dart';
 
 import 'package:flutter/material.dart';
 
@@ -128,7 +129,7 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('资料详情'),
+        title: const Text('知识包详情'),
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
       ),
@@ -156,6 +157,21 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
               children: [
                 _ImageSection(document: data.document),
                 const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LearningWorkspacePage(
+                          documentId: widget.documentId,
+                        ),
+                      ),
+                    );
+                    if (mounted) await _refresh();
+                  },
+                  icon: const Icon(Icons.auto_stories_rounded),
+                  label: const Text('理解图片与学习资源'),
+                ),
+                const SizedBox(height: 14),
                 _ActionSection(
                   document: data.document,
                   onOpenOcr: _openOcr,
@@ -181,6 +197,8 @@ class _ImageSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPdfDocument =
+        document.sourceType == SourceDocumentSourceType.pdfDocument;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -193,15 +211,28 @@ class _ImageSection extends StatelessWidget {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             child: AspectRatio(
               aspectRatio: 4 / 3,
-              child: Image.file(
-                File(document.imagePath),
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
-                  color: const Color(0xFFE2E8F0),
-                  alignment: Alignment.center,
-                  child: const Icon(Icons.broken_image_outlined, size: 42),
-                ),
-              ),
+              child: isPdfDocument
+                  ? Container(
+                      color: const Color(0xFFEFF6FF),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.picture_as_pdf_rounded,
+                        size: 64,
+                        color: AppColors.error,
+                      ),
+                    )
+                  : Image.file(
+                      File(document.imagePath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        color: const Color(0xFFE2E8F0),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.broken_image_outlined,
+                          size: 42,
+                        ),
+                      ),
+                    ),
             ),
           ),
           Padding(
@@ -286,15 +317,54 @@ class _OcrSection extends StatelessWidget {
       title: 'OCR 文本',
       child: ocrRecord == null
           ? const _EmptyHint(text: '暂无 OCR 文本，请先执行 OCR。')
-          : SelectableText(
-              ocrRecord!.cleanText.trim().isNotEmpty
-                  ? ocrRecord!.cleanText
-                  : ocrRecord!.rawText,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.textPrimary,
-                height: 1.5,
-              ),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (ocrRecord!.isLowQuality && !ocrRecord!.hasFinalText) ...[
+                  const _QualityWarning(
+                    text: 'OCR 质量较低，建议进入 OCR 页面框选重试、AI 修复或确认 finalText 后再生成。',
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                if (ocrRecord!.hasFinalText) ...[
+                  const _Tag(text: '已使用 finalText'),
+                  const SizedBox(height: 10),
+                ],
+                SelectableText(
+                  ocrRecord!.effectiveText,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textPrimary,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
+    );
+  }
+}
+
+class _QualityWarning extends StatelessWidget {
+  const _QualityWarning({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: const Color(0xFF9A3412),
+          fontWeight: FontWeight.w700,
+          height: 1.4,
+        ),
+      ),
     );
   }
 }
@@ -334,7 +404,7 @@ class _AiResultSection extends StatelessWidget {
                   ),
                 if (data.questions.isNotEmpty)
                   _ResultBlock(
-                    title: '复习题',
+                    title: '练习题',
                     text: data.questions
                         .map(
                           (item) =>

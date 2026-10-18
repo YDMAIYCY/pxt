@@ -113,6 +113,7 @@ class MiniMaxClient {
     required String systemPrompt,
     required String userPrompt,
     Map<String, dynamic>? jsonSchema,
+    List<({String base64, String mimeType})>? images,
   }) async {
     if (_apiKey.isEmpty) {
       throw MiniMaxException('未配置 $_providerLabel API Key，请先到“我的”页配置大模型。');
@@ -133,6 +134,38 @@ class MiniMaxClient {
       userPrompt: userPrompt,
       jsonSchema: jsonSchema,
     );
+
+    if (images != null && images.isNotEmpty) {
+      if (!_usesOpenAiCompatible && !_usesTokenPlan) {
+        throw const MiniMaxException(
+          '图片理解需要支持视觉的模型，请在模型设置中使用 OpenAI 兼容接口或支持图片的 Token Plan 模型。',
+        );
+      }
+      final content = <Map<String, Object?>>[
+        for (final image in images)
+          if (_usesTokenPlan)
+            {
+              'type': 'image',
+              'source': {
+                'type': 'base64',
+                'media_type': image.mimeType,
+                'data': image.base64,
+              },
+            }
+          else
+            {
+              'type': 'image_url',
+              'image_url': {
+                'url': 'data:${image.mimeType};base64,${image.base64}',
+              },
+            },
+        {'type': 'text', 'text': userPrompt},
+      ];
+      body['messages'] = [
+        if (!_usesTokenPlan) {'role': 'system', 'content': systemPrompt},
+        {'role': 'user', 'content': content},
+      ];
+    }
 
     try {
       final response = await _httpClient
@@ -156,6 +189,63 @@ class MiniMaxClient {
       throw MiniMaxException('$_providerLabel 网络连接中断，请检查网络、代理或接口地址后重试。');
     } on FormatException {
       throw MiniMaxException('$_providerLabel 返回内容不是有效 JSON');
+    }
+  }
+
+  Future<String> generateChatReply({
+    required String systemPrompt,
+    required List<Map<String, String>> messages,
+  }) async {
+    if (_apiKey.isEmpty) {
+      throw MiniMaxException('未配置 $_providerLabel API Key，请先到“我的”页配置大模型。');
+    }
+
+    final normalizedMessages = _normalizeChatMessages(messages);
+    if (normalizedMessages.isEmpty) {
+      throw const MiniMaxException('请输入聊天内容后再发送');
+    }
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $_apiKey',
+    };
+    if (_provider == LlmProvider.minimax &&
+        !_usesTokenPlan &&
+        _groupId.isNotEmpty) {
+      headers['Group-Id'] = _groupId;
+    }
+
+    final body = _buildChatRequestBody(
+      systemPrompt: systemPrompt,
+      messages: normalizedMessages,
+    );
+
+    try {
+      final response = await _httpClient
+          .post(_endpoint, headers: headers, body: jsonEncode(body))
+          .timeout(_timeout);
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw MiniMaxException(
+          '$_providerLabel 请求失败（HTTP ${response.statusCode}）：${response.body}',
+        );
+      }
+
+      final decoded = jsonDecode(response.body);
+      _throwIfApiError(decoded);
+      _throwIfOutputTruncated(decoded);
+      final content = _extractModelContent(decoded);
+      final reply = _extractPlainText(content);
+      if (reply.isEmpty) {
+        throw const FormatException('Empty chat response');
+      }
+      return reply;
+    } on TimeoutException {
+      throw MiniMaxException('$_providerLabel 请求超时，请稍后重试');
+    } on http.ClientException {
+      throw MiniMaxException('$_providerLabel 网络连接中断，请检查网络、代理或接口地址后重试。');
+    } on FormatException {
+      throw MiniMaxException('$_providerLabel 返回内容不是有效文本');
     }
   }
 
@@ -218,6 +308,28 @@ class MiniMaxClient {
     );
   }
 
+  Map<String, Object?> _buildChatRequestBody({
+    required String systemPrompt,
+    required List<Map<String, String>> messages,
+  }) {
+    if (_usesOpenAiCompatible) {
+      return _buildOpenAiCompatibleChatBody(
+        systemPrompt: systemPrompt,
+        messages: messages,
+      );
+    }
+    if (_usesTokenPlan) {
+      return _buildTokenPlanChatBody(
+        systemPrompt: systemPrompt,
+        messages: messages,
+      );
+    }
+    return _buildMiniMaxChatCompletionChatBody(
+      systemPrompt: systemPrompt,
+      messages: messages,
+    );
+  }
+
   Map<String, Object?> _buildMiniMaxChatCompletionBody({
     required String systemPrompt,
     required String userPrompt,
@@ -242,6 +354,18 @@ class MiniMaxClient {
     return body;
   }
 
+  Map<String, Object?> _buildMiniMaxChatCompletionChatBody({
+    required String systemPrompt,
+    required List<Map<String, String>> messages,
+  }) {
+    return {
+      'model': _model,
+      'temperature': 0.4,
+      'max_completion_tokens': _maxCompletionTokens,
+      'messages': _withSystemMessage(systemPrompt, messages),
+    };
+  }
+
   Map<String, Object?> _buildTokenPlanBody({
     required String systemPrompt,
     required String userPrompt,
@@ -258,6 +382,20 @@ class MiniMaxClient {
     };
   }
 
+  Map<String, Object?> _buildTokenPlanChatBody({
+    required String systemPrompt,
+    required List<Map<String, String>> messages,
+  }) {
+    return {
+      'model': _model,
+      'anthropic_version': 'bedrock-2023-05-31',
+      'temperature': 0.4,
+      'max_tokens': _maxCompletionTokens,
+      'system': systemPrompt,
+      'messages': messages,
+    };
+  }
+
   Map<String, Object?> _buildOpenAiCompatibleBody({
     required String systemPrompt,
     required String userPrompt,
@@ -271,6 +409,18 @@ class MiniMaxClient {
         {'role': 'system', 'content': systemPrompt},
         {'role': 'user', 'content': userPrompt},
       ],
+    };
+  }
+
+  Map<String, Object?> _buildOpenAiCompatibleChatBody({
+    required String systemPrompt,
+    required List<Map<String, String>> messages,
+  }) {
+    return {
+      'model': _model,
+      'temperature': _openAiCompatibleTemperature,
+      'max_tokens': _maxCompletionTokens,
+      'messages': _withSystemMessage(systemPrompt, messages),
     };
   }
 
@@ -369,6 +519,72 @@ class MiniMaxClient {
     }
 
     throw const FormatException('Unsupported response content');
+  }
+
+  String _extractPlainText(Object? content) {
+    if (content == null) {
+      return '';
+    }
+    if (content is String) {
+      return content.trim();
+    }
+    if (content is List) {
+      return _joinMessageParts(content).trim();
+    }
+    if (content is Map) {
+      final map = content.cast<String, Object?>();
+      for (final key in const ['text', 'content', 'reply', 'output_text']) {
+        final value = map[key];
+        final text = _extractPlainText(value);
+        if (text.isNotEmpty) {
+          return text;
+        }
+      }
+    }
+    return '';
+  }
+
+  List<Map<String, String>> _withSystemMessage(
+    String systemPrompt,
+    List<Map<String, String>> messages,
+  ) {
+    final trimmedSystem = systemPrompt.trim();
+    if (trimmedSystem.isEmpty) {
+      return messages;
+    }
+    return [
+      {'role': 'system', 'content': trimmedSystem},
+      ...messages,
+    ];
+  }
+
+  List<Map<String, String>> _normalizeChatMessages(
+    List<Map<String, String>> messages,
+  ) {
+    return messages
+        .map((message) {
+          final role = _normalizeRole(message['role']);
+          final content = (message['content'] ?? '').trim();
+          if (content.isEmpty) {
+            return null;
+          }
+          return {'role': role, 'content': content};
+        })
+        .whereType<Map<String, String>>()
+        .toList(growable: false);
+  }
+
+  String _normalizeRole(String? role) {
+    final raw = (role ?? '').trim().toLowerCase();
+    switch (raw) {
+      case 'assistant':
+        return 'assistant';
+      case 'system':
+        return 'system';
+      case 'user':
+      default:
+        return 'user';
+    }
   }
 
   void _throwIfApiError(Object? decoded) {

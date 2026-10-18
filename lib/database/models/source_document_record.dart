@@ -6,6 +6,7 @@ class SourceDocumentSourceType {
 
   static const String cameraCapture = 'camera_capture';
   static const String galleryImport = 'gallery_import';
+  static const String pdfDocument = 'pdf_document';
   static const String pdfPage = 'pdf_page';
 }
 
@@ -14,6 +15,7 @@ class SourceDocumentOcrStatus {
 
   static const String pending = 'pending';
   static const String processing = 'processing';
+  static const String needsReview = 'needs_review';
   static const String success = 'success';
   static const String failed = 'failed';
 
@@ -22,6 +24,7 @@ class SourceDocumentOcrStatus {
     switch (raw) {
       case pending:
       case processing:
+      case needsReview:
       case success:
       case failed:
         return raw;
@@ -49,6 +52,10 @@ class SourceDocumentRecord {
     this.pageNumber,
     this.ocrErrorMessage,
     this.ocrUpdatedAt,
+    this.lastConceptName,
+    this.importRecordId,
+    this.originalFilePath,
+    this.filePageNumber,
   });
 
   final int id;
@@ -64,6 +71,10 @@ class SourceDocumentRecord {
   final bool aiDone;
   final String? ocrErrorMessage;
   final DateTime? ocrUpdatedAt;
+  final String? lastConceptName;
+  final int? importRecordId;
+  final String? originalFilePath;
+  final int? filePageNumber;
 
   bool get ocrDone => ocrStatus == SourceDocumentOcrStatus.success;
 
@@ -72,28 +83,31 @@ class SourceDocumentRecord {
   String get ocrStatusLabel {
     switch (ocrStatus) {
       case SourceDocumentOcrStatus.pending:
-        return '待识别';
+        return '\u5f85\u8bc6\u522b';
       case SourceDocumentOcrStatus.processing:
-        return '识别中';
+        return '\u8bc6\u522b\u4e2d';
+      case SourceDocumentOcrStatus.needsReview:
+        return '\u5f85\u6821\u5bf9';
       case SourceDocumentOcrStatus.success:
-        return '识别成功';
+        return '\u8bc6\u522b\u6210\u529f';
       case SourceDocumentOcrStatus.failed:
-        return '识别失败';
+        return '\u8bc6\u522b\u5931\u8d25';
       default:
-        return '待识别';
+        return '\u5f85\u8bc6\u522b';
     }
   }
 
   String get sourceTypeLabel {
     switch (sourceType) {
       case SourceDocumentSourceType.cameraCapture:
-        return '拍照';
+        return '\u62cd\u7167';
       case SourceDocumentSourceType.galleryImport:
-        return '相册';
+        return '\u76f8\u518c';
+      case SourceDocumentSourceType.pdfDocument:
       case SourceDocumentSourceType.pdfPage:
         return 'PDF';
       default:
-        return '资料';
+        return '\u8d44\u6599';
     }
   }
 
@@ -126,6 +140,9 @@ class SourceDocumentRecord {
       libraryId: map['library_id'] as int?,
       batchId: map['batch_id'] as int?,
       pageNumber: map['page_number'] as int?,
+      importRecordId: map['import_record_id'] as int?,
+      originalFilePath: map['original_file_path'] as String?,
+      filePageNumber: map['file_page_number'] as int?,
       sourceType: (map['source_type'] as String?)?.trim() ?? '',
       imagePath: (map['image_path'] as String?)?.trim() ?? '',
       title: ((map['original_title'] as String?)?.trim().isNotEmpty ?? false)
@@ -137,6 +154,7 @@ class SourceDocumentRecord {
         fallbackDone: ocrDoneFallback,
       ),
       aiDone: _readBool(map['ai_done']),
+      lastConceptName: map['last_concept_name'] as String?,
       ocrErrorMessage: (map['ocr_error_message'] as String?)?.trim(),
       ocrUpdatedAt: rawOcrUpdatedAt.isEmpty
           ? null

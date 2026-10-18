@@ -22,7 +22,7 @@ class AiTaskType {
       case mindmapText:
         return '思维导图文字版';
       case practiceQuestions:
-        return '复习题';
+        return '练习题';
       default:
         return taskType;
     }

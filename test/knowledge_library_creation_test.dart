@@ -4,9 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pxt1/database/ai_generation_repository.dart';
 import 'package:pxt1/database/auth_repository.dart';
 import 'package:pxt1/database/document_batch_repository.dart';
+import 'package:pxt1/database/knowledge_graph_repository.dart';
 import 'package:pxt1/database/knowledge_library_repository.dart';
 import 'package:pxt1/database/models/ai_result_records.dart';
 import 'package:pxt1/database/models/document_batch_record.dart';
+import 'package:pxt1/database/models/knowledge_graph_records.dart';
 import 'package:pxt1/database/models/knowledge_library_record.dart';
 import 'package:pxt1/database/models/source_document_record.dart';
 import 'package:pxt1/database/models/user_profile.dart';
@@ -27,6 +29,7 @@ void main() {
               sourceDocumentRepository: _EmptySourceDocumentRepository(),
               aiGenerationRepository: _EmptyAiGenerationRepository(),
               documentBatchRepository: _EmptyDocumentBatchRepository(),
+              knowledgeGraphRepository: _EmptyKnowledgeGraphRepository(),
               knowledgeLibraryRepository: libraries,
             ),
           ),
@@ -44,6 +47,57 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('knowledge graph keeps a pannable wide canvas on phone width', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: KnowledgeTabPage(
+            authRepository: _FakeAuthRepository(),
+            sourceDocumentRepository: _EmptySourceDocumentRepository(),
+            aiGenerationRepository: _EmptyAiGenerationRepository(),
+            documentBatchRepository: _EmptyDocumentBatchRepository(),
+            knowledgeGraphRepository: _GraphKnowledgeGraphRepository(),
+            knowledgeLibraryRepository: _FakeKnowledgeLibraryRepository(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('\u77e5\u8bc6\u56fe\u8c31'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('\u77e5\u8bc6\u56fe\u8c31'));
+    await tester.pumpAndSettle();
+
+    final viewer = tester.widget<InteractiveViewer>(
+      find.byType(InteractiveViewer),
+    );
+    expect(viewer.constrained, isFalse);
+    expect(viewer.boundaryMargin.horizontal, greaterThanOrEqualTo(480));
+    expect(find.byType(CustomPaint), findsWidgets);
+
+    final linkHitTarget = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_GraphLinkHitTarget',
+    );
+    expect(linkHitTarget, findsWidgets);
+    await tester.ensureVisible(linkHitTarget.first);
+    await tester.pumpAndSettle();
+    await tester.tap(linkHitTarget.first);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('知识点1'), findsWidgets);
+    expect(find.textContaining('知识点2'), findsWidgets);
+  });
 }
 
 // ========== 测试假对象 ==========
@@ -142,5 +196,72 @@ class _EmptyAiGenerationRepository extends AiGenerationRepository {
     int limit = 100,
   }) async {
     return const <PracticeQuestionWithDocument>[];
+  }
+}
+
+class _EmptyKnowledgeGraphRepository extends KnowledgeGraphRepository {
+  @override
+  Future<List<KnowledgeConceptWithDocument>> fetchWeakConcepts({
+    required int userId,
+    int? libraryId,
+    int limit = 20,
+  }) async {
+    return const <KnowledgeConceptWithDocument>[];
+  }
+
+  @override
+  Future<List<KnowledgeConceptLinkRecord>> fetchLinksByLibrary({
+    required int userId,
+    int? libraryId,
+    int limit = 100,
+  }) async {
+    return const <KnowledgeConceptLinkRecord>[];
+  }
+}
+
+class _GraphKnowledgeGraphRepository extends _EmptyKnowledgeGraphRepository {
+  @override
+  Future<List<KnowledgeConceptWithDocument>> fetchWeakConcepts({
+    required int userId,
+    int? libraryId,
+    int limit = 20,
+  }) async {
+    final now = DateTime(2026, 6, 30);
+    return List.generate(12, (index) {
+      return KnowledgeConceptWithDocument(
+        concept: KnowledgeConceptRecord(
+          id: index + 1,
+          userId: userId,
+          libraryId: libraryId,
+          documentId: 100 + index,
+          name: '知识点${index + 1}',
+          masteryScore: (index * 9).clamp(0, 100),
+          weaknessScore: (100 - index * 7).clamp(0, 100),
+          createdAt: now,
+          updatedAt: now,
+        ),
+        documentTitle: '资料${index + 1}',
+      );
+    });
+  }
+
+  @override
+  Future<List<KnowledgeConceptLinkRecord>> fetchLinksByLibrary({
+    required int userId,
+    int? libraryId,
+    int limit = 100,
+  }) async {
+    final now = DateTime(2026, 6, 30);
+    return List.generate(11, (index) {
+      return KnowledgeConceptLinkRecord(
+        id: index + 1,
+        userId: userId,
+        libraryId: libraryId,
+        fromConceptId: index + 1,
+        toConceptId: index + 2,
+        relationLabel: '前置依赖',
+        createdAt: now,
+      );
+    });
   }
 }
